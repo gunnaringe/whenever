@@ -114,6 +114,9 @@ const data = (el: HTMLElement, k: string): string => el.dataset[k] ?? '';
 // A form control by name (form.elements.namedItem).
 const control = <T = HTMLInputElement>(form: HTMLFormElement, name: string): T => form.elements.namedItem(name) as T;
 
+// A finger is the main pointer (phones, tablets): painting starts with a hold.
+const touch = () => matchMedia('(pointer: coarse)').matches;
+
 const eventUrl = (id: string) => `${location.origin}/e/${id}`;
 const linkUrl = (id: string, token: string | null) => `${location.origin}/e/${id}/${token}`;
 
@@ -531,7 +534,7 @@ function renderForm(v: M.View | null): void {
       </section>
       <section class="card" id="times-card" ${d.mode === 'times' ? '' : 'hidden'}>
         <h2>${esc(t('possibleTimes'))}</h2>
-        <p class="muted">${esc(t('possibleTimesHint'))}</p>
+        <p class="muted">${esc(t(touch() ? 'possibleTimesHintTouch' : 'possibleTimesHint'))}</p>
         <div class="chip-row">${(Object.keys(PRESETS) as Preset[]).map((p) => `<button type="button" class="btn small" data-act="preset" data-p="${p}">${esc(t(`preset.${p}`))}</button>`).join('')}</div>
         <div id="f-grid"></div>
       </section>
@@ -1216,7 +1219,18 @@ function renderAnswer(v: M.View, pid: string | null): void {
   const a = answer();
   const title = target ? (own ? t('editYourAnswers') : t('editAnswersOf', { name: target.name })) : t('addYourAnswers');
   document.title = `${title} · ${ev.name}`;
-  const hint = ev.mode === 'dates' ? (ev.settings.maybe ? 'answerDatesHintMaybe' : 'answerDatesHint') : ev.settings.maybe ? 'answerTimesHintMaybe' : 'answerTimesHint';
+  const hint: Key =
+    ev.mode === 'dates'
+      ? ev.settings.maybe
+        ? 'answerDatesHintMaybe'
+        : 'answerDatesHint'
+      : touch()
+        ? ev.settings.maybe
+          ? 'answerTimesHintTouchMaybe'
+          : 'answerTimesHintTouch'
+        : ev.settings.maybe
+          ? 'answerTimesHintMaybe'
+          : 'answerTimesHint';
   paint(`
     <a class="back" href="${esc(location.pathname)}" data-act="cancel-answer">${icon('back')}${esc(t('back'))}</a>
     <h1>${esc(title)}</h1>

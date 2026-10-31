@@ -46,11 +46,13 @@ async function dragCells(p, from, to) {
   await p.mouse.up();
 }
 
-// The same as a finger: synthetic touch pointer events (the handlers don't
-// care about the source, the CSS touch-action decides scrolling).
-async function touchDrag(p, from, to) {
+// The same as a finger: synthetic touch pointer events. A finger has to hold
+// still for a moment before it paints (hold = false: a swipe, which the
+// grid leaves to the browser for scrolling). These events never scroll the
+// page; real touch scrolling is checked by hand (see CLAUDE.md).
+async function touchDrag(p, from, to, hold = true) {
   await p.evaluate(
-    ([f, t]) => {
+    async ([f, t, hold]) => {
       const el = (k) => document.querySelector(`.tg-cell[data-k="${k}"]`);
       const at = (e) => {
         const r = e.getBoundingClientRect();
@@ -58,10 +60,11 @@ async function touchDrag(p, from, to) {
       };
       const opts = { bubbles: true, pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0 };
       el(f).dispatchEvent(new PointerEvent('pointerdown', { ...opts, ...at(el(f)) }));
+      if (hold) await new Promise((r) => setTimeout(r, 450));
       el(t).dispatchEvent(new PointerEvent('pointermove', { ...opts, ...at(el(t)) }));
-      el(t).dispatchEvent(new PointerEvent('pointerup', { ...opts, ...at(el(t)) }));
+      el(t).dispatchEvent(new PointerEvent(hold ? 'pointerup' : 'pointercancel', { ...opts, ...at(el(t)) }));
     },
-    [from, to],
+    [from, to, hold],
   );
 }
 
@@ -217,7 +220,11 @@ for (const [name, from, to, maybeFrom, maybeTo] of [
   await pp.goto(timesUrl);
   await pp.click('[data-act="answer"]');
   await pp.fill('form [name=name]', name);
-  // Phones show 7 days per page; all five days fit.
+  // Phones show a week per page; all five days fit.
+  if (name === 'Anne') {
+    await touchDrag(pp, from, to, false);
+    check((await pp.locator('#pick-area .tg-cell.v1').count()) === 0, 'a swipe without holding paints nothing');
+  }
   await touchDrag(pp, from, to);
   if (maybeFrom) {
     await pp.click('[data-act="ans-brush"][data-b="2"]');
