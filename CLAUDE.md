@@ -100,6 +100,9 @@ language (`finn-tid.` → nb, `whenever.` → en, anything else → browser).
   `PWCHROME` at an existing
   `~/.cache/ms-playwright/chromium_headless_shell-*/…/chrome-headless-shell`.
   Screenshots go to `$SHOTS` (default `/tmp/whenever-shots`).
+- Changes go in PRs; visible ones with screenshots:
+  `scripts/pr-shots.sh --pr <shot-name>...` uploads them to the orphan
+  `pr-shots` branch and adds the Markdown to the branch's PR.
 
 ## Deploy
 
