@@ -278,6 +278,34 @@ await boss.locator(`.tg-cell[data-k="${D(2, '10:30')}"]`).click();
 check((await boss.locator('.detail .dg.yes .pn').count()) === 3, 'tapping a slot shows who can come');
 await shot(boss, '11-results-times');
 
+// The organiser picks the best time; it shows as a whole window.
+await boss.locator('.best-item').first().click();
+await boss.click('.detail [data-act="decide"]');
+await boss.click('#dlg button[value="yes"]');
+await boss.waitForSelector('.decided');
+check((await boss.locator('.decided .when').textContent()).includes('10:00–11:00'), 'picked time shows as the whole window');
+
+// --- G) The organiser picks the date ---------------------------------------------------------
+await admin.reload();
+await admin.waitForSelector('.best-item');
+await admin.locator('.best-item').first().click();
+await admin.click('.detail [data-act="decide"]');
+await admin.click('#dlg button[value="yes"]');
+await admin.waitForSelector('.decided');
+check(await admin.locator('.best-item .tag').first().isVisible(), 'the best list marks the pick');
+await guest.reload();
+await guest.waitForSelector('.decided');
+check((await guest.locator('.decided [data-act="undecide"]').count()) === 0, 'everyone sees the pick; only the admin can undo it');
+check((await guest.locator('[data-act="answer"]').count()) === 0, 'picking closes the event for new answers');
+const [dl] = await Promise.all([guest.waitForEvent('download'), guest.click('.decided [data-act="ics"]')]);
+const ics = await (await import('node:fs/promises')).readFile(await dl.path(), 'utf8');
+check(dl.suggestedFilename() === 'julebord-2026.ics' && ics.includes(`DTSTART;VALUE=DATE:${D(11).replace(/-/g, '')}`), `calendar file for the picked date (${dl.suggestedFilename()})`);
+check(!/[0-9a-f]{16}[A-Za-z0-9_-]{22}/.test(ics), 'the calendar file has no link secret in it');
+await admin.click('.decided [data-act="undecide"]');
+await admin.click('#dlg button[value="yes"]');
+await admin.waitForSelector('.decided', { state: 'detached' });
+check(true, 'the admin can undo the pick');
+
 // --- F) Admin deletes an entry and the event --------------------------------------------
 await admin.reload();
 await admin.waitForSelector('.plist');

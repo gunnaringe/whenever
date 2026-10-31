@@ -34,6 +34,9 @@ interface EventBase {
   end: string;
   settings: Settings;
   options: string[];
+  // The organiser's pick: an option, or in times mode the start of a
+  // window of `duration` (see decisionKeys).
+  decided?: string;
 }
 export interface DatesEvent extends EventBase {
   mode: 'dates';
@@ -410,7 +413,22 @@ export function sanitizeEvent(input: unknown): { ok: true; event: PollEvent } | 
   if (!options.length) return fail('options');
   if (options.length > LIMITS.options) return fail('tooMany');
   ev.options = options;
+  // A pick that no longer fits the options is dropped, not an error.
+  if (typeof o.decided === 'string' && decisionKeys(ev).has(o.decided)) ev.decided = o.decided;
   return { ok: true, event: ev };
+}
+
+// What the organiser can pick as the final date or time: an option, or in
+// times mode the start of a whole window.
+export function decisionKeys(ev: PollEvent): Set<string> {
+  return new Set(ev.mode === 'dates' ? ev.options : windows(ev, []).map((w) => w.key));
+}
+
+// The picked option or window with who can come, or null if nothing is picked.
+export function decision(ev: PollEvent, people: readonly Answered[]): Tally | TimeWindow | null {
+  if (!ev.decided) return null;
+  if (ev.mode === 'times') return windows(ev, people).find((w) => w.key === ev.decided) ?? null;
+  return tally(ev, people).get(ev.decided) ?? null;
 }
 
 // Keeps only answers to existing options, with valid values.

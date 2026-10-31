@@ -129,6 +129,11 @@ a { color: var(--accent); }
 .notice > .i + p { flex: 1; flex-basis: auto; }
 .notice h2 { display: flex; gap: .4rem; align-items: center; }
 .notice.ok { background: var(--ok-bg); }
+.decided .when { font: 700 1.3rem var(--head); }
+.decided > .row { flex-basis: 100%; }
+.tag { display: inline-block; margin-left: .35rem; padding: .05rem .45rem; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: .72rem; font-weight: 700; vertical-align: .1rem; }
+.detail > .btn, .decided-mark { margin-top: .75rem; }
+.decided-mark { display: flex; gap: .35rem; align-items: center; color: var(--accent); font-weight: 700; }
 .notice.warn { background: var(--warn-bg); }
 .notice.info { background: var(--info-bg); }
 .back { display: inline-flex; align-items: center; gap: .25rem; margin-bottom: .5rem; text-decoration: none; font-weight: 600; }

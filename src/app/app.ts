@@ -14,6 +14,7 @@ import { $, $opt, $$, esc, icon, toast, ask, menu, dialog, copyText, shareUrl, q
 import type { MenuItem } from './ui.ts';
 import { calendarHtml, bindPaint } from './calendar.ts';
 import { TimeGrid, weekPages } from './timegrid.ts';
+import { icsFor, icsName } from './ics.ts';
 
 type Route = { page: 'home' } | { page: 'new' } | { page: 'missing' } | { page: 'event'; id: string; token: string | null };
 type Sub = { kind: 'overview' } | { kind: 'edit' } | { kind: 'answer'; pid: string | null };
@@ -34,6 +35,7 @@ interface Draft extends M.DayWindow {
   times: Set<string>;
   pattern: Set<number> | null; // times a newly added day gets (null = all)
   until: string; // the calendar shows months up to this day
+  decided: string | null; // kept when the event is edited, if it still fits
   dirty: boolean; // changed since it was opened or saved
 }
 
@@ -368,6 +370,7 @@ function newDraft(): Draft {
     pattern: marks(...PRESETS.work),
     // At least six weeks ahead, to the end of that month.
     until: M.monthEnd(M.addDays(M.localToday(), 42)),
+    decided: null,
     dirty: false,
   };
 }
@@ -382,6 +385,7 @@ function draftFromView(v: M.View): Draft {
     mode: ev.mode,
     settings: { ...ev.settings },
     email: v.adminEmail ?? '',
+    decided: ev.decided ?? null,
   });
   if (ev.mode === 'times') {
     Object.assign(d, { slot: ev.slot, dayStart: ev.dayStart, dayEnd: ev.dayEnd, duration: ev.duration, tz: ev.tz });
@@ -406,7 +410,7 @@ function draftToEvent(d: Draft): Record<string, unknown> & { options: string[] }
   const days = offeredDays(d);
   const start = days[0] ?? M.localToday();
   const end = days[days.length - 1] ?? start;
-  const ev = { name: d.name, description: d.description, location: d.location, mode: d.mode, start, end, settings: { ...d.settings } };
+  const ev = { name: d.name, description: d.description, location: d.location, mode: d.mode, start, end, settings: { ...d.settings }, decided: d.decided ?? undefined };
   if (d.mode === 'dates') return { ...ev, options: days };
   return {
     ...ev,
@@ -935,6 +939,7 @@ function renderOverview(v: M.View): void {
     ${flashHtml()}
     ${noticesHtml(v, stored)}
     ${headHtml(v)}
+    ${decidedHtml(v)}
     ${created ? share : ''}
     ${actionsHtml(v)}
     ${created ? '' : share}
@@ -1054,7 +1059,7 @@ function bestHtml(v: M.View): string {
     .map(
       (b, i) => `<li><button type="button" class="best-item${app.pick?.k === b.key ? ' sel' : ''}" data-act="pick" data-k="${b.key}" ${ev.mode === 'times' ? 'data-win="1"' : ''}>
         <span class="rank">${i + 1}</span>
-        <span class="bl">${esc(cap('date' in b ? windowLabel(b) : fmtDate(b.key, 'long')))}</span>
+        <span class="bl">${esc(cap('date' in b ? windowLabel(b) : fmtDate(b.key, 'long')))}${ev.decided === b.key ? ` <span class="tag">${esc(t('decidedTag'))}</span>` : ''}</span>
         <span class="bn">${esc(t('nOfM', { n: M.available(b), m: n }))}${b.maybe.length ? ` · ${esc(t('nMaybe', { n: b.maybe.length }))}` : ''}</span>
       </button></li>`,
     )
@@ -1154,7 +1159,41 @@ function detailHtml(v: M.View): string {
     <div class="dg yes"><b>${icon('check')}${esc(t('canCome'))} (${g.yes.length})</b><div>${names(g.yes)}</div></div>
     ${g.maybe.length || ev.settings.maybe ? `<div class="dg maybe"><b>${icon('maybe')}${esc(t('ifNeedBe'))} (${g.maybe.length})</b><div>${names(g.maybe)}</div></div>` : ''}
     <div class="dg no"><b>${icon('x')}${esc(t('cannot'))} (${g.no.length})</b><div>${names(g.no)}</div></div>
+    ${decideHtml(v, p.k)}
   </div>`;
+}
+
+// What the picked date or time is called: "fredag 27. november" or
+// "onsdag 18. november, 10:00–11:00" (times mode: the whole window).
+function whenLabel(ev: M.PollEvent, key: string): string {
+  if (ev.mode === 'dates') return fmtDate(key, 'long');
+  const w = M.windows(ev, []).find((x) => x.key === key);
+  return w ? windowLabel(w) : slotLabel(key, ev.slot);
+}
+
+// For the admin, under the details of an option: pick it as the final date.
+function decideHtml(v: M.View, key: string): string {
+  const ev = v.event;
+  if (v.role !== 'admin' || !M.decisionKeys(ev).has(key)) return '';
+  if (ev.decided === key) return `<p class="decided-mark">${icon('check')}${esc(t('decidedThis'))}</p>`;
+  return `<button type="button" class="btn small" data-act="decide" data-k="${key}">${icon('check')}${esc(t('decideThis', { when: whenLabel(ev, key) }))}</button>`;
+}
+
+// Everyone sees the organiser's pick first, with a calendar file.
+function decidedHtml(v: M.View): string {
+  const ev = v.event;
+  const pick = M.decision(ev, v.people);
+  if (!pick || !ev.decided) return '';
+  const n = v.people.length;
+  return `<section class="card notice ok decided">
+    <h2>${icon('check')}${esc(t('decidedTitle'))}</h2>
+    <p class="when">${esc(cap(whenLabel(ev, ev.decided)))}</p>
+    ${n && !v.hidden ? `<p class="muted">${esc(t('nOfM', { n: M.available(pick), m: n }))}${pick.maybe.length ? ` · ${esc(t('nMaybe', { n: pick.maybe.length }))}` : ''}</p>` : ''}
+    <div class="row wrap">
+      <button type="button" class="btn primary" data-act="ics">${icon('cal')}${esc(t('addToCalendar'))}</button>
+      ${v.role === 'admin' ? `<button type="button" class="btn" data-act="undecide">${esc(t('undoDecision'))}</button>` : ''}
+    </div>
+  </section>`;
 }
 
 function updateDetail(): void {
@@ -1538,6 +1577,41 @@ async function personLink(pid: string): Promise<void> {
   }
 }
 
+// The admin picks the final date or time (key), or undoes it (null). Picking
+// also closes the event for new answers.
+async function decide(key: string | null): Promise<void> {
+  const ev = current().event;
+  const { id, token } = here();
+  const q = key ? t('decideQ', { when: whenLabel(ev, key) }) : t('undecideQ');
+  if (!(await ask(q, { ok: t(key ? 'decideOk' : 'undoDecision') }))) return;
+  try {
+    const settings = key ? { ...ev.settings, closed: true } : ev.settings;
+    const body = { event: { ...ev, settings, decided: key ?? undefined } };
+    const { view } = await api<{ view: M.View }>('PUT', `/events/${id}`, { token, body });
+    setView(view);
+    render();
+    toast(t(key ? 'decidedToast' : 'undecidedToast'));
+    if (key) window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (e) {
+    toast(errText(e));
+  }
+}
+
+function downloadIcs(): void {
+  const ev = current().event;
+  const { id } = here();
+  const ics = icsFor(ev, id, eventUrl(id));
+  if (!ics) return;
+  const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = icsName(ev.name);
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 async function toggleClosed(): Promise<void> {
   const ev = current().event;
   const { id, token } = here();
@@ -1625,6 +1699,9 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
     store.forget(data(b, 'id'));
     render();
   },
+  decide: (b) => decide(data(b, 'k')),
+  undecide: () => decide(null),
+  ics: () => downloadIcs(),
   'close-sub': async () => {
     if (await leaveOk()) closeSub();
   },
