@@ -551,6 +551,7 @@ function renderForm(v: M.View | null): void {
         <p class="muted">${esc(t('possibleDaysHint'))}</p>
         <div id="f-chips"></div>
         <div id="f-cal"></div>
+        <p class="cal-tip muted small">${esc(t(touch() ? 'rangeHintTouch' : 'rangeHint'))}</p>
         <button type="button" class="btn small" id="more-months" data-act="more-months">${icon('plus')}${esc(t('moreMonths'))}</button>
         <p id="f-count" class="count-line" aria-live="polite"></p>
         <p class="err" id="range-err" hidden></p>
@@ -616,6 +617,7 @@ function bindForm(): void {
     submitForm();
   });
   bindPaint($('#f-cal'), '.cal-day[data-d]', {
+    get: (el) => d.dates.has(data(el, 'd')),
     next: (el) => !d.dates.has(data(el, 'd')),
     apply: (el, on) => {
       changed();
@@ -1457,7 +1459,7 @@ function mountPicker(v: M.View): void {
     const legend = ([[M.YES, 'canCome'], ...(ev.settings.maybe ? [[M.MAYBE, 'ifNeedBe']] : []), [0, 'cannot']] as [number, Key][])
       .map(([val, key]) => `<span><i class="sw a${val}"></i>${esc(t(key))}</span>`)
       .join('');
-    area.innerHTML = `<p class="ans-legend">${legend}</p>${calendarHtml({
+    area.innerHTML = `<p class="ans-legend">${legend}</p><p class="cal-tip muted small">${esc(t(touch() ? 'rangeHintTouch' : 'rangeHint'))}</p>${calendarHtml({
       start: ds[0],
       end: ds[ds.length - 1],
       dayHtml: (x) => {
@@ -1467,6 +1469,7 @@ function mountPicker(v: M.View): void {
       },
     })}`;
     bindPaint(area, '.cal-day[data-d]', {
+      get: (el) => a.answers[data(el, 'd')] || 0,
       next: (el) => cycle(a.answers[data(el, 'd')] || 0),
       apply: (el, val) => {
         setAns(data(el, 'd'), val);

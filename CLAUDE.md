@@ -128,8 +128,14 @@ transforming (enums, namespaces, parameter properties) is off
   smoke test's synthetic events can't scroll, so after touching this, check
   real touch over CDP (`Input.dispatchTouchEvent`): a swipe scrolls and
   paints nothing, hold-and-drag paints and doesn't scroll, a tap toggles.
-  The calendar (`bindPaint`) drag-paints with a mouse and taps on touch.
-  Calendar days are buttons; the time grid takes arrow keys + Space.
+  The calendars (`bindPaint`, form and answers) pick date ranges: a drag
+  gives every day from the first to the one under the pointer, in date
+  order, the first day's new value, previewed live; days the drag leaves
+  get their old value back (`get`). Shift-click or Shift+Enter fills from
+  the last day clicked. A finger holds a day for `HOLD_MS` first, like the
+  time grid, so swipes scroll and taps toggle; check it over CDP the same
+  way. The day under the pointer comes from `elementFromPoint`. Calendar
+  days are buttons; the time grid takes arrow keys + Space.
 - **Time grid pages** are ISO weeks (`weekPages`), two side by side when
   the grid is at least `WIDE` px, picked with week buttons (a dot = something
   marked there). The day names are sticky; in paint mode they open the

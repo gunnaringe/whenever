@@ -346,7 +346,8 @@ button.cal-wk:hover { background: var(--soft); color: var(--ink); }
   user-select: none;
   -webkit-user-select: none;
 }
-button.cal-day { cursor: pointer; }
+button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-callout: none; }
+.cal-tip { margin: .5rem 0; }
 .cal-day.out, .cal-day.off { color: var(--muted); opacity: .45; }
 #more-months { margin-top: .6rem; }
 .cal-day.pick { background: var(--soft); }
