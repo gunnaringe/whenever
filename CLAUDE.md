@@ -180,12 +180,13 @@ transforming (enums, namespaces, parameter properties) is off
 ## Deploy
 
 Cloudflare Worker `whenever` (never rename it: the custom domains are bound
-to it), Workers Builds on push to `main`. Workers Builds ignores the
-`build` field in `wrangler.jsonc`: its Build command must be
-`npm run build`, for production and for Previews (without it the deploy
-fails, as `dist/` doesn't exist). Other branches run `wrangler
-preview`, which needs the `previews` block in `wrangler.jsonc`: give any new
-binding a Preview-safe copy there. Rate-limit namespaces are account-wide:
+to it), live since 2026-11-01. Workers Builds deploys on push to `main`.
+Workers Builds ignores the `build` field in `wrangler.jsonc`: its Build
+command must be `npm run build` (without it the deploy fails, as `dist/`
+doesn't exist). Branch builds are not enabled, so branches only get CI.
+If they are turned on, they run `wrangler preview`, which needs the
+`previews` block in `wrangler.jsonc`: keep giving any new binding a
+Preview-safe copy there. Rate-limit namespaces are account-wide:
 `3001` production, `3002` previews (1001 is scoreboard, 2001/2002 scorepad).
 No secrets or other manual setup besides that Build command. Agent sessions
 can't deploy (Cloudflare credentials there are read-only). Free plan:

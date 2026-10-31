@@ -45,9 +45,8 @@ npm run build    # dist/: public/ plus the hashed app and stylesheet
 ## Deploy
 
 Cloudflare Worker `whenever` with static assets and one SQLite-backed Durable
-Object per event, deployed by Workers Builds on push to `main`. Branches get a
-Preview. The Build command (production and Previews) is `npm run build`.
-There are no secrets to set.
+Object per event, deployed by Workers Builds on push to `main` (branch builds
+are off). The Build command is `npm run build`. There are no secrets to set.
 
 ## Licence
 
