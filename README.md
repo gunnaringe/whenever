@@ -21,22 +21,27 @@ and everyone marks when they can. At
 
 ## Running locally
 
+TypeScript, bundled with esbuild; needs Node 22.18 or newer.
+
 ```sh
 npm install
-npx wrangler dev
-npm test
+npm run dev      # wrangler dev at http://127.0.0.1:8787 (builds dist/ first)
+npm run check    # type-check
+npm test         # unit tests
+npm run build    # dist/: public/ plus the hashed app and stylesheet
 ```
 
-`scripts/smoke.mjs` is a browser end-to-end test against `wrangler dev`
+`npm run smoke` is a browser end-to-end test against `npm run dev`
 (see `CLAUDE.md`).
 
 ## Deploy
 
 Cloudflare Worker `whenever` with static assets and one SQLite-backed Durable
 Object per event, deployed by Workers Builds on push to `main`. Branches get a
-Preview. There are no secrets to set.
+Preview. The Build command (production and Previews) is `npm run build`.
+There are no secrets to set.
 
 ## Licence
 
 QR codes by [Project Nayuki's QR Code generator](https://www.nayuki.io/page/qr-code-generator-library)
-(MIT), in `public/qrcodegen.js`. Font: Fredoka (SIL OFL), in `public/fonts/`.
+(MIT), in `src/app/vendor/qrcodegen.js`. Font: Fredoka (SIL OFL), in `public/fonts/`.

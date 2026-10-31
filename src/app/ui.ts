@@ -1,18 +1,20 @@
 // Small DOM helpers: escaping, icons, toast, dialogs, copy/share, QR codes.
 
-import qrcodegen from './qrcodegen.js';
-import { t } from './i18n.js';
+import qrcodegen from './vendor/qrcodegen.js';
+import { t } from './i18n.ts';
 
-export const $ = (s, r = document) => r.querySelector(s);
-export const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+// An element the current view always has (use $opt when it may be missing).
+export const $ = <T extends Element = HTMLElement>(s: string, r: ParentNode = document): T => r.querySelector<T>(s) as T;
+export const $opt = <T extends Element = HTMLElement>(s: string, r: ParentNode = document): T | null => r.querySelector<T>(s);
+export const $$ = <T extends Element = HTMLElement>(s: string, r: ParentNode = document): T[] => [...r.querySelectorAll<T>(s)];
 
-const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
+const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+export const esc = (s: unknown): string => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
 
-export const icon = (name, cls = '') => `<svg class="i${cls ? ` ${cls}` : ''}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+export const icon = (name: string, cls = ''): string => `<svg class="i${cls ? ` ${cls}` : ''}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
-let toastTimer;
-export function toast(msg) {
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+export function toast(msg: string): void {
   const el = $('#toast');
   el.textContent = msg;
   el.hidden = false;
@@ -22,18 +24,18 @@ export function toast(msg) {
 
 // A modal built from HTML. Resolves with the value of the button that closed
 // it ('' for Escape or a tap on the backdrop).
-export function dialog(html, { onOpen } = {}) {
-  const dlg = $('#dlg');
+export function dialog(html: string, { onOpen }: { onOpen?: (dlg: HTMLDialogElement) => void } = {}): Promise<string> {
+  const dlg = $<HTMLDialogElement>('#dlg');
   if (dlg.open) dlg.close('');
   dlg.innerHTML = `<form method="dialog">${html}</form>`;
   dlg.returnValue = '';
   dlg.showModal();
   onOpen?.(dlg);
-  const backdrop = (e) => {
+  const backdrop = (e: MouseEvent) => {
     if (e.target === dlg) dlg.close('');
   };
   dlg.addEventListener('click', backdrop);
-  return new Promise((resolve) =>
+  return new Promise<string>((resolve) =>
     dlg.addEventListener(
       'close',
       () => {
@@ -45,7 +47,7 @@ export function dialog(html, { onOpen } = {}) {
   );
 }
 
-export async function ask(text, { ok = t('ok'), cancel = t('cancel'), danger = false, title = '' } = {}) {
+export async function ask(text: string, { ok = t('ok'), cancel = t('cancel'), danger = false, title = '' } = {}): Promise<boolean> {
   const r = await dialog(`
     ${title ? `<h3>${esc(title)}</h3>` : ''}
     <p>${esc(text)}</p>
@@ -56,8 +58,15 @@ export async function ask(text, { ok = t('ok'), cancel = t('cancel'), danger = f
   return r === 'yes';
 }
 
-// items: [{ id, label, danger?, hint? }]
-export function menu(title, items) {
+export interface MenuItem {
+  id: string;
+  label: string;
+  danger?: boolean;
+  hint?: string;
+}
+
+// Resolves with the picked item's id ('' for none).
+export function menu(title: string, items: MenuItem[]): Promise<string> {
   return dialog(`
     <h3>${esc(title)}</h3>
     <div class="menu-list">
@@ -66,7 +75,7 @@ export function menu(title, items) {
     <div class="row end"><button value="" class="btn">${esc(t('cancel'))}</button></div>`);
 }
 
-export async function copyText(text) {
+export async function copyText(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -83,8 +92,8 @@ export async function copyText(text) {
   toast(t('copied'));
 }
 
-export async function shareUrl(url, title) {
-  if (navigator.share) {
+export async function shareUrl(url: string, title: string): Promise<void> {
+  if ('share' in navigator) {
     try {
       await navigator.share({ title, url });
     } catch {
@@ -95,7 +104,7 @@ export async function shareUrl(url, title) {
   await copyText(url);
 }
 
-export function qrSvg(text) {
+export function qrSvg(text: string): string {
   const qr = qrcodegen.QrCode.encodeText(text, qrcodegen.QrCode.Ecc.MEDIUM);
   const n = qr.size;
   const b = 2;

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newPid, newSecret, token, parse, same, TOKEN_RE, PID_RE } from '../src/link.js';
+import { newPid, newSecret, token, parse, same, TOKEN_RE, PID_RE } from '../src/worker/link.ts';
 
 test('a token is a participant id and a 22-character secret, 38 URL-safe characters', () => {
   const pid = newPid();
