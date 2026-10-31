@@ -110,6 +110,13 @@ await admin.click('[data-act="sel-wd"][data-wd="2"]'); // Wednesdays are picked:
 check((await picked(admin)) === 17, 'Wednesday chip drops the four Wednesdays');
 for (const n of [2, 9, 16, 23]) await day(admin, D(n)).click();
 check((await admin.locator('#f-count').textContent()).includes('21'), 'the count line says 21 days');
+const maybeCounts = admin.locator('[name=s-maybeCounts]');
+check((await maybeCounts.isEnabled()) && !(await maybeCounts.isChecked()), '"maybe counts" is off by default');
+await admin.locator('[name=s-maybe]').uncheck();
+check(await maybeCounts.isDisabled(), '"maybe counts" is disabled without maybe answers');
+await admin.locator('#ev-form .card:has([name=s-maybe])').screenshot({ path: `${SHOTS}/02b-settings-no-maybe.png` });
+await admin.locator('[name=s-maybe]').check();
+check(await maybeCounts.isEnabled(), '"maybe counts" is enabled again with maybe answers');
 await shot(admin, '02-new-event');
 await admin.click('button[type=submit]');
 await admin.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/);
@@ -305,6 +312,46 @@ await admin.click('.decided [data-act="undecide"]');
 await admin.click('#dlg button[value="yes"]');
 await admin.waitForSelector('.decided', { state: 'detached' });
 check(true, 'the admin can undo the pick');
+
+// --- H) Ranking: yes first, maybe breaks ties, unless maybe counts ---------------------------
+// D(0), D(1), D(4), D(5): Kari and Ola yes. D(2): everyone maybe. D(3): Kari yes, Per maybe.
+const rk = await page();
+await rk.goto(`${BASE}/`);
+async function rankedEvent(maybeCounts) {
+  return rk.evaluate(
+    async ([days, maybeCounts]) => {
+      const api = async (path, body) => (await fetch(`/api${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json();
+      const [d0, d1, d2, d3, d4, d5] = days;
+      const r = await api('/events', { event: { name: 'Rangering', mode: 'dates', start: d0, end: d5, options: days, settings: { maybeCounts } }, email: '' });
+      const people = [
+        ['Kari', { [d0]: 1, [d1]: 1, [d2]: 2, [d3]: 1, [d4]: 1, [d5]: 1 }],
+        ['Ola', { [d0]: 1, [d1]: 1, [d2]: 2, [d4]: 1, [d5]: 1 }],
+        ['Per', { [d2]: 2, [d3]: 2 }],
+      ];
+      for (const [name, answers] of people) await api(`/events/${r.id}/people`, { name, answers });
+      return `/e/${r.id}/${r.token}`;
+    },
+    [[0, 1, 2, 3, 4, 5].map((n) => D(n)), maybeCounts],
+  );
+}
+const rankOf = (p) => p.locator('.best-item .rank').allTextContents();
+await rk.goto(BASE + (await rankedEvent(false)));
+await rk.waitForSelector('.best-item');
+check((await rankOf(rk)).join() === '1,1,1', `equally good days share first place (${(await rankOf(rk)).join()})`);
+check((await rk.locator('.best-item.first').count()) === 3, 'all of them are marked as best');
+check((await rk.locator('.best-more').textContent()).includes('1'), 'the fourth equally good day is mentioned');
+check((await rk.locator('.cal-day.res.top').count()) === 4, 'the calendar rings all four');
+check((await rk.locator(`.cal-day[data-k="${D(2)}"] .dc`).textContent()) === '', 'a day with only maybes shows no count');
+check((await rk.locator('.best-item .bn').first().textContent()) === '2 av 3 kan', 'yes is the count');
+check((await rk.locator('.best-how').textContent()).includes('flest ja'), 'the ranking is explained');
+await rk.locator('.results').screenshot({ path: `${SHOTS}/13-ranking-yes-first.png` });
+await rk.goto(BASE + (await rankedEvent(true)));
+await rk.waitForSelector('.best-item');
+check((await rk.locator('.best-item').first().getAttribute('data-k')) === D(2), 'with "maybe counts", the day everyone may come ranks first');
+check((await rankOf(rk)).join() === '1,2,2', `then the tied days (${(await rankOf(rk)).join()})`);
+check((await rk.locator('.best-item .bn').first().textContent()) === '3 av 3 kan · inkl. 3 kanskje', 'the count includes the maybes');
+check((await rk.locator('.best-more').count()) === 0, 'no "more" line without first-place ties');
+await rk.locator('.results').screenshot({ path: `${SHOTS}/14-ranking-maybe-counts.png` });
 
 // --- F) Admin deletes an entry and the event --------------------------------------------
 await admin.reload();

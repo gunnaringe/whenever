@@ -233,6 +233,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .check b { display: block; }
 .check small { color: var(--muted); }
 .check:has(input:disabled) { opacity: .55; }
+.check.sub { padding-left: 2.05rem; border-top: 0; padding-top: 0; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .6rem; }
 .chip {
@@ -458,12 +459,15 @@ button.cal-day { cursor: pointer; }
   text-align: left;
   cursor: pointer;
 }
-.best li:first-child .best-item { background: var(--yes-soft); border-color: color-mix(in srgb, var(--yes) 40%, transparent); }
+.best-item.first { background: var(--yes-soft); border-color: color-mix(in srgb, var(--yes) 40%, transparent); }
 .best-item.sel { box-shadow: inset 0 0 0 2px var(--ink); }
 .rank { display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: var(--card); font: 600 .95rem var(--head); }
-.best li:first-child .rank { background: var(--yes); color: var(--yes-ink); }
+.best-item.first .rank { background: var(--yes); color: var(--yes-ink); }
 .bl { font-weight: 600; }
 .bn { color: var(--muted); font-size: .875rem; white-space: nowrap; }
+.best-more { margin: -.6rem 0 1rem; }
+.best-how { margin: -.6rem 0 1rem; }
+.best-more + .best-how { margin-top: -.75rem; }
 @media (max-width: 480px) { .best-item { grid-template-columns: auto 1fr; } .bn { grid-column: 2; } }
 
 .res-list { display: grid; gap: 2px; }
