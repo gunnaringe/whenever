@@ -84,8 +84,18 @@ transforming (enums, namespaces, parameter properties) is off
   (`weekdayState`, `groupState`). The stored event is just the explicit
   set, so a single Saturday can always be picked by hand. Keep it that way:
   never store a "no weekends" rule.
-- **Ranking:** most available (yes + maybe) first, then most yes, then
-  earliest. Times mode ranks windows of `duration` built from consecutive
+- **Ranking:** by default most yes first; more maybes only break a tie,
+  then the earliest wins. With the `maybeCounts` setting (only offered with
+  `maybe`): most yes + maybe first, then most yes. `score` is the number
+  shown everywhere (calendar days, list, table sum, best list, the
+  "Avtalt" card), so with the default a maybe-only day shows no count.
+  `compareScore`, `sameScore` and `ranks` live in `model.ts`. Equally good
+  options share a rank (1, 1, 3); every one tied for first is green and
+  ringed, and the best list (3 items) adds "+ N til" for any first-place
+  ties it leaves out. `heat` shades by the score, nudged by the tiebreak by
+  less than one person, so on the dates calendar a darker day never ranks
+  lower (in the times grid the shading is per slot and the ranking per
+  window). Times mode ranks windows of `duration` built from consecutive
   slots, and the top windows don't overlap.
 - **Picking the final date:** the admin picks an option (dates) or a
   window start (times) in the detail panel; it's stored as the event's
@@ -157,7 +167,7 @@ transforming (enums, namespaces, parameter properties) is off
   changes), then `BASE=http://127.0.0.1:8787 npm run smoke`: a browser
   end-to-end check (dates and times events, chips, drag and touch painting,
   several participants, permissions, link reset, picking the date and the
-  `.ics` download). It uses `playwright-core`,
+  `.ics` download, ties and the ranking setting). It uses `playwright-core`,
   which has no browser: set `PWCHROME` to a Chromium or
   `chrome-headless-shell` binary, e.g. under `~/.cache/ms-playwright/`.
   Screenshots go to `$SHOTS` (default `/tmp/whenever-shots`).
@@ -170,12 +180,13 @@ transforming (enums, namespaces, parameter properties) is off
 ## Deploy
 
 Cloudflare Worker `whenever` (never rename it: the custom domains are bound
-to it), Workers Builds on push to `main`. Workers Builds ignores the
-`build` field in `wrangler.jsonc`: its Build command must be
-`npm run build`, for production and for Previews (without it the deploy
-fails, as `dist/` doesn't exist). Other branches run `wrangler
-preview`, which needs the `previews` block in `wrangler.jsonc`: give any new
-binding a Preview-safe copy there. Rate-limit namespaces are account-wide:
+to it), live since 2026-11-01. Workers Builds deploys on push to `main`.
+Workers Builds ignores the `build` field in `wrangler.jsonc`: its Build
+command must be `npm run build` (without it the deploy fails, as `dist/`
+doesn't exist). Branch builds are not enabled, so branches only get CI.
+If they are turned on, they run `wrangler preview`, which needs the
+`previews` block in `wrangler.jsonc`: keep giving any new binding a
+Preview-safe copy there. Rate-limit namespaces are account-wide:
 `3001` production, `3002` previews (1001 is scoreboard, 2001/2002 scorepad).
 No secrets or other manual setup besides that Build command. Agent sessions
 can't deploy (Cloudflare credentials there are read-only). Free plan:

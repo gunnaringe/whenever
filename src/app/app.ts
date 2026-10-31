@@ -516,8 +516,8 @@ function renderForm(v: M.View | null): void {
       <span><b>${esc(t(`mode.${mode}`))}</b><small>${esc(t(`mode.${mode}Hint`))}</small></span>
     </label>`;
   const check = (key: keyof M.Settings) => `
-    <label class="check">
-      <input type="checkbox" name="s-${key}" ${d.settings[key] ? 'checked' : ''} ${key === 'openEdit' && d.settings.hidden ? 'disabled' : ''}>
+    <label class="check${key === 'maybeCounts' ? ' sub' : ''}">
+      <input type="checkbox" name="s-${key}" ${d.settings[key] ? 'checked' : ''} ${(key === 'openEdit' && d.settings.hidden) || (key === 'maybeCounts' && !d.settings.maybe) ? 'disabled' : ''}>
       <span><b>${esc(t(`set.${key}`))}</b><small>${esc(t(`set.${key}Hint`))}</small></span>
     </label>`;
   paint(`
@@ -564,7 +564,7 @@ function renderForm(v: M.View | null): void {
       </section>
       <section class="card">
         <h2>${esc(t('settings'))}</h2>
-        ${check('maybe')}${check('openEdit')}${check('hidden')}${editing ? check('closed') : ''}
+        ${check('maybe')}${check('maybeCounts')}${check('openEdit')}${check('hidden')}${editing ? check('closed') : ''}
         ${field('email', t('yourEmailOptional'), `<input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(d.email)}" autocomplete="email" inputmode="email">`, t('adminEmailHint'))}
       </section>
       <p class="err" id="form-err" hidden></p>
@@ -607,6 +607,8 @@ function bindForm(): void {
         openEdit.checked = d.settings.openEdit;
         openEdit.disabled = el.checked;
       }
+      // Without maybe answers there is nothing for it to count.
+      if (n === 's-maybe') control(form, 's-maybeCounts').disabled = !el.checked;
     }
   });
   form.addEventListener('submit', (e) => {
@@ -887,7 +889,7 @@ async function submitForm(): Promise<void> {
 
 // --- Event page -----------------------------------------------------------------------------
 
-const heat = (g: M.Tally, n: number): string => (n ? ((g.yes.length + g.maybe.length * 0.5) / n).toFixed(3) : '0');
+const heat = (g: M.Tally, n: number, s: M.Settings): string => M.heat(g, n, s).toFixed(3);
 // Dark cells get light text.
 const hi = (h: string) => (Number(h) > 0.55 ? ' hi' : '');
 
@@ -1049,21 +1051,44 @@ function shareHtml(v: M.View): string {
   </details>`;
 }
 
+// "2 av 4 kan · 1 kanskje"; when maybe counts, "3 av 4 kan · inkl. 1 kanskje".
+function countText(g: M.Tally, n: number, s: M.Settings): string {
+  const m = g.maybe.length;
+  return t('nOfM', { n: M.score(g, s), m: n }) + (m ? ` · ${t(s.maybeCounts ? 'nMaybeIncl' : 'nMaybe', { n: m })}` : '');
+}
+
+// Every option ranked best first: dates, or in times mode windows that
+// don't overlap.
+const ranked = (ev: M.PollEvent, people: readonly M.Person[]): (M.Tally | M.TimeWindow)[] =>
+  ev.mode === 'dates' ? M.bestOptions(ev, people, Infinity) : M.bestWindows(ev, people, Infinity);
+
+// The ones sharing first place.
+const firstPlace = <T extends M.Tally>(list: T[], s: M.Settings): T[] => list.filter((b) => M.sameScore(b, list[0], s));
+
+const SHOW_BEST = 3;
+
 function bestHtml(v: M.View): string {
   const ev = v.event;
+  const s = ev.settings;
   const n = v.people.length;
   if (!n) return '';
-  const best: (M.Tally | M.TimeWindow)[] = ev.mode === 'dates' ? M.bestOptions(ev, v.people, 3) : M.bestWindows(ev, v.people, 3);
-  if (!best.length) return `<p class="muted">${esc(t('noneAvailable'))}</p>`;
-  return `<ol class="best">${best
+  const all = ranked(ev, v.people);
+  if (!all.length) return `<p class="muted">${esc(t('noneAvailable'))}</p>`;
+  const rank = M.ranks(all, s);
+  // Never leave out one that is as good as the first.
+  const more = rank.slice(SHOW_BEST).filter((r) => r === 1).length;
+  return `<ol class="best">${all
+    .slice(0, SHOW_BEST)
     .map(
-      (b, i) => `<li><button type="button" class="best-item${app.pick?.k === b.key ? ' sel' : ''}" data-act="pick" data-k="${b.key}" ${ev.mode === 'times' ? 'data-win="1"' : ''}>
-        <span class="rank">${i + 1}</span>
+      (b, i) => `<li><button type="button" class="best-item${rank[i] === 1 ? ' first' : ''}${app.pick?.k === b.key ? ' sel' : ''}" data-act="pick" data-k="${b.key}" ${ev.mode === 'times' ? 'data-win="1"' : ''}>
+        <span class="rank">${rank[i]}</span>
         <span class="bl">${esc(cap('date' in b ? windowLabel(b) : fmtDate(b.key, 'long')))}${ev.decided === b.key ? ` <span class="tag">${esc(t('decidedTag'))}</span>` : ''}</span>
-        <span class="bn">${esc(t('nOfM', { n: M.available(b), m: n }))}${b.maybe.length ? ` · ${esc(t('nMaybe', { n: b.maybe.length }))}` : ''}</span>
+        <span class="bn">${esc(countText(b, n, s))}</span>
       </button></li>`,
     )
-    .join('')}</ol>`;
+    .join('')}</ol>
+    ${more ? `<p class="best-more muted small">${esc(t('moreTied', { n: more }))}</p>` : ''}
+    ${s.maybe ? `<p class="best-how muted small">${esc(t(s.maybeCounts ? 'rankMaybeCounts' : 'rankYesFirst'))}</p>` : ''}`;
 }
 
 function resultsHtml(v: M.View): string {
@@ -1094,7 +1119,7 @@ function resultsBody(v: M.View): string {
     <button type="button" class="res-row${app.pick?.k === key ? ' sel' : ''}" data-act="pick" data-k="${key}" ${win ? 'data-win="1"' : ''}>
       <span class="rl">${esc(cap(label))}</span>
       <span class="meter"><i class="y" style="width:${pct(g.yes.length)}%"></i><i class="m" style="width:${pct(g.maybe.length)}%"></i></span>
-      <span class="rn">${M.available(g)}/${n}</span>
+      <span class="rn">${M.score(g, ev.settings)}/${n}</span>
     </button>`;
 
   if (ev.mode === 'times') {
@@ -1114,13 +1139,13 @@ function resultsBody(v: M.View): string {
     return `<div class="table-scroll"><table class="ptable">
       <thead><tr><th scope="col" class="name">${esc(t('name'))}</th>${ev.options.map((k) => `<th scope="col"><span>${wd[M.weekday(k)]}</span><b>${Number(k.slice(8))}</b><small>${esc(fmtDate(k, 'monthShort'))}</small></th>`).join('')}</tr></thead>
       <tbody>${v.people.map((p) => `<tr><th scope="row" class="name">${esc(p.name)}</th>${ev.options.map((k) => cell(p.answers[k])).join('')}</tr>`).join('')}</tbody>
-      <tfoot><tr><th scope="row" class="name">${esc(t('sum'))}</th>${ev.options.map((k) => `<td>${M.available(at(k))}</td>`).join('')}</tr></tfoot>
+      <tfoot><tr><th scope="row" class="name">${esc(t('sum'))}</th>${ev.options.map((k) => `<td>${M.score(at(k), ev.settings)}</td>`).join('')}</tr></tfoot>
     </table></div>`;
   }
 
   const opts = new Set(ev.options);
   const ds = M.optionDates(ev);
-  const top = new Set(M.bestOptions(ev, v.people, 1).map((b) => b.key));
+  const top = new Set(firstPlace(M.bestOptions(ev, v.people, Infinity), ev.settings).map((b) => b.key));
   // From the first to the last offered day: weeks without any are left out.
   return calendarHtml({
     start: ds[0],
@@ -1128,9 +1153,9 @@ function resultsBody(v: M.View): string {
     dayHtml: (x) => {
       if (!opts.has(x)) return `<span class="cal-day off">${Number(x.slice(8))}</span>`;
       const g = at(x);
-      const a = M.available(g);
-      const h = heat(g, n);
-      return `<button type="button" class="cal-day res${hi(h)}${top.has(x) ? ' top' : ''}${app.pick?.k === x ? ' sel' : ''}" style="--h:${h}" data-act="pick" data-k="${x}" aria-label="${esc(fmtDate(x, 'long'))}: ${esc(t('nOfM', { n: a, m: n }))}"><span class="dn">${Number(x.slice(8))}</span><span class="dc">${a || ''}</span></button>`;
+      const a = M.score(g, ev.settings);
+      const h = heat(g, n, ev.settings);
+      return `<button type="button" class="cal-day res${hi(h)}${top.has(x) ? ' top' : ''}${app.pick?.k === x ? ' sel' : ''}" style="--h:${h}" data-act="pick" data-k="${x}" aria-label="${esc(fmtDate(x, 'long'))}: ${esc(countText(g, n, ev.settings))}"><span class="dn">${Number(x.slice(8))}</span><span class="dc">${a || ''}</span></button>`;
     },
   });
 }
@@ -1188,7 +1213,7 @@ function decidedHtml(v: M.View): string {
   return `<section class="card notice ok decided">
     <h2>${icon('check')}${esc(t('decidedTitle'))}</h2>
     <p class="when">${esc(cap(whenLabel(ev, ev.decided)))}</p>
-    ${n && !v.hidden ? `<p class="muted">${esc(t('nOfM', { n: M.available(pick), m: n }))}${pick.maybe.length ? ` · ${esc(t('nMaybe', { n: pick.maybe.length }))}` : ''}</p>` : ''}
+    ${n && !v.hidden ? `<p class="muted">${esc(countText(pick, n, ev.settings))}</p>` : ''}
     <div class="row wrap">
       <button type="button" class="btn primary" data-act="ics">${icon('cal')}${esc(t('addToCalendar'))}</button>
       ${v.role === 'admin' ? `<button type="button" class="btn" data-act="undecide">${esc(t('undoDecision'))}</button>` : ''}
@@ -1210,7 +1235,7 @@ function mountResults(v: M.View): void {
   const n = v.people.length;
   const T = M.tally(ev, v.people);
   const opts = new Set(ev.options);
-  const topKeys = new Set(M.bestWindows(ev, v.people, 1)[0]?.keys ?? []);
+  const topKeys = new Set(firstPlace(M.bestWindows(ev, v.people, Infinity), ev.settings).flatMap((w) => w.keys));
   const selKeys = (): Set<string> => {
     const p = app.pick;
     if (!p) return new Set();
@@ -1227,8 +1252,8 @@ function mountResults(v: M.View): void {
     allowed: (k) => opts.has(k),
     decorate: (k) => {
       const g = T.get(k) ?? { key: k, yes: [], maybe: [], no: [] };
-      const a = M.available(g);
-      const h = heat(g, n);
+      const a = M.score(g, ev.settings);
+      const h = heat(g, n, ev.settings);
       return { cls: `heat${hi(h)}${topKeys.has(k) ? ' top' : ''}${sel.has(k) ? ' sel' : ''}`, h, text: n && a ? String(a) : '' };
     },
     onPick: (k) => {

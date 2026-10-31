@@ -150,17 +150,55 @@ test('permissions', () => {
   assert.ok(M.canAdd(admin, { ...s, closed: true }));
 });
 
-test('ranking: most people able to come, then most yes, then earliest', () => {
-  const ev = event({ ...datesEvent, options: ['2026-11-06', '2026-11-07', '2026-11-13', '2026-11-14'] });
+test('ranking: most yes first and maybe breaks ties, unless maybe counts', () => {
+  const options = ['2026-11-06', '2026-11-07', '2026-11-13', '2026-11-14'];
   const people: Answered[] = [
-    { id: 'a', answers: { '2026-11-06': 1, '2026-11-07': 1, '2026-11-13': 2 } },
-    { id: 'b', answers: { '2026-11-06': 2, '2026-11-07': 1, '2026-11-13': 1 } },
-    { id: 'c', answers: { '2026-11-13': 1 } },
+    { id: 'a', answers: { '2026-11-06': 1, '2026-11-07': 1, '2026-11-13': 2, '2026-11-14': 2 } },
+    { id: 'b', answers: { '2026-11-06': 2, '2026-11-07': 1, '2026-11-13': 1, '2026-11-14': 2 } },
+    { id: 'c', answers: { '2026-11-13': 1, '2026-11-14': 2 } },
   ];
-  const best = M.bestOptions(ev, people, 4);
-  assert.deepEqual(best.map((b) => b.key), ['2026-11-13', '2026-11-07', '2026-11-06']);
+  // 06: 1 yes + 1 maybe, 07: 2 yes, 13: 2 yes + 1 maybe, 14: 3 maybe.
+  const yesFirst = event({ ...datesEvent, options });
+  assert.equal(yesFirst.settings.maybeCounts, false);
+  const best = M.bestOptions(yesFirst, people, 4);
+  assert.deepEqual(best.map((b) => b.key), ['2026-11-13', '2026-11-07', '2026-11-06', '2026-11-14']);
+  assert.deepEqual(best.map((b) => M.score(b, yesFirst.settings)), [2, 2, 1, 0]);
   assert.deepEqual(best[0].no, []);
-  assert.deepEqual(best[2].maybe, ['b']);
+
+  const counting = event({ ...datesEvent, options, settings: { maybeCounts: true } });
+  const best2 = M.bestOptions(counting, people, 4);
+  assert.deepEqual(best2.map((b) => b.key), ['2026-11-13', '2026-11-14', '2026-11-07', '2026-11-06']);
+  assert.deepEqual(best2.map((b) => M.score(b, counting.settings)), [3, 3, 2, 2]);
+
+  // Darker never ranks lower.
+  for (const [ev, list] of [[yesFirst, best], [counting, best2]] as const) {
+    const h = list.map((b) => M.heat(b, people.length, ev.settings));
+    for (let i = 1; i < h.length; i++) assert.ok(h[i - 1] > h[i], `${list[i - 1].key} is darker than ${list[i].key}`);
+    assert.ok(h.every((x) => x > 0 && x <= 1));
+  }
+  const all: M.Tally = { key: 'x', yes: ['a', 'b', 'c'], maybe: [], no: [] };
+  assert.equal(M.heat(all, 3, yesFirst.settings), 1);
+  assert.equal(M.heat(all, 3, counting.settings), 1);
+  assert.equal(M.heat(all, 0, counting.settings), 0);
+});
+
+test('equally good options share a rank', () => {
+  const options = ['2026-11-06', '2026-11-07', '2026-11-13', '2026-11-14'];
+  const people: Answered[] = [
+    { id: 'a', answers: { '2026-11-06': 1, '2026-11-07': 1, '2026-11-13': 1, '2026-11-14': 2 } },
+    { id: 'b', answers: { '2026-11-06': 1, '2026-11-07': 1, '2026-11-13': 2, '2026-11-14': 1 } },
+  ];
+  const ev = event({ ...datesEvent, options });
+  const best = M.bestOptions(ev, people, 4);
+  // 06 and 07: both yes. 13 and 14: one yes, one maybe.
+  assert.deepEqual(best.map((b) => b.key), options);
+  assert.deepEqual(M.ranks(best, ev.settings), [1, 1, 3, 3]);
+  // Counting maybe, two can come on all four days, and yes breaks the tie.
+  const counting = { maybeCounts: true };
+  assert.deepEqual(M.ranks(best, counting), [1, 1, 3, 3]);
+  const allMaybe = M.bestOptions(event({ ...datesEvent, options, settings: { maybeCounts: true } }), [{ id: 'a', answers: { '2026-11-06': 2, '2026-11-07': 2 } }], 4);
+  assert.deepEqual(M.ranks(allMaybe, counting), [1, 1]);
+  assert.deepEqual(M.ranks([], counting), []);
 });
 
 test('windows: consecutive slots, everyone available for the whole window', () => {

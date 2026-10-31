@@ -18,8 +18,13 @@ and everyone marks when they can. At
 - **Pick the date.** The organiser picks the final day or time from the
   results. Everyone then sees it at the top and can download it as a
   calendar file (`.ics`).
-- **Settings:** allow "maybe", let everyone edit or delete entries, hide
-  answers from other participants, close the event.
+- **Clear results.** The best days or times come first, ranked by most
+  yes; "maybe" only breaks ties, unless the organiser chooses to count it
+  as yes. Equally good options share a rank, and a calendar shades and
+  numbers every day.
+- **Settings:** allow "maybe" (and whether it counts as able to come), let
+  everyone edit or delete entries, hide answers from other participants,
+  close the event.
 - Everything is deleted 30 days after the event's last date.
 
 ## Running locally
@@ -40,9 +45,8 @@ npm run build    # dist/: public/ plus the hashed app and stylesheet
 ## Deploy
 
 Cloudflare Worker `whenever` with static assets and one SQLite-backed Durable
-Object per event, deployed by Workers Builds on push to `main`. Branches get a
-Preview. The Build command (production and Previews) is `npm run build`.
-There are no secrets to set.
+Object per event, deployed by Workers Builds on push to `main` (branch builds
+are off). The Build command is `npm run build`. There are no secrets to set.
 
 ## Licence
 

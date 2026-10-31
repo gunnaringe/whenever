@@ -14,6 +14,8 @@ export type Answer = typeof YES | typeof MAYBE;
 export type Answers = Record<string, Answer>;
 export interface Settings {
   maybe: boolean;
+  // Rank by yes + maybe. Off (the default): rank by yes, maybe breaks ties.
+  maybeCounts: boolean;
   openEdit: boolean;
   hidden: boolean;
   closed: boolean;
@@ -126,7 +128,7 @@ export const MODES: readonly Mode[] = ['dates', 'times'];
 export const SLOTS: readonly number[] = [15, 30, 60];
 export const YES = 1;
 export const MAYBE = 2;
-export const DEFAULT_SETTINGS: Readonly<Settings> = { maybe: true, openEdit: false, hidden: false, closed: false };
+export const DEFAULT_SETTINGS: Readonly<Settings> = { maybe: true, maybeCounts: false, openEdit: false, hidden: false, closed: false };
 
 // Participant ids and link tokens (a 16-hex selector, then a 22-character
 // random secret; see src/worker/link.ts).
@@ -487,16 +489,48 @@ export function tally(ev: Pick<PollEvent, 'options'>, people: readonly Answered[
   return out;
 }
 
-// Most people able to come first, then most clear yeses, then earliest.
-export function compareScore(a: Tally, b: Tally): number {
-  return b.yes.length + b.maybe.length - (a.yes.length + a.maybe.length) || b.yes.length - a.yes.length || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
-}
-
 export const available = (t: Tally): number => t.yes.length + t.maybe.length;
 
+type Ranking = Pick<Settings, 'maybeCounts'>;
+
+// The number shown for an option: how many can come. "Maybe" only counts
+// with maybeCounts.
+export const score = (t: Tally, s: Ranking): number => (s.maybeCounts ? available(t) : t.yes.length);
+
+// What breaks a tie in score: more maybes (by default), or with
+// maybeCounts, more clear yeses.
+const tiebreak = (t: Tally, s: Ranking): number => (s.maybeCounts ? t.yes.length : t.maybe.length);
+
+// Equally good: neither the score nor the tiebreak tells them apart.
+export const sameScore = (a: Tally, b: Tally, s: Ranking): boolean => score(a, s) === score(b, s) && tiebreak(a, s) === tiebreak(b, s);
+
+// Highest score first, then the tiebreak, then earliest.
+export function compareScore(a: Tally, b: Tally, s: Ranking): number {
+  return score(b, s) - score(a, s) || tiebreak(b, s) - tiebreak(a, s) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+}
+
+// Rank numbers for a list sorted by compareScore; equally good ones share
+// one (1, 1, 3).
+export function ranks(sorted: readonly Tally[], s: Ranking): number[] {
+  const out: number[] = [];
+  sorted.forEach((t, i) => out.push(i && sameScore(t, sorted[i - 1], s) ? out[i - 1] : i + 1));
+  return out;
+}
+
+// Shading from 0 to 1: the score, moved by the tiebreak by less than one
+// person, so a darker option never ranks lower.
+export function heat(t: Tally, n: number, s: Ranking): number {
+  if (!n) return 0;
+  const m = t.maybe.length / (n + 1);
+  return s.maybeCounts ? (available(t) - m) / n : (t.yes.length + m) / n;
+}
+
 // Best dates (dates mode) or best single slots, at least one person available.
-export function bestOptions(ev: Pick<PollEvent, 'options'>, people: readonly Answered[], n = 3): Tally[] {
-  return [...tally(ev, people).values()].filter((t) => available(t) > 0).sort(compareScore).slice(0, n);
+export function bestOptions(ev: Pick<PollEvent, 'options' | 'settings'>, people: readonly Answered[], n = 3): Tally[] {
+  return [...tally(ev, people).values()]
+    .filter((t) => available(t) > 0)
+    .sort((a, b) => compareScore(a, b, ev.settings))
+    .slice(0, n);
 }
 
 // Times mode: windows of ev.duration made of consecutive options on one day.
@@ -538,7 +572,9 @@ export function windows(ev: PollEvent, people: readonly Answered[]): TimeWindow[
 // The n best windows that don't overlap each other.
 export function bestWindows(ev: PollEvent, people: readonly Answered[], n = 3): TimeWindow[] {
   const picked: TimeWindow[] = [];
-  for (const w of windows(ev, people).filter((x) => available(x) > 0).sort(compareScore)) {
+  for (const w of windows(ev, people)
+    .filter((x) => available(x) > 0)
+    .sort((a, b) => compareScore(a, b, ev.settings))) {
     if (picked.some((p) => p.date === w.date && w.start < p.end && p.start < w.end)) continue;
     picked.push(w);
     if (picked.length === n) break;
