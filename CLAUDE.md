@@ -84,15 +84,16 @@ transforming (enums, namespaces, parameter properties) is off
   (`weekdayState`, `groupState`). The stored event is just the explicit
   set, so a single Saturday can always be picked by hand. Keep it that way:
   never store a "no weekends" rule.
-- **Ranking:** by default most yes first; more maybes only break a tie,
-  then the earliest wins. With the `maybeCounts` setting (only offered with
+- **Ranking:** by default most yes first; on a tie more maybes come
+  first, then the earliest. With the `maybeCounts` setting (only offered with
   `maybe`): most yes + maybe first, then most yes. `score` is the number
   shown everywhere (calendar days, list, table sum, best list, the
   "Avtalt" card), so with the default a maybe-only day shows no count.
-  `compareScore`, `sameScore` and `ranks` live in `model.ts`. Equally good
-  options share a rank (1, 1, 3); every one tied for first is green and
-  ringed, and the best list (3 items) adds "+ N til" for any first-place
-  ties it leaves out. `heat` shades by the score, nudged by the tiebreak by
+  `compareScore`, `sameScore` and `ranks` live in `model.ts`. The same
+  score is a draw and shares a rank (1, 1, 3): the tiebreak only orders
+  inside a draw, since "2 av 3 kan" twice must not look like a win. Every
+  option tied for first is green and ringed, and the best list (3 items)
+  adds "+ N til" for any first-place ties it leaves out. `heat` shades by the score, nudged by the tiebreak by
   less than one person, so on the dates calendar a darker day never ranks
   lower (in the times grid the shading is per slot and the ranking per
   window). Times mode ranks windows of `duration` built from consecutive

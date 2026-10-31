@@ -313,8 +313,9 @@ await admin.click('#dlg button[value="yes"]');
 await admin.waitForSelector('.decided', { state: 'detached' });
 check(true, 'the admin can undo the pick');
 
-// --- H) Ranking: yes first, maybe breaks ties, unless maybe counts ---------------------------
-// D(0), D(1), D(4), D(5): Kari and Ola yes. D(2): everyone maybe. D(3): Kari yes, Per maybe.
+// --- H) Ranking: yes first, maybe only orders a draw, unless maybe counts -----------------
+// D(0), D(1), D(4), D(5): Kari and Ola yes, D(1) also Per maybe. D(2): everyone
+// maybe. D(3): Kari yes, Per maybe.
 const rk = await page();
 await rk.goto(`${BASE}/`);
 async function rankedEvent(maybeCounts) {
@@ -326,7 +327,7 @@ async function rankedEvent(maybeCounts) {
       const people = [
         ['Kari', { [d0]: 1, [d1]: 1, [d2]: 2, [d3]: 1, [d4]: 1, [d5]: 1 }],
         ['Ola', { [d0]: 1, [d1]: 1, [d2]: 2, [d4]: 1, [d5]: 1 }],
-        ['Per', { [d2]: 2, [d3]: 2 }],
+        ['Per', { [d1]: 2, [d2]: 2, [d3]: 2 }],
       ];
       for (const [name, answers] of people) await api(`/events/${r.id}/people`, { name, answers });
       return `/e/${r.id}/${r.token}`;
@@ -337,19 +338,20 @@ async function rankedEvent(maybeCounts) {
 const rankOf = (p) => p.locator('.best-item .rank').allTextContents();
 await rk.goto(BASE + (await rankedEvent(false)));
 await rk.waitForSelector('.best-item');
-check((await rankOf(rk)).join() === '1,1,1', `equally good days share first place (${(await rankOf(rk)).join()})`);
+check((await rankOf(rk)).join() === '1,1,1', `days with as many yes share first place (${(await rankOf(rk)).join()})`);
 check((await rk.locator('.best-item.first').count()) === 3, 'all of them are marked as best');
+check((await rk.locator('.best-item').first().getAttribute('data-k')) === D(1), 'the one with a maybe more is listed first, still a draw');
 check((await rk.locator('.best-more').textContent()).includes('1'), 'the fourth equally good day is mentioned');
 check((await rk.locator('.cal-day.res.top').count()) === 4, 'the calendar rings all four');
 check((await rk.locator(`.cal-day[data-k="${D(2)}"] .dc`).textContent()) === '', 'a day with only maybes shows no count');
-check((await rk.locator('.best-item .bn').first().textContent()) === '2 av 3 kan', 'yes is the count');
+check((await rk.locator('.best-item .bn').first().textContent()) === '2 av 3 kan · 1 kanskje', 'yes is the count');
 check((await rk.locator('.best-how').textContent()).includes('flest ja'), 'the ranking is explained');
 await rk.locator('.results').screenshot({ path: `${SHOTS}/13-ranking-yes-first.png` });
 await rk.goto(BASE + (await rankedEvent(true)));
 await rk.waitForSelector('.best-item');
-check((await rk.locator('.best-item').first().getAttribute('data-k')) === D(2), 'with "maybe counts", the day everyone may come ranks first');
-check((await rankOf(rk)).join() === '1,2,2', `then the tied days (${(await rankOf(rk)).join()})`);
-check((await rk.locator('.best-item .bn').first().textContent()) === '3 av 3 kan · inkl. 3 kanskje', 'the count includes the maybes');
+check((await rankOf(rk)).join() === '1,1,3', `with "maybe counts", the two days all three may come share first place (${(await rankOf(rk)).join()})`);
+check((await rk.locator('.best-item').nth(1).getAttribute('data-k')) === D(2), 'the one with fewer yes is listed second');
+check((await rk.locator('.best-item .bn').first().textContent()) === '3 av 3 kan · inkl. 1 kanskje', 'the count includes the maybes');
 check((await rk.locator('.best-more').count()) === 0, 'no "more" line without first-place ties');
 await rk.locator('.results').screenshot({ path: `${SHOTS}/14-ranking-maybe-counts.png` });
 

@@ -19,9 +19,9 @@ and everyone marks when they can. At
   results. Everyone then sees it at the top and can download it as a
   calendar file (`.ics`).
 - **Clear results.** The best days or times come first, ranked by most
-  yes; "maybe" only breaks ties, unless the organiser chooses to count it
-  as yes. Equally good options share a rank, and a calendar shades and
-  numbers every day.
+  yes, unless the organiser chooses to count "maybe" too. Options with as
+  many able to come share a rank ("maybe" only orders them), and a
+  calendar shades and numbers every day.
 - **Settings:** allow "maybe" (and whether it counts as able to come), let
   everyone edit or delete entries, hide answers from other participants,
   close the event.
