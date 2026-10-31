@@ -87,6 +87,15 @@ transforming (enums, namespaces, parameter properties) is off
 - **Ranking:** most available (yes + maybe) first, then most yes, then
   earliest. Times mode ranks windows of `duration` built from consecutive
   slots, and the top windows don't overlap.
+- **Picking the final date:** the admin picks an option (dates) or a
+  window start (times) in the detail panel; it's stored as the event's
+  `decided`. `sanitizeEvent` drops it unless it is in `decisionKeys`, so
+  editing the options away clears it. Picking also closes the event;
+  undoing the pick leaves it closed. `decision()` gives the picked tally or
+  window for the "Avtalt" card. "Legg i kalender" builds the `.ics` in the
+  browser (`src/app/ics.ts`). Times are wall-clock in the event's `tz`, and
+  `zonedUtc` converts them to UTC with `Intl`. The file may only carry the
+  public event URL, never a link token.
 - **Permissions:** the admin can do everything; `closed` blocks everyone
   else; people edit their own entry; `openEdit` lets anyone edit/delete any
   entry (not with `hidden`, where only the admin sees others' answers).
@@ -147,7 +156,8 @@ transforming (enums, namespaces, parameter properties) is off
 - `npm run dev` (wrangler dev, which runs the build and rebuilds on
   changes), then `BASE=http://127.0.0.1:8787 npm run smoke`: a browser
   end-to-end check (dates and times events, chips, drag and touch painting,
-  several participants, permissions, link reset). It uses `playwright-core`,
+  several participants, permissions, link reset, picking the date and the
+  `.ics` download). It uses `playwright-core`,
   which has no browser: set `PWCHROME` to a Chromium or
   `chrome-headless-shell` binary, e.g. under `~/.cache/ms-playwright/`.
   Screenshots go to `$SHOTS` (default `/tmp/whenever-shots`).

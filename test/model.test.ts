@@ -181,6 +181,21 @@ test('windows: consecutive slots, everyone available for the whole window', () =
   assert.equal(best.length, 2);
 });
 
+test('the organiser\'s pick must fit the options', () => {
+  const ev = event({ ...datesEvent, decided: '2026-11-13' });
+  assert.equal(ev.decided, '2026-11-13');
+  assert.equal(event({ ...datesEvent, decided: '2026-11-14' }).decided, undefined);
+  const people: Answered[] = [{ id: 'a', answers: { '2026-11-13': 1 } }];
+  assert.deepEqual(M.decision(ev, people)?.yes, ['a']);
+  // Times: the start of a whole one-hour window, not just any slot.
+  const tm = times({ ...timesEvent, decided: '2026-11-02T09:00' });
+  assert.equal(tm.decided, '2026-11-02T09:00');
+  assert.equal(times({ ...timesEvent, decided: '2026-11-02T10:00' }).decided, undefined); // 10:30 isn't offered
+  assert.equal(times({ ...timesEvent, decided: '2026-11-03T11:30' }).decided, undefined); // 12:00 is the end of the day
+  const w = M.decision(tm, []);
+  assert.ok(w && 'date' in w && w.start === 540 && w.end === 600);
+});
+
 test('expiry is 30 days after the last date', () => {
   const ev = event(datesEvent);
   assert.equal(M.fromTime(M.expiresAt(ev)), M.addDays(ev.end, 31));

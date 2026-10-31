@@ -15,6 +15,9 @@ and everyone marks when they can. At
 - **No accounts, no cookies.** Each admin or personal link carries a random
   secret stored with the event. Email is optional (stored for magic links;
   none are sent yet).
+- **Pick the date.** The organiser picks the final day or time from the
+  results. Everyone then sees it at the top and can download it as a
+  calendar file (`.ics`).
 - **Settings:** allow "maybe", let everyone edit or delete entries, hide
   answers from other participants, close the event.
 - Everything is deleted 30 days after the event's last date.
