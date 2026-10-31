@@ -342,6 +342,7 @@ button.cal-wk:hover { background: var(--soft); color: var(--ink); }
 }
 button.cal-day { cursor: pointer; }
 .cal-day.out, .cal-day.off { color: var(--muted); opacity: .45; }
+#more-months { margin-top: .6rem; }
 .cal-day.pick { background: var(--soft); }
 .cal-day.pick:hover { box-shadow: inset 0 0 0 2px var(--accent); }
 .cal-day.pick.on { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
