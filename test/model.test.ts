@@ -163,12 +163,15 @@ test('ranking: most yes first and maybe breaks ties, unless maybe counts', () =>
   const best = M.bestOptions(yesFirst, people, 4);
   assert.deepEqual(best.map((b) => b.key), ['2026-11-13', '2026-11-07', '2026-11-06', '2026-11-14']);
   assert.deepEqual(best.map((b) => M.score(b, yesFirst.settings)), [2, 2, 1, 0]);
+  // 13 and 07 both have 2 yes: a draw, the maybe only puts 13 first.
+  assert.deepEqual(M.ranks(best, yesFirst.settings), [1, 1, 3, 4]);
   assert.deepEqual(best[0].no, []);
 
   const counting = event({ ...datesEvent, options, settings: { maybeCounts: true } });
   const best2 = M.bestOptions(counting, people, 4);
   assert.deepEqual(best2.map((b) => b.key), ['2026-11-13', '2026-11-14', '2026-11-07', '2026-11-06']);
   assert.deepEqual(best2.map((b) => M.score(b, counting.settings)), [3, 3, 2, 2]);
+  assert.deepEqual(M.ranks(best2, counting.settings), [1, 1, 3, 3]);
 
   // Darker never ranks lower.
   for (const [ev, list] of [[yesFirst, best], [counting, best2]] as const) {
@@ -182,7 +185,7 @@ test('ranking: most yes first and maybe breaks ties, unless maybe counts', () =>
   assert.equal(M.heat(all, 0, counting.settings), 0);
 });
 
-test('equally good options share a rank', () => {
+test('the same number able to come is a draw: same rank, the tiebreak only orders', () => {
   const options = ['2026-11-06', '2026-11-07', '2026-11-13', '2026-11-14'];
   const people: Answered[] = [
     { id: 'a', answers: { '2026-11-06': 1, '2026-11-07': 1, '2026-11-13': 1, '2026-11-14': 2 } },
@@ -193,9 +196,9 @@ test('equally good options share a rank', () => {
   // 06 and 07: both yes. 13 and 14: one yes, one maybe.
   assert.deepEqual(best.map((b) => b.key), options);
   assert.deepEqual(M.ranks(best, ev.settings), [1, 1, 3, 3]);
-  // Counting maybe, two can come on all four days, and yes breaks the tie.
+  // Counting maybe, two can come on all four days: all share first place.
   const counting = { maybeCounts: true };
-  assert.deepEqual(M.ranks(best, counting), [1, 1, 3, 3]);
+  assert.deepEqual(M.ranks(best, counting), [1, 1, 1, 1]);
   const allMaybe = M.bestOptions(event({ ...datesEvent, options, settings: { maybeCounts: true } }), [{ id: 'a', answers: { '2026-11-06': 2, '2026-11-07': 2 } }], 4);
   assert.deepEqual(M.ranks(allMaybe, counting), [1, 1]);
   assert.deepEqual(M.ranks([], counting), []);

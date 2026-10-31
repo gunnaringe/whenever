@@ -501,16 +501,17 @@ export const score = (t: Tally, s: Ranking): number => (s.maybeCounts ? availabl
 // maybeCounts, more clear yeses.
 const tiebreak = (t: Tally, s: Ranking): number => (s.maybeCounts ? t.yes.length : t.maybe.length);
 
-// Equally good: neither the score nor the tiebreak tells them apart.
-export const sameScore = (a: Tally, b: Tally, s: Ranking): boolean => score(a, s) === score(b, s) && tiebreak(a, s) === tiebreak(b, s);
+// A draw: the same number can come. The tiebreak only orders a draw, so
+// what reads as equal ("2 av 3 kan") also ranks as equal.
+export const sameScore = (a: Tally, b: Tally, s: Ranking): boolean => score(a, s) === score(b, s);
 
 // Highest score first, then the tiebreak, then earliest.
 export function compareScore(a: Tally, b: Tally, s: Ranking): number {
   return score(b, s) - score(a, s) || tiebreak(b, s) - tiebreak(a, s) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 }
 
-// Rank numbers for a list sorted by compareScore; equally good ones share
-// one (1, 1, 3).
+// Rank numbers for a list sorted by compareScore; a draw shares one
+// (1, 1, 3).
 export function ranks(sorted: readonly Tally[], s: Ranking): number[] {
   const out: number[] = [];
   sorted.forEach((t, i) => out.push(i && sameScore(t, sorted[i - 1], s) ? out[i - 1] : i + 1));
