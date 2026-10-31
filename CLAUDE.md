@@ -23,7 +23,7 @@ language (`finn-tid.` → nb, `whenever.` → en, anything else → browser).
 - `src/worker.js`: `/api/*` only (`run_worker_first`): routing, JSON parsing,
   rate limit, turning the Bearer token into a credential.
   `src/poll.js`: the `Poll` Durable Object, which decides everything about
-  who may do what. `src/link.js`: sealing and opening link tokens.
+  who may do what. `src/link.js`: making and parsing link tokens.
 
 ## How it works
 
