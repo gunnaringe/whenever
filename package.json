@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "build": "node scripts/build.mjs",
+    "check": "wrangler types && tsc -p src/shared && tsc -p src/app && tsc -p src/worker && tsc -p test",
     "test": "node --test \"test/*.test.ts\"",
     "smoke": "node scripts/smoke.mjs"
   },

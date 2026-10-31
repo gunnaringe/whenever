@@ -4,19 +4,35 @@
 // the app start with whenever-.
 
 import { TOKEN_RE, PID_RE } from '../shared/model.ts';
+import { isLang } from './i18n.ts';
+import type { Lang } from './i18n.ts';
 
 const KEY = 'whenever-v1';
 
-function read() {
+// One remembered event: its name, and the admin and/or personal link token.
+export interface Stored {
+  name: string;
+  admin?: string;
+  me?: string;
+  pid?: string;
+  seen: number;
+}
+type Raw = Record<string, unknown>;
+interface State {
+  events?: Record<string, Raw>;
+  lang?: unknown;
+}
+
+function read(): State {
   try {
-    const s = JSON.parse(localStorage.getItem(KEY));
-    return s && typeof s === 'object' ? s : {};
+    const s: unknown = JSON.parse(localStorage.getItem(KEY) ?? 'null');
+    return s && typeof s === 'object' ? (s as State) : {};
   } catch {
     return {};
   }
 }
 
-function write(s) {
+function write(s: State): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(s));
   } catch {
@@ -24,27 +40,29 @@ function write(s) {
   }
 }
 
-const clean = (e) => ({
+const match = (re: RegExp, v: unknown): string | undefined => (typeof v === 'string' && re.test(v) ? v : undefined);
+
+const clean = (e: Raw): Stored => ({
   name: typeof e.name === 'string' ? e.name : '',
-  admin: TOKEN_RE.test(e.admin ?? '') ? e.admin : undefined,
-  me: TOKEN_RE.test(e.me ?? '') ? e.me : undefined,
-  pid: PID_RE.test(e.pid ?? '') ? e.pid : undefined,
+  admin: match(TOKEN_RE, e.admin),
+  me: match(TOKEN_RE, e.me),
+  pid: match(PID_RE, e.pid),
   seen: Number(e.seen) || 0,
 });
 
-export function events() {
+export function events(): (Stored & { id: string })[] {
   return Object.entries(read().events ?? {})
     .filter(([id]) => /^[A-Za-z0-9]{12}$/.test(id))
     .map(([id, e]) => ({ id, ...clean(e ?? {}) }))
     .sort((a, b) => b.seen - a.seen);
 }
 
-export function get(id) {
+export function get(id: string): Stored | null {
   const e = read().events?.[id];
   return e ? clean(e) : null;
 }
 
-export function put(id, patch) {
+export function put(id: string, patch: Partial<Stored>): void {
   const s = read();
   s.events ??= {};
   s.events[id] = { ...(s.events[id] ?? {}), ...patch, seen: Date.now() };
@@ -52,7 +70,7 @@ export function put(id, patch) {
 }
 
 // A link that no longer works: forget it (and the event if nothing is left).
-export function dropToken(id, token) {
+export function dropToken(id: string, token: string): void {
   const s = read();
   const e = s.events?.[id];
   if (!e) return;
@@ -61,32 +79,32 @@ export function dropToken(id, token) {
     delete e.me;
     delete e.pid;
   }
-  if (!e.admin && !e.me) delete s.events[id];
+  if (!e.admin && !e.me) delete s.events?.[id];
   write(s);
 }
 
-export function forgetMe(id) {
+export function forgetMe(id: string): void {
   const s = read();
   const e = s.events?.[id];
   if (!e) return;
   delete e.me;
   delete e.pid;
-  if (!e.admin) delete s.events[id];
+  if (!e.admin) delete s.events?.[id];
   write(s);
 }
 
-export function forget(id) {
+export function forget(id: string): void {
   const s = read();
   if (s.events) delete s.events[id];
   write(s);
 }
 
-export function getLang() {
+export function getLang(): Lang | null {
   const l = read().lang;
-  return l === 'nb' || l === 'en' ? l : null;
+  return isLang(l) ? l : null;
 }
 
-export function setLang(lang) {
+export function setLang(lang: Lang): void {
   const s = read();
   s.lang = lang;
   write(s);

@@ -1,0 +1,5 @@
+{
+  // Shared by the browser and the Worker, so neither side's globals.
+  "extends": "../../tsconfig.base.json",
+  "include": ["."]
+}

@@ -13,6 +13,7 @@
 //   POST   /api/events/:id/people/:pid/link  { reset? } (self or admin) -> { token }
 
 import { Poll } from './poll.ts';
+import type { Cred, Failure } from './poll.ts';
 import { parse, PID_RE } from './link.ts';
 import { sanitizeEvent, cleanEmail } from '../shared/model.ts';
 
@@ -23,17 +24,19 @@ const ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456
 const MAX_BODY = 256 * 1024;
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' };
 
-const json = (data, status = 200) => Response.json(data, { status, headers: HEADERS });
+const json = (data: unknown, status = 200): Response => Response.json(data, { status, headers: HEADERS });
 
 class HttpError extends Error {
-  constructor(status, code) {
+  status: number;
+
+  constructor(status: number, code: string) {
     super(code);
     this.status = status;
   }
 }
 
 // 12 characters of base62 (~71 bits); rejection sampling keeps it uniform.
-function newId() {
+function newId(): string {
   let out = '';
   while (out.length < 12) {
     for (const b of crypto.getRandomValues(new Uint8Array(16))) {
@@ -43,7 +46,7 @@ function newId() {
   return out;
 }
 
-async function limited(req, env) {
+async function limited(req: Request, env: Env): Promise<boolean> {
   if (!env.LIMIT) return false;
   const key = req.headers.get('cf-connecting-ip') ?? 'local';
   const { success } = await env.LIMIT.limit({ key });
@@ -51,7 +54,7 @@ async function limited(req, env) {
 }
 
 // JSON only: a cross-site form or simple fetch can't send it without a preflight.
-async function readJson(req) {
+async function readJson(req: Request): Promise<unknown> {
   if (!(req.headers.get('content-type') ?? '').startsWith('application/json')) throw new HttpError(415, 'type');
   if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY) throw new HttpError(413, 'size');
   const text = await req.text();
@@ -63,30 +66,34 @@ async function readJson(req) {
   }
 }
 
-function credential(req) {
+function credential(req: Request): Cred {
   const m = /^Bearer\s+(\S+)$/i.exec(req.headers.get('authorization') ?? '');
   if (!m) return null;
   return parse(m[1]) ?? { bad: true };
 }
 
-const send = (r) => (r.error ? json({ error: r.error }, r.status) : json(r));
+const failed = (r: object): r is Failure => typeof (r as Partial<Failure>).error === 'string';
+const send = (r: object): Response => (failed(r) ? json({ error: r.error }, r.status) : json(r));
 
-function event(body) {
-  const r = sanitizeEvent(body?.event);
+// body.k, or undefined when the body isn't an object.
+const field = (body: unknown, k: string): unknown => (body && typeof body === 'object' ? (body as Record<string, unknown>)[k] : undefined);
+
+function event(body: unknown) {
+  const r = sanitizeEvent(field(body, 'event'));
   if (!r.ok) throw new HttpError(400, r.error);
   return r.event;
 }
 
-function adminEmail(body, optional) {
-  if (optional && body?.email === undefined) return undefined;
-  const e = cleanEmail(body?.email);
+function adminEmail(body: unknown, optional: boolean): string | undefined {
+  if (optional && field(body, 'email') === undefined) return undefined;
+  const e = cleanEmail(field(body, 'email'));
   if (!e.ok) throw new HttpError(400, 'email');
   return e.email;
 }
 
-const stub = (env, id) => env.POLLS.get(env.POLLS.idFromName(id));
+const stub = (env: Env, id: string) => env.POLLS.get(env.POLLS.idFromName(id));
 
-async function route(req, env) {
+async function route(req: Request, env: Env): Promise<Response> {
   const { pathname } = new URL(req.url);
   const method = req.method;
 
@@ -94,7 +101,7 @@ async function route(req, env) {
     if (method !== 'POST') throw new HttpError(405, 'method');
     const body = await readJson(req);
     const ev = event(body);
-    const email = adminEmail(body, false);
+    const email = adminEmail(body, false) ?? '';
     for (let i = 0; i < 5; i++) {
       const id = newId();
       const made = await stub(env, id).create(ev, email);
@@ -133,7 +140,7 @@ async function route(req, env) {
   if (linkPath) {
     if (method !== 'POST') throw new HttpError(405, 'method');
     const body = await readJson(req);
-    return send(await poll.link(cred, pid, body?.reset === true));
+    return send(await poll.link(cred, pid, field(body, 'reset') === true));
   }
   if (method === 'PUT') return send(await poll.edit(cred, pid, await readJson(req)));
   if (method === 'DELETE') return send(await poll.drop(cred, pid));
@@ -141,7 +148,7 @@ async function route(req, env) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req: Request, env: Env): Promise<Response> {
     try {
       if (await limited(req, env)) return json({ error: 'rate' }, 429);
       return await route(req, env);
@@ -151,4 +158,4 @@ export default {
       return json({ error: 'server' }, 500);
     }
   },
-};
+} satisfies ExportedHandler<Env>;

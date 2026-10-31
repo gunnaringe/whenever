@@ -2,6 +2,32 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as M from '../src/shared/model.ts';
 
+// A valid result's value, or a failed one's error code.
+function event(input: unknown): M.PollEvent {
+  const r = M.sanitizeEvent(input);
+  assert.ok(r.ok);
+  return r.event;
+}
+function times(input: unknown): M.TimesEvent {
+  const ev = event(input);
+  assert.ok(ev.mode === 'times');
+  return ev;
+}
+const eventError = (input: unknown) => {
+  const r = M.sanitizeEvent(input);
+  return r.ok ? null : r.error;
+};
+function entry(input: unknown, ev: M.PollEvent): M.Entry {
+  const r = M.sanitizeEntry(input, ev);
+  assert.ok(r.ok);
+  return r.entry;
+}
+const entryError = (input: unknown, ev: M.PollEvent) => {
+  const r = M.sanitizeEntry(input, ev);
+  return r.ok ? null : r.error;
+};
+type Answered = Pick<M.Person, 'id' | 'answers'>;
+
 test('dates: validation, weekday, ISO week', () => {
   assert.ok(M.isDate('2026-02-28'));
   assert.ok(!M.isDate('2026-02-30'));
@@ -57,13 +83,13 @@ test('sanitizeEvent: dates mode', () => {
   assert.ok(r.ok);
   assert.deepEqual(r.event.options, ['2026-11-06', '2026-11-13']); // sorted, deduplicated, in range
   assert.deepEqual(r.event.settings, M.DEFAULT_SETTINGS);
-  assert.equal(M.sanitizeEvent({ ...datesEvent, name: '  ' }).error, 'name');
-  assert.equal(M.sanitizeEvent({ ...datesEvent, end: '2026-11-01' }).error, 'range');
-  assert.equal(M.sanitizeEvent({ ...datesEvent, end: '2028-01-01' }).error, 'rangeLong');
-  assert.equal(M.sanitizeEvent({ ...datesEvent, options: [] }).error, 'options');
-  assert.equal(M.sanitizeEvent({ ...datesEvent, name: 'a\u0000b\nc' }).event.name, 'a b c');
-  assert.equal(M.sanitizeEvent({ ...datesEvent, settings: { openEdit: 'yes', hidden: true } }).event.settings.hidden, true);
-  assert.equal(M.sanitizeEvent({ ...datesEvent, settings: { openEdit: 'yes' } }).event.settings.openEdit, false);
+  assert.equal(eventError({ ...datesEvent, name: '  ' }), 'name');
+  assert.equal(eventError({ ...datesEvent, end: '2026-11-01' }), 'range');
+  assert.equal(eventError({ ...datesEvent, end: '2028-01-01' }), 'rangeLong');
+  assert.equal(eventError({ ...datesEvent, options: [] }), 'options');
+  assert.equal(event({ ...datesEvent, name: 'a\u0000b\nc' }).name, 'a b c');
+  assert.equal(event({ ...datesEvent, settings: { openEdit: 'yes', hidden: true } }).settings.hidden, true);
+  assert.equal(event({ ...datesEvent, settings: { openEdit: 'yes' } }).settings.openEdit, false);
 });
 
 const timesEvent = {
@@ -84,31 +110,31 @@ test('sanitizeEvent: times mode', () => {
   assert.ok(r.ok);
   // 08:30 is before the window, 09:15 is off the slot grid, 12:00 is the end.
   assert.deepEqual(r.event.options, ['2026-11-02T09:00', '2026-11-02T09:30', '2026-11-02T10:00', '2026-11-03T11:30']);
-  assert.equal(M.sanitizeEvent({ ...timesEvent, dayStart: 545 }).error, 'hours');
-  assert.equal(M.sanitizeEvent({ ...timesEvent, end: '2027-01-30' }).error, 'rangeLong');
-  assert.equal(M.sanitizeEvent({ ...timesEvent, tz: 'Mars/Olympus' }).event.tz, 'Europe/Oslo');
-  assert.equal(M.sanitizeEvent({ ...timesEvent, duration: 50 }).event.duration, 60);
-  assert.equal(M.sanitizeEvent({ ...timesEvent, duration: 9999 }).event.duration, 180);
+  assert.equal(eventError({ ...timesEvent, dayStart: 545 }), 'hours');
+  assert.equal(eventError({ ...timesEvent, end: '2027-01-30' }), 'rangeLong');
+  assert.equal(times({ ...timesEvent, tz: 'Mars/Olympus' }).tz, 'Europe/Oslo');
+  assert.equal(times({ ...timesEvent, duration: 50 }).duration, 60);
+  assert.equal(times({ ...timesEvent, duration: 9999 }).duration, 180);
 });
 
 test('sanitizeEntry and cleanAnswers', () => {
-  const ev = M.sanitizeEvent(datesEvent).event;
+  const ev = event(datesEvent);
   const r = M.sanitizeEntry({ name: ' Kari ', answers: { '2026-11-06': 1, '2026-11-13': 2, '2026-11-07': 1, x: 3 } }, ev);
   assert.ok(r.ok);
   assert.deepEqual(r.entry.answers, { '2026-11-06': 1, '2026-11-13': 2 });
   assert.equal(r.entry.name, 'Kari');
   assert.equal(r.entry.email, undefined); // not given: unchanged
-  assert.equal(M.sanitizeEntry({ name: '' }, ev).error, 'personName');
-  assert.equal(M.sanitizeEntry({ name: 'A', email: 'nope' }, ev).error, 'email');
-  assert.equal(M.sanitizeEntry({ name: 'A', email: ' Kari@Example.no ' }, ev).entry.email, 'kari@example.no');
-  assert.equal(M.sanitizeEntry({ name: 'A', email: '' }, ev).entry.email, '');
+  assert.equal(entryError({ name: '' }, ev), 'personName');
+  assert.equal(entryError({ name: 'A', email: 'nope' }, ev), 'email');
+  assert.equal(entry({ name: 'A', email: ' Kari@Example.no ' }, ev).email, 'kari@example.no');
+  assert.equal(entry({ name: 'A', email: '' }, ev).email, '');
 });
 
 test('permissions', () => {
   const s = { ...M.DEFAULT_SETTINGS };
-  const admin = { role: 'admin', me: null };
-  const kari = { role: 'participant', me: 'k' };
-  const guest = { role: 'visitor', me: null };
+  const admin = { role: 'admin', me: null } as const;
+  const kari = { role: 'participant', me: 'k' } as const;
+  const guest = { role: 'visitor', me: null } as const;
   assert.ok(M.canEdit(admin, { ...s, closed: true }, 'k'));
   assert.ok(M.canEdit(kari, s, 'k'));
   assert.ok(!M.canEdit(kari, s, 'o'));
@@ -121,8 +147,8 @@ test('permissions', () => {
 });
 
 test('ranking: most people able to come, then most yes, then earliest', () => {
-  const ev = M.sanitizeEvent({ ...datesEvent, options: ['2026-11-06', '2026-11-07', '2026-11-13', '2026-11-14'] }).event;
-  const people = [
+  const ev = event({ ...datesEvent, options: ['2026-11-06', '2026-11-07', '2026-11-13', '2026-11-14'] });
+  const people: Answered[] = [
     { id: 'a', answers: { '2026-11-06': 1, '2026-11-07': 1, '2026-11-13': 2 } },
     { id: 'b', answers: { '2026-11-06': 2, '2026-11-07': 1, '2026-11-13': 1 } },
     { id: 'c', answers: { '2026-11-13': 1 } },
@@ -134,8 +160,8 @@ test('ranking: most people able to come, then most yes, then earliest', () => {
 });
 
 test('windows: consecutive slots, everyone available for the whole window', () => {
-  const ev = M.sanitizeEvent({ ...timesEvent, options: ['2026-11-02T09:00', '2026-11-02T09:30', '2026-11-02T10:00', '2026-11-02T11:00', '2026-11-02T11:30'] }).event;
-  const people = [
+  const ev = event({ ...timesEvent, options: ['2026-11-02T09:00', '2026-11-02T09:30', '2026-11-02T10:00', '2026-11-02T11:00', '2026-11-02T11:30'] });
+  const people: Answered[] = [
     { id: 'a', answers: { '2026-11-02T09:00': 1, '2026-11-02T09:30': 1, '2026-11-02T10:00': 1, '2026-11-02T11:00': 1, '2026-11-02T11:30': 1 } },
     { id: 'b', answers: { '2026-11-02T09:30': 1, '2026-11-02T10:00': 2, '2026-11-02T11:00': 1, '2026-11-02T11:30': 1 } },
   ];
@@ -152,6 +178,6 @@ test('windows: consecutive slots, everyone available for the whole window', () =
 });
 
 test('expiry is 30 days after the last date', () => {
-  const ev = M.sanitizeEvent(datesEvent).event;
+  const ev = event(datesEvent);
   assert.equal(M.fromTime(M.expiresAt(ev)), M.addDays(ev.end, 31));
 });

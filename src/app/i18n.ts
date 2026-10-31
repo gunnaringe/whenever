@@ -3,6 +3,9 @@
 // A value can be { one, other }, picked by vars.n.
 
 import { toTime, hhmm, parseKey } from '../shared/model.ts';
+import type { TimeWindow } from '../shared/model.ts';
+
+type Text = string | { one: string; other: string };
 
 const nb = {
   appName: 'Finn tid',
@@ -265,9 +268,13 @@ const nb = {
   'holiday.whitMonday': '2. pinsedag',
   'holiday.christmas': '1. juledag',
   'holiday.boxingDay': '2. juledag',
-};
+} satisfies Record<string, Text>;
 
-const en = {
+export type Key = keyof typeof nb;
+export type Lang = 'nb' | 'en';
+
+// Record<Key, …>: a key missing in English (or extra) doesn't compile.
+const en: Record<Key, Text> = {
   appName: 'Whenever',
   tagline: 'find the day that suits most people',
   privacy: 'Privacy',
@@ -530,42 +537,51 @@ const en = {
   'holiday.boxingDay': 'Boxing Day',
 };
 
-export const STRINGS = { nb, en };
-export const LANG_NAMES = { nb: 'Norsk', en: 'English' };
-const LOCALES = { nb: 'nb-NO', en: 'en-GB' };
-const WEEKDAYS = {
+export const STRINGS: Record<Lang, Record<Key, Text>> = { nb, en };
+export const LANG_NAMES: Record<Lang, string> = { nb: 'Norsk', en: 'English' };
+const LOCALES: Record<Lang, string> = { nb: 'nb-NO', en: 'en-GB' };
+const WEEKDAYS: Record<Lang, string[]> = {
   nb: ['ma', 'ti', 'on', 'to', 'fr', 'lø', 'sø'],
   en: ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'],
 };
 
-let lang = 'nb';
-export const getLang = () => lang;
-export function setLang(l) {
-  lang = STRINGS[l] ? l : 'en';
+export const isLang = (l: unknown): l is Lang => l === 'nb' || l === 'en';
+
+let lang: Lang = 'nb';
+export const getLang = (): Lang => lang;
+export function setLang(l: unknown): void {
+  lang = isLang(l) ? l : 'en';
 }
 
-export function t(key, vars = {}) {
-  let s = STRINGS[lang][key] ?? STRINGS.en[key] ?? key;
+export type Vars = Record<string, string | number>;
+
+export function t(key: Key, vars: Vars = {}): string {
+  let s: Text = STRINGS[lang][key] ?? STRINGS.en[key] ?? key;
   if (typeof s === 'object') s = vars.n === 1 ? s.one : s.other;
-  return s.replace(/\{(\w+)\}/g, (m, k) => (vars[k] !== undefined ? String(vars[k]) : m));
+  return s.replace(/\{(\w+)\}/g, (m: string, k: string) => (vars[k] !== undefined ? String(vars[k]) : m));
 }
 
-export const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+// For keys built at run time (error codes from the server and the like):
+// unknown ones come back as the key itself.
+export const tx = (key: string, vars?: Vars): string => t(key as Key, vars);
 
-const fmt = (opts) => new Intl.DateTimeFormat(LOCALES[lang], { timeZone: 'UTC', ...opts });
+export const cap = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
-const STYLES = {
+const fmt = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(LOCALES[lang], { timeZone: 'UTC', ...opts });
+
+export type DateStyle = 'long' | 'medium' | 'full' | 'monthShort';
+const STYLES: Record<DateStyle, Intl.DateTimeFormatOptions> = {
   long: { weekday: 'long', day: 'numeric', month: 'long' },
   medium: { weekday: 'short', day: 'numeric', month: 'short' },
   full: { day: 'numeric', month: 'long', year: 'numeric' },
   monthShort: { month: 'short' },
 };
 
-export function fmtDate(d, style = 'long') {
+export function fmtDate(d: string, style: DateStyle = 'long'): string {
   return fmt(STYLES[style] ?? STYLES.long).format(toTime(d));
 }
 
-export function fmtRange(start, end) {
+export function fmtRange(start: string, end: string): string {
   const f = fmt(STYLES.full);
   if (start === end) return f.format(toTime(start));
   try {
@@ -575,25 +591,25 @@ export function fmtRange(start, end) {
   }
 }
 
-export function monthTitle(y, m) {
+export function monthTitle(y: number, m: number): string {
   return cap(fmt({ month: 'long', year: 'numeric' }).format(Date.UTC(y, m, 1)));
 }
 
-export const weekdayShort = () => WEEKDAYS[lang];
+export const weekdayShort = (): string[] => WEEKDAYS[lang];
 
-export function weekdayLong() {
+export function weekdayLong(): string[] {
   const f = fmt({ weekday: 'long' });
   // 2024-01-01 was a Monday.
   return Array.from({ length: 7 }, (_, i) => f.format(Date.UTC(2024, 0, 1 + i)));
 }
 
-export function shortDate(d) {
+export function shortDate(d: string): string {
   const day = Number(d.slice(8));
   const month = Number(d.slice(5, 7));
   return lang === 'nb' ? `${day}.${month}.` : `${day}/${month}`;
 }
 
-export function durationLabel(min) {
+export function durationLabel(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
   const hu = lang === 'nb' ? 't' : 'h';
@@ -601,12 +617,13 @@ export function durationLabel(min) {
   return m ? `${h} ${hu} ${m} min` : `${h} ${hu}`;
 }
 
-export function slotLabel(key, slot) {
-  const { date, min } = parseKey(key);
-  return `${fmtDate(date, 'long')}, ${hhmm(min)}–${hhmm(min + slot)}`;
+export function slotLabel(key: string, slot: number): string {
+  const p = parseKey(key);
+  if (!p || p.min === null) return key;
+  return `${fmtDate(p.date, 'long')}, ${hhmm(p.min)}–${hhmm(p.min + slot)}`;
 }
 
-export function windowLabel(w) {
+export function windowLabel(w: Pick<TimeWindow, 'date' | 'start' | 'end'>): string {
   return `${fmtDate(w.date, 'long')}, ${hhmm(w.start)}–${hhmm(w.end)}`;
 }
 

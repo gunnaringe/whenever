@@ -1,0 +1,26 @@
+{
+  // Shared settings. Each source directory has its own tsconfig.json with the
+  // globals it may use: src/shared none, src/app the DOM, src/worker the
+  // Workers runtime (worker-configuration.d.ts from `wrangler types`), test
+  // Node. `npm run check` type-checks all of them; nothing is emitted, esbuild
+  // and wrangler compile, and Node runs the tests by stripping types.
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": ["es2023"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "isolatedModules": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true
+  }
+}

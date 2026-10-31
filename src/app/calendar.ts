@@ -6,7 +6,19 @@ import { monthTitle, weekdayShort, t } from './i18n.ts';
 
 // One block per month. Days inside [start, end] are rendered by dayHtml(date);
 // weekHtml(monday, weekNumber) renders the week-number cell.
-export function calendarHtml({ start, end, dayHtml, weekHtml, months = monthsBetween(start, end) }) {
+export function calendarHtml({
+  start,
+  end,
+  dayHtml,
+  weekHtml,
+  months = monthsBetween(start, end),
+}: {
+  start: string;
+  end: string;
+  dayHtml: (date: string) => string;
+  weekHtml?: (monday: string, week: number) => string;
+  months?: [number, number][];
+}): string {
   const names = weekdayShort();
   const blocks = months.map(([y, m]) => {
     const first = `${y}-${pad(m + 1)}-01`;
@@ -34,13 +46,18 @@ export function calendarHtml({ start, end, dayHtml, weekHtml, months = monthsBet
 //   next(el)        value a tap on el gives
 //   apply(el, v)    store v and update el
 //   done()          after a tap or a finished drag
-export function bindPaint(root, selector, { next, apply, done }) {
-  let drag = null;
+export function bindPaint<V>(
+  root: HTMLElement,
+  selector: string,
+  { next, apply, done }: { next: (el: HTMLButtonElement) => V; apply: (el: HTMLButtonElement, v: V) => void; done?: () => void },
+): void {
+  let drag: { value: V; seen: Set<HTMLButtonElement> } | null = null;
   let fromMouse = false;
-  const usable = (el) => el && root.contains(el) && !el.disabled;
+  const usable = (el: HTMLButtonElement | null): el is HTMLButtonElement => Boolean(el && root.contains(el) && !el.disabled);
+  const target = (e: Event) => (e.target as Element).closest<HTMLButtonElement>(selector);
 
   root.addEventListener('pointerdown', (e) => {
-    const el = e.target.closest(selector);
+    const el = target(e);
     if (!usable(el) || e.pointerType !== 'mouse' || e.button !== 0) return;
     e.preventDefault();
     drag = { value: next(el), seen: new Set([el]) };
@@ -59,14 +76,14 @@ export function bindPaint(root, selector, { next, apply, done }) {
 
   root.addEventListener('pointerover', (e) => {
     if (!drag) return;
-    const el = e.target.closest(selector);
+    const el = target(e);
     if (!usable(el) || drag.seen.has(el)) return;
     drag.seen.add(el);
     apply(el, drag.value);
   });
 
   root.addEventListener('click', (e) => {
-    const el = e.target.closest(selector);
+    const el = target(e);
     if (!usable(el)) return;
     if (fromMouse) return;
     apply(el, next(el));
