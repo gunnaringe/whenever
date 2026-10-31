@@ -190,9 +190,17 @@ input, select, textarea {
 }
 textarea { resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .75rem; }
-.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 .75rem; }
-@media (max-width: 560px) { .grid4 { grid-template-columns: 1fr 1fr; } }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 .75rem; }
+.grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 .75rem; }
+@media (max-width: 560px) { .grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Date inputs have a wide built-in minimum; let them fit the column. */
+.grid2 input, .grid4 select { min-width: 0; }
+
+.fold > summary { display: inline-flex; align-items: center; gap: .4rem; margin: .1rem 0 .75rem; color: var(--accent); font-weight: 600; cursor: pointer; list-style: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "+"; display: inline-grid; place-items: center; width: 1.2rem; height: 1.2rem; border: 1.5px solid currentColor; border-radius: 50%; font-size: .9rem; line-height: 1; }
+.fold[open] > summary::before { content: "−"; }
+.note.warn { margin: .6rem 0 0; padding: .5rem .7rem; border-radius: 8px; background: var(--warn-bg); font-size: .875rem; }
 .err { color: var(--danger); font-weight: 600; }
 .count-line { margin: .75rem 0 0; color: var(--muted); font-weight: 600; font-size: .9rem; }
 
@@ -259,6 +267,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .seg.brush .b2 .sw { background: var(--maybe); }
 .toolbar { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: .6rem; }
 .toolbar .seg { margin: 0; }
+.toolbar .tb-end { display: flex; gap: .4rem; margin-left: auto; }
 
 .linkbox { display: flex; gap: .4rem; align-items: center; margin: .25rem 0 .75rem; }
 .linkbox input { flex: 1; min-width: 0; font-size: .875rem; font-family: ui-monospace, monospace; background: var(--soft); }
@@ -339,6 +348,11 @@ button.cal-day { cursor: pointer; }
 .cal-day.we:not(.on) { color: var(--accent); }
 .cal-day.hol::after { content: ""; position: absolute; bottom: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--danger); }
 .cal-day.ans { border: 2px solid var(--line); background: var(--card); }
+.ans-legend { display: flex; flex-wrap: wrap; gap: .3rem 1rem; margin: 0 0 .6rem; color: var(--muted); font-size: .85rem; }
+.ans-legend span { display: inline-flex; align-items: center; gap: .35rem; }
+.ans-legend .sw { width: .95rem; height: .95rem; border-radius: 4px; border: 2px solid var(--line); background: var(--card); }
+.ans-legend .sw.a1 { background: var(--yes); border-color: var(--yes); }
+.ans-legend .sw.a2 { background: repeating-linear-gradient(135deg, var(--maybe) 0 3px, var(--maybe-soft) 3px 5px); border-color: var(--maybe); }
 .cal-day.ans.a1 { background: var(--yes); border-color: var(--yes); color: var(--yes-ink); font-weight: 700; }
 .cal-day.ans.a2 { background: repeating-linear-gradient(135deg, var(--maybe) 0 6px, var(--maybe-soft) 6px 10px); border-color: var(--maybe); color: var(--maybe-ink); font-weight: 700; }
 .cal-day.res {
@@ -354,9 +368,12 @@ button.cal-day { cursor: pointer; }
 
 /* --- Time grid -------------------------------------------------------------------- */
 
-.tg-nav { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .5rem; font-weight: 600; }
-.tg-nav small { color: var(--muted); font-weight: 400; }
+.tg-weeks { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .6rem; }
+.tg-weeks .chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.tg-weeks .dot { display: none; width: .45rem; height: .45rem; border-radius: 50%; background: var(--yes); box-shadow: 0 0 0 1.5px var(--card); }
+.tg-weeks .marked .dot { display: inline-block; }
 .tg {
+  -webkit-touch-callout: none;
   display: grid;
   grid-template-columns: 3rem repeat(var(--cols), minmax(0, 1fr));
   grid-auto-rows: var(--rowh);
@@ -366,7 +383,10 @@ button.cal-day { cursor: pointer; }
   border-radius: 8px;
 }
 .tg:focus-visible { outline-offset: 4px; }
-.tg-corner, .tg-day { grid-row: 1; height: auto; }
+/* The day names stay in view while the grid scrolls past. */
+.tg-corner, .tg-day { grid-row: 1; height: auto; position: sticky; top: 0; z-index: 2; background: var(--card); }
+/* No background on the corner: the first time label reaches up into it. */
+.tg > .tg-corner { background: transparent; }
 .tg > .tg-corner { grid-column: 1; }
 .tg-day { display: flex; align-items: stretch; padding-bottom: 4px; }
 .tg-day > * {
@@ -382,8 +402,9 @@ button.cal-day { cursor: pointer; }
   font: inherit;
   line-height: 1.15;
 }
-.tg-day button { cursor: pointer; }
+.tg-day button { cursor: pointer; border: 1px solid var(--line); background: var(--card); }
 .tg-day button:hover { background: var(--soft); }
+.tg-day .caret { width: 0; height: 0; margin-top: .15rem; border: .25rem solid transparent; border-top-color: var(--muted); border-bottom: 0; }
 .tg-day b { font-size: .8rem; text-transform: capitalize; }
 .tg-day small { font-size: .72rem; color: var(--muted); }
 /* the header row is taller than slot rows */
@@ -391,7 +412,7 @@ button.cal-day { cursor: pointer; }
 .tg-time { grid-column: 1; font-size: .7rem; line-height: 1; color: var(--muted); text-align: right; padding-right: .35rem; transform: translateY(-.4em); }
 .tg-cell { border-top: 1px dashed var(--line); background: var(--heat0); }
 .tg-cell.hour { border-top: 1px solid color-mix(in srgb, var(--muted) 45%, transparent); }
-.tg.paint .tg-cell { touch-action: none; cursor: pointer; }
+.tg.paint .tg-cell { touch-action: manipulation; cursor: pointer; }
 .tg-cell.v1 { background: var(--yes); border-top-color: color-mix(in srgb, var(--yes-ink) 25%, transparent); }
 .tg-cell.v2 { background: var(--maybe); border-top-color: color-mix(in srgb, var(--maybe-ink) 20%, transparent); }
 .tg-cell.na { background: repeating-linear-gradient(135deg, var(--na) 0 4px, transparent 4px 8px); cursor: default; }

@@ -46,11 +46,13 @@ async function dragCells(p, from, to) {
   await p.mouse.up();
 }
 
-// The same as a finger: synthetic touch pointer events (the handlers don't
-// care about the source, the CSS touch-action decides scrolling).
-async function touchDrag(p, from, to) {
+// The same as a finger: synthetic touch pointer events. A finger has to hold
+// still for a moment before it paints (hold = false: a swipe, which the
+// grid leaves to the browser for scrolling). These events never scroll the
+// page; real touch scrolling is checked by hand (see CLAUDE.md).
+async function touchDrag(p, from, to, hold = true) {
   await p.evaluate(
-    ([f, t]) => {
+    async ([f, t, hold]) => {
       const el = (k) => document.querySelector(`.tg-cell[data-k="${k}"]`);
       const at = (e) => {
         const r = e.getBoundingClientRect();
@@ -58,10 +60,11 @@ async function touchDrag(p, from, to) {
       };
       const opts = { bubbles: true, pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0 };
       el(f).dispatchEvent(new PointerEvent('pointerdown', { ...opts, ...at(el(f)) }));
+      if (hold) await new Promise((r) => setTimeout(r, 450));
       el(t).dispatchEvent(new PointerEvent('pointermove', { ...opts, ...at(el(t)) }));
-      el(t).dispatchEvent(new PointerEvent('pointerup', { ...opts, ...at(el(t)) }));
+      el(t).dispatchEvent(new PointerEvent(hold ? 'pointerup' : 'pointercancel', { ...opts, ...at(el(t)) }));
     },
-    [from, to],
+    [from, to, hold],
   );
 }
 
@@ -71,6 +74,7 @@ await admin.goto(`${BASE}/`);
 await shot(admin, '01-home');
 await admin.click('a[href="/new"]');
 await admin.fill('form [name=name]', 'Julebord 2026');
+await admin.click('#ev-form .fold summary'); // description and place are folded away
 await admin.fill('#ev-form [name=description]', 'Middag og quiz. Svar innen fredag!');
 await admin.fill('[name=location]', 'Kantina');
 await admin.fill('[name=start]', '2026-11-16');
@@ -101,6 +105,11 @@ const kari = await page();
 await kari.goto(eventUrl);
 await kari.click('[data-act="answer"]');
 await kari.fill('form [name=name]', 'Kari Nordmann');
+check(
+  await kari.evaluate(() => document.querySelector('#pick-area').getBoundingClientRect().top < document.querySelector('#answer-form').getBoundingClientRect().top),
+  'the days come before the name fields',
+);
+await kari.click('#answer-form .fold summary'); // email is folded away
 await kari.fill('form [name=email]', 'kari@example.no');
 await kari.fill('form [name=comment]', 'Helst fredag');
 for (const d of ['2026-11-20', '2026-11-27', '2026-11-28', '2026-12-04']) await day(kari, d).click();
@@ -190,12 +199,13 @@ const boss = await page({ mobile: false });
 await boss.goto(`${BASE}/new`);
 await boss.fill('form [name=name]', 'Planleggingsmøte');
 await boss.check('[name=mode][value=times]');
+check((await boss.locator('#f-cal .cal-day.pick.on').count()) === 10, 'times mode starts with two weeks of weekdays');
 await boss.fill('[name=start]', '2026-11-16');
 await boss.fill('[name=end]', '2026-11-22');
 await boss.locator('[name=end]').dispatchEvent('change');
+check((await boss.locator('#f-cal .cal-day.pick.we.on').count()) === 0, 'a longer range keeps weekends off');
 await boss.selectOption('[name=dayStart]', '480');
 await boss.selectOption('[name=dayEnd]', '1080');
-await boss.click('[data-act="sel-group"][data-g="weekends"]');
 await boss.click('[data-act="preset"][data-p="work"]');
 check((await boss.locator('#f-grid .tg-cell.v1').count()) === 5 * 16, 'working hours preset: 5 days x 16 slots');
 await dragCells(boss, '2026-11-16T08:00', '2026-11-17T08:30'); // add 08:00-09:00 on Mon+Tue
@@ -217,7 +227,11 @@ for (const [name, from, to, maybeFrom, maybeTo] of [
   await pp.goto(timesUrl);
   await pp.click('[data-act="answer"]');
   await pp.fill('form [name=name]', name);
-  // Phones show 7 days per page; all five days fit.
+  // Phones show a week per page; all five days fit.
+  if (name === 'Anne') {
+    await touchDrag(pp, from, to, false);
+    check((await pp.locator('#pick-area .tg-cell.v1').count()) === 0, 'a swipe without holding paints nothing');
+  }
   await touchDrag(pp, from, to);
   if (maybeFrom) {
     await pp.click('[data-act="ans-brush"][data-b="2"]');

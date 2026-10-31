@@ -88,13 +88,33 @@ transforming (enums, namespaces, parameter properties) is off
   `#edit`. Clicks go through `data-act` delegation to the `actions` map.
   The overview polls every 30 s and on tab focus, only while it's the
   visible view and no dialog is open (`refreshIfIdle`).
-- **Painting:** `TimeGrid` uses pointer events with `touch-action: none` on
-  cells, so a finger paints a rectangle (the first cell decides paint or
-  erase); the cell under the pointer comes from the grid geometry
-  (`track()`), not `elementFromPoint`, and dragging near the window edge
-  auto-scrolls. The calendar (`bindPaint`) drag-paints with a mouse and
-  taps on touch, so the page still scrolls. Calendar days are buttons; the
-  time grid takes arrow keys + Space.
+- **Painting:** `TimeGrid` paints a rectangle (the first cell decides
+  paint or erase). A mouse paints at once. A finger scrolls the page as
+  usual (`touch-action: manipulation`): a tap toggles one cell, and holding
+  a cell for `HOLD_MS` starts the rectangle, after which `touchmove` is
+  cancelled so the page stays put. Never go back to `touch-action: none`:
+  the grid covers most of a phone screen and the page couldn't be scrolled.
+  The cell under the pointer comes from the grid geometry (`track()`), not
+  `elementFromPoint`, and dragging near the window edge auto-scrolls. The
+  smoke test's synthetic events can't scroll, so after touching this, check
+  real touch over CDP (`Input.dispatchTouchEvent`): a swipe scrolls and
+  paints nothing, hold-and-drag paints and doesn't scroll, a tap toggles.
+  The calendar (`bindPaint`) drag-paints with a mouse and taps on touch.
+  Calendar days are buttons; the time grid takes arrow keys + Space.
+- **Time grid pages** are ISO weeks (`weekPages`), two side by side when
+  the grid is at least `WIDE` px, picked with week buttons (a dot = something
+  marked there). The day names are sticky; in paint mode they open the
+  whole-day menu. The event form warns when participants would page
+  through more than two weeks.
+- **New-event defaults:** dates mode offers today + 27 days; times mode
+  two weeks of weekdays, 9 to 17 (`modeDefaults`). Switching mode resets
+  to that mode's defaults only while the days and times are untouched
+  (`Draft.shaped`).
+- **Unsaved changes:** `Draft.dirty` / `AnswerDraft.dirty`. In-app links,
+  Back and Cancel ask (`leaveOk`), closing the tab triggers
+  `beforeunload`, and the browser's back button keeps the form in memory
+  (`app.kept`) until its page is opened again. Clear `dirty` before
+  navigating after a successful save.
 - **i18n:** `STRINGS.nb` / `STRINGS.en`, same keys, plurals as
   `{ one, other }` (tests check parity, that literal `t('…')` keys exist and
   that every API error code has an `err.*` string). User text always goes

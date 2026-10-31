@@ -13,7 +13,7 @@ import type { Stored } from './store.ts';
 import { $, $opt, $$, esc, icon, toast, ask, menu, dialog, copyText, shareUrl, qrSvg } from './ui.ts';
 import type { MenuItem } from './ui.ts';
 import { calendarHtml, bindPaint } from './calendar.ts';
-import { TimeGrid } from './timegrid.ts';
+import { TimeGrid, weekPages } from './timegrid.ts';
 
 type Route = { page: 'home' } | { page: 'new' } | { page: 'missing' } | { page: 'event'; id: string; token: string | null };
 type Sub = { kind: 'overview' } | { kind: 'edit' } | { kind: 'answer'; pid: string | null };
@@ -36,6 +36,8 @@ interface Draft extends M.DayWindow {
   times: Set<string>;
   pattern: Set<number> | null; // times a newly added day gets (null = all)
   rangeError: string | null;
+  dirty: boolean; // changed since it was opened or saved
+  shaped: boolean; // days or times changed by hand: keep them when the mode changes
 }
 
 // The answer editor's state while it is open.
@@ -69,6 +71,9 @@ const app: {
   pushedSub: boolean;
   renders: number;
   busy: boolean;
+  // An unsaved form left with the browser's back button, given back when
+  // its page is opened again.
+  kept: { where: string; draft: Draft | null; answer: AnswerDraft | null } | null;
 } = {
   route: null,
   where: null,
@@ -87,6 +92,7 @@ const app: {
   pushedSub: false,
   renders: 0,
   busy: false,
+  kept: null,
 };
 
 // The current event page, view, form and answer. Code that uses them only
@@ -109,10 +115,28 @@ function answer(): AnswerDraft {
   return app.answer;
 }
 
+// An open event form or answer editor with changes that aren't saved.
+function unsaved(): boolean {
+  return Boolean(app.draft?.dirty || app.answer?.dirty);
+}
+
+// Before leaving a page with unsaved changes. True = go ahead (and drop them).
+async function leaveOk(): Promise<boolean> {
+  if (!unsaved()) return true;
+  if (!(await ask(t('discardQ'), { ok: t('discard'), danger: true }))) return false;
+  app.draft = null;
+  app.answer = null;
+  app.kept = null;
+  return true;
+}
+
 // el.dataset[k], '' if missing.
 const data = (el: HTMLElement, k: string): string => el.dataset[k] ?? '';
 // A form control by name (form.elements.namedItem).
 const control = <T = HTMLInputElement>(form: HTMLFormElement, name: string): T => form.elements.namedItem(name) as T;
+
+// A finger is the main pointer (phones, tablets): painting starts with a hold.
+const touch = () => matchMedia('(pointer: coarse)').matches;
 
 const eventUrl = (id: string) => `${location.origin}/e/${id}`;
 const linkUrl = (id: string, token: string | null) => `${location.origin}/e/${id}/${token}`;
@@ -193,11 +217,11 @@ function paint(inner: string): void {
 const field = (name: string, label: string, control: string, hint = '') =>
   `<label class="field" data-field="${name}"><span class="label">${esc(label)}</span>${control}${hint ? `<small class="hint">${esc(hint)}</small>` : ''}</label>`;
 
-const linkBox = (url: string, { share = false, qr = false, label = t('link'), title = '' } = {}) => `
+const linkBox = (url: string, { share = false, qr = false, label = t('link'), title = '', primary = false } = {}) => `
   <div class="linkbox">
     <input readonly value="${esc(url)}" aria-label="${esc(label)}" data-select>
     <button type="button" class="btn small" data-act="copy" data-url="${esc(url)}">${icon('copy')}${esc(t('copy'))}</button>
-    ${share ? `<button type="button" class="btn small" data-act="share" data-url="${esc(url)}" data-title="${esc(title)}">${icon('share')}${esc(t('share'))}</button>` : ''}
+    ${share ? `<button type="button" class="btn small${primary ? ' primary' : ''}" data-act="share" data-url="${esc(url)}" data-title="${esc(title)}">${icon('share')}${esc(t('share'))}</button>` : ''}
     ${qr ? `<button type="button" class="btn small" data-act="qr" data-url="${esc(url)}" aria-label="${esc(t('qrTitle'))}">${icon('qr')}</button>` : ''}
   </div>`;
 
@@ -216,9 +240,14 @@ async function render(): Promise<void> {
   document.documentElement.lang = getLang();
   const where = [r.page, r.page === 'event' ? r.id : '', r.page === 'event' ? r.token : '', s.kind, s.kind === 'answer' ? s.pid : ''].join('|');
   if (where !== app.where) {
+    if (app.where && unsaved()) app.kept = { where: app.where, draft: app.draft, answer: app.answer };
     app.where = where;
     app.draft = null;
     app.answer = null;
+    if (app.kept?.where === where) {
+      ({ draft: app.draft, answer: app.answer } = app.kept);
+      app.kept = null;
+    }
     app.pick = null;
     window.scrollTo(0, 0);
   }
@@ -344,7 +373,20 @@ function newDraft(): Draft {
     times: new Set(),
     pattern: null,
     rangeError: null,
+    dirty: false,
+    shaped: false,
   };
+}
+
+// A new event's days and times for a mode. Times start smaller: two weeks of
+// weekdays, 9 to 17, which participants can answer without paging much.
+function modeDefaults(d: Draft, mode: M.Mode): void {
+  d.start = M.localToday();
+  d.end = M.addDays(d.start, mode === 'times' ? 13 : 27);
+  const days = M.dateRange(d.start, d.end);
+  d.dates = new Set(mode === 'times' ? days.filter((x) => !M.isWeekend(x)) : days);
+  d.times = new Set();
+  d.pattern = mode === 'times' ? marks(...PRESETS.work) : null;
 }
 
 function draftFromView(v: M.View): Draft {
@@ -367,6 +409,7 @@ function draftFromView(v: M.View): Draft {
   } else {
     d.dates = new Set(ev.options);
   }
+  d.shaped = true;
   return d;
 }
 
@@ -501,8 +544,11 @@ function renderForm(v: M.View | null): void {
       <section class="card">
         <h2>${esc(t('aboutEvent'))}</h2>
         ${field('name', `${t('eventName')} *`, `<input name="name" maxlength="${M.LIMITS.name}" required value="${esc(d.name)}" placeholder="${esc(t('eventNamePh'))}" autocomplete="off">`)}
-        ${field('description', t('descriptionOptional'), `<textarea name="description" rows="3" maxlength="${M.LIMITS.description}">${esc(d.description)}</textarea>`)}
-        ${field('location', t('locationOptional'), `<input name="location" maxlength="${M.LIMITS.location}" value="${esc(d.location)}" autocomplete="off">`)}
+        <details class="fold" ${d.description || d.location ? 'open' : ''}>
+          <summary>${esc(t('addDetails'))}</summary>
+          ${field('description', t('descriptionOptional'), `<textarea name="description" rows="3" maxlength="${M.LIMITS.description}">${esc(d.description)}</textarea>`)}
+          ${field('location', t('locationOptional'), `<input name="location" maxlength="${M.LIMITS.location}" value="${esc(d.location)}" autocomplete="off">`)}
+        </details>
       </section>
       <section class="card">
         <h2>${esc(t('whatToFind'))}</h2>
@@ -531,17 +577,15 @@ function renderForm(v: M.View | null): void {
       </section>
       <section class="card" id="times-card" ${d.mode === 'times' ? '' : 'hidden'}>
         <h2>${esc(t('possibleTimes'))}</h2>
-        <p class="muted">${esc(t('possibleTimesHint'))}</p>
+        <p class="muted">${esc(t(touch() ? 'possibleTimesHintTouch' : 'possibleTimesHint'))}</p>
         <div class="chip-row">${(Object.keys(PRESETS) as Preset[]).map((p) => `<button type="button" class="btn small" data-act="preset" data-p="${p}">${esc(t(`preset.${p}`))}</button>`).join('')}</div>
         <div id="f-grid"></div>
+        <p id="f-warn" class="note warn" hidden></p>
       </section>
       <section class="card">
         <h2>${esc(t('settings'))}</h2>
         ${check('maybe')}${check('openEdit')}${check('hidden')}${editing ? check('closed') : ''}
-      </section>
-      <section class="card">
-        <h2>${esc(t('yourEmailTitle'))}</h2>
-        ${field('email', t('emailOptional'), `<input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(d.email)}" autocomplete="email" inputmode="email">`, t('adminEmailHint'))}
+        ${field('email', t('yourEmailOptional'), `<input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(d.email)}" autocomplete="email" inputmode="email">`, t('adminEmailHint'))}
       </section>
       <p class="err" id="form-err" hidden></p>
       <div class="savebar">
@@ -561,6 +605,7 @@ function bindForm(): void {
     const el = e.target as HTMLInputElement;
     const n = el.name;
     if (n === 'name' || n === 'description' || n === 'location' || n === 'email') d[n] = el.value;
+    d.dirty = true;
   });
   // Enter in a text field shouldn't create the event by accident.
   form.addEventListener('keydown', (e) => {
@@ -569,6 +614,8 @@ function bindForm(): void {
   form.addEventListener('change', (e) => {
     const el = e.target as HTMLInputElement;
     const n = el.name;
+    d.dirty = true;
+    if (n === 'start' || n === 'end' || n === 'dayStart' || n === 'dayEnd' || n === 'slot') d.shaped = true;
     if (n === 'mode') setMode(el.value as M.Mode);
     else if (n === 'start' || n === 'end') changeRange(n);
     else if (n === 'dayStart' || n === 'dayEnd' || n === 'slot') changeWindow(n);
@@ -591,6 +638,7 @@ function bindForm(): void {
   bindPaint($('#f-cal'), '.cal-day[data-d]', {
     next: (el) => !d.dates.has(data(el, 'd')),
     apply: (el, on) => {
+      shaped();
       selectDates(d, [data(el, 'd')], on);
       el.classList.toggle('on', on);
       el.setAttribute('aria-pressed', String(on));
@@ -610,14 +658,27 @@ function showRangeError(err: string | null): void {
   el.textContent = err ? tx(`err.${err}`) : '';
 }
 
+// The organiser changed days or times by hand.
+function shaped(): void {
+  const d = draft();
+  d.shaped = true;
+  d.dirty = true;
+}
+
 function setMode(mode: M.Mode): void {
   const d = draft();
   d.mode = mode;
+  if (!d.shaped) {
+    modeDefaults(d, mode);
+    const form = $<HTMLFormElement>('#ev-form');
+    control(form, 'start').value = d.start;
+    control(form, 'end').value = d.end;
+  }
   if (mode === 'times') for (const date of d.dates) if (!hasTimes(d, date)) fillDate(d, date);
   showRangeError(rangeError(d.start, d.end, mode));
   $('#times-opts').hidden = mode !== 'times';
   $('#times-card').hidden = mode !== 'times';
-  refreshCount();
+  refreshDays();
   refreshTimes();
 }
 
@@ -722,6 +783,14 @@ function refreshCount(): void {
     if (empty) s += ` · ${t('nDaysNoTimes', { n: empty })}`;
   }
   $('#f-count').textContent = s;
+  // Participants answer one week at a time on a phone (see TimeGrid).
+  const warn = $opt('#f-warn');
+  if (warn) {
+    const withTimes = [...d.dates].filter((x) => hasTimes(d, x)).sort();
+    const weeks = d.mode === 'times' ? weekPages(withTimes).length : 0;
+    warn.hidden = weeks <= 2;
+    warn.textContent = weeks > 2 ? t('manyWeeks', { n: weeks }) : '';
+  }
 }
 
 function refreshTimes(): void {
@@ -738,6 +807,7 @@ function refreshTimes(): void {
     value: (k) => (draft().times.has(k) ? 1 : 0),
     brush: () => 1,
     onPaint: (keys, val) => {
+      shaped();
       const times = draft().times;
       for (const k of keys) {
         if (val) times.add(k);
@@ -757,6 +827,8 @@ async function dayMenu(date: string): Promise<void> {
     { id: 'copy', label: t('dayCopy'), hint: t('dayCopyHint') },
     { id: 'remove', label: t('dayRemove'), danger: true },
   ]);
+  if (r === '') return;
+  shaped();
   const mins = M.daySlots(d);
   if (r === 'all') setDateTimes(d, date, mins);
   else if (r === 'clear') setDateTimes(d, date, []);
@@ -773,6 +845,7 @@ async function dayMenu(date: string): Promise<void> {
 }
 
 function applyPreset(p: Preset): void {
+  shaped();
   const d = draft();
   const [from, to] = PRESETS[p];
   d.pattern = p === 'all' ? null : marks(from, to);
@@ -783,6 +856,7 @@ function applyPreset(p: Preset): void {
 }
 
 function selectGroup(list: string[]): void {
+  shaped();
   const d = draft();
   selectDates(d, list, M.groupState(d.dates, list) !== 'all');
   refreshDays();
@@ -820,12 +894,14 @@ async function submitForm(): Promise<void> {
     if (v) {
       const { id, token } = here();
       const { view } = await api<{ view: M.View }>('PUT', `/events/${id}`, { token, body: { event: r.event, email: em.email } });
+      d.dirty = false;
       setView(view);
       toast(t('saved'));
       closeSub();
     } else {
       const res = await api<M.Created>('POST', '/events', { body: { event: r.event, email: em.email } });
       store.put(res.id, { name: r.event.name, admin: res.token });
+      d.dirty = false;
       app.flash = { kind: 'created' };
       setView(res.view, res.id, res.token);
       go(`/e/${res.id}/${res.token}`, true);
@@ -884,12 +960,16 @@ function renderOverview(v: M.View): void {
   const { id } = here();
   document.title = `${ev.name} · ${t('appName')}`;
   const stored = store.get(id);
+  // Just created: sharing the link is the next thing to do.
+  const created = app.flash?.kind === 'created';
+  const share = v.role === 'admin' ? shareHtml(v) : '';
   paint(`
     ${flashHtml()}
     ${noticesHtml(v, stored)}
     ${headHtml(v)}
+    ${created ? share : ''}
     ${actionsHtml(v)}
-    ${v.role === 'admin' ? shareHtml(v) : ''}
+    ${created ? '' : share}
     ${resultsHtml(v)}
     ${peopleHtml(v, stored)}
     <p class="muted small center">${esc(t('expiresNote', { date: fmtDate(M.addDays(ev.end, M.RETENTION_DAYS), 'full') }))}</p>`);
@@ -958,7 +1038,7 @@ function actionsHtml(v: M.View): string {
     return `<section class="card role">
       <div class="role-text"><b>${esc(t('youAreAdmin'))}</b><p class="muted">${esc(t('adminHint'))}</p></div>
       <div class="row wrap">
-        ${add ? `<button type="button" class="btn primary" data-act="answer">${icon('plus')}${esc(t('addAnswers'))}</button>` : ''}
+        ${add ? `<button type="button" class="btn${app.flash?.kind === 'created' ? '' : ' primary'}" data-act="answer">${icon('plus')}${esc(t('addAnswers'))}</button>` : ''}
         <button type="button" class="btn" data-act="edit-event">${icon('edit')}${esc(t('editEvent'))}</button>
         <button type="button" class="btn" data-act="toggle-closed">${icon('lock')}${esc(t(ev.settings.closed ? 'reopen' : 'close'))}</button>
         <button type="button" class="btn" data-act="admin-more" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('dots')}</button>
@@ -968,7 +1048,7 @@ function actionsHtml(v: M.View): string {
   if (v.role === 'participant') {
     const me = v.people.find((p) => p.id === v.me);
     return `<section class="card role">
-      <div class="role-text"><b>${esc(t('hiName', { name: me?.name ?? '' }))}</b><p class="muted">${esc(t('personalHint'))}</p></div>
+      <div class="role-text"><b>${esc(t('hiName', { name: me?.name ?? '' }))}</b>${app.flash?.kind === 'savedNew' ? '' : `<p class="muted">${esc(t('personalHint'))}</p>`}</div>
       <div class="row wrap">
         ${M.canEdit(who, ev.settings, v.me) ? `<button type="button" class="btn primary" data-act="answer">${icon('edit')}${esc(t('editYourAnswers'))}</button>` : ''}
         <button type="button" class="btn" data-act="copy" data-url="${esc(linkUrl(id, token))}">${icon('copy')}${esc(t('copyMyLink'))}</button>
@@ -989,7 +1069,7 @@ function shareHtml(v: M.View): string {
   return `<details class="card share" ${open ? 'open' : ''}>
     <summary><h2>${icon('share')}${esc(t('shareTitle'))}</h2></summary>
     <p class="muted">${esc(t('shareHint'))}</p>
-    ${linkBox(eventUrl(id), { share: true, qr: true, label: t('eventLink'), title: v.event.name })}
+    ${linkBox(eventUrl(id), { share: true, qr: true, label: t('eventLink'), title: v.event.name, primary: app.flash?.kind === 'created' })}
     <h3>${icon('key')}${esc(t('adminLinkTitle'))}</h3>
     <p class="muted">${esc(t('adminLinkHint'))}</p>
     ${linkBox(linkUrl(id, token), { label: t('adminLinkTitle') })}
@@ -1068,10 +1148,10 @@ function resultsBody(v: M.View): string {
   const opts = new Set(ev.options);
   const ds = M.optionDates(ev);
   const top = new Set(M.bestOptions(ev, v.people, 1).map((b) => b.key));
+  // From the first to the last offered day: weeks without any are left out.
   return calendarHtml({
-    start: ev.start,
-    end: ev.end,
-    months: M.monthsBetween(ds[0], ds[ds.length - 1]),
+    start: ds[0],
+    end: ds[ds.length - 1],
     dayHtml: (x) => {
       if (!opts.has(x)) return `<span class="cal-day off">${Number(x.slice(8))}</span>`;
       const g = at(x);
@@ -1216,24 +1296,42 @@ function renderAnswer(v: M.View, pid: string | null): void {
   const a = answer();
   const title = target ? (own ? t('editYourAnswers') : t('editAnswersOf', { name: target.name })) : t('addYourAnswers');
   document.title = `${title} · ${ev.name}`;
-  const hint = ev.mode === 'dates' ? (ev.settings.maybe ? 'answerDatesHintMaybe' : 'answerDatesHint') : ev.settings.maybe ? 'answerTimesHintMaybe' : 'answerTimesHint';
+  const hint: Key =
+    ev.mode === 'dates'
+      ? ev.settings.maybe
+        ? 'answerDatesHintMaybe'
+        : 'answerDatesHint'
+      : touch()
+        ? ev.settings.maybe
+          ? 'answerTimesHintTouchMaybe'
+          : 'answerTimesHintTouch'
+        : ev.settings.maybe
+          ? 'answerTimesHintMaybe'
+          : 'answerTimesHint';
   paint(`
     <a class="back" href="${esc(location.pathname)}" data-act="cancel-answer">${icon('back')}${esc(t('back'))}</a>
     <h1>${esc(title)}</h1>
     <p class="muted sub">${esc(ev.name)}</p>
-    <section class="card">
-      <form id="answer-form" novalidate>
-        ${field('name', `${t('yourName')} *`, `<input name="name" required maxlength="${M.LIMITS.person}" value="${esc(a.name)}" autocomplete="name">`)}
-        ${own ? field('email', t('emailOptional'), `<input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(a.email)}" autocomplete="email" inputmode="email">`, t('emailHint')) : ''}
-        ${field('comment', t('commentOptional'), `<input name="comment" maxlength="${M.LIMITS.comment}" value="${esc(a.comment)}" placeholder="${esc(t('commentPh'))}">`)}
-      </form>
-    </section>
     <section class="card picker">
       <h2>${esc(t(ev.mode === 'dates' ? 'whichDays' : 'whichTimes'))}</h2>
       <p class="muted">${esc(t(hint))}</p>
       <div class="toolbar" id="pick-tools">${pickerToolbar(v)}</div>
       <div id="pick-area"></div>
       <p id="pick-sum" class="count-line" aria-live="polite"></p>
+    </section>
+    <section class="card">
+      <form id="answer-form" novalidate>
+        ${field('name', `${t('yourName')} *`, `<input name="name" required maxlength="${M.LIMITS.person}" value="${esc(a.name)}" autocomplete="name">`)}
+        ${field('comment', t('commentOptional'), `<input name="comment" maxlength="${M.LIMITS.comment}" value="${esc(a.comment)}" placeholder="${esc(t('commentPh'))}">`)}
+        ${
+          own
+            ? `<details class="fold" ${a.email ? 'open' : ''}>
+                <summary>${esc(t('addEmail'))}</summary>
+                ${field('email', t('emailOptional'), `<input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(a.email)}" autocomplete="email" inputmode="email">`, t('emailHint'))}
+              </details>`
+            : ''
+        }
+      </form>
     </section>
     <div class="savebar">
       <button type="button" class="btn" data-act="cancel-answer">${esc(t('cancel'))}</button>
@@ -1271,9 +1369,11 @@ function pickerToolbar(v: M.View): string {
       .map(([b, k]) => `<button type="button" role="radio" aria-checked="${a.brush === b}" class="b${b}${a.brush === b ? ' on' : ''}" data-act="ans-brush" data-b="${b}"><i class="sw"></i>${esc(t(k))}</button>`)
       .join('')}</div>`);
   }
-  parts.push('<span class="grow"></span>');
-  parts.push(`<button type="button" class="btn small" data-act="ans-all">${esc(t('yesToAll'))}</button>`);
-  parts.push(`<button type="button" class="btn small" data-act="ans-clear">${esc(t('clearAll'))}</button>`);
+  // Kept together, so on a narrow screen they wrap as a pair.
+  parts.push(`<span class="tb-end">
+    <button type="button" class="btn small" data-act="ans-all">${esc(t('yesToAll'))}</button>
+    <button type="button" class="btn small" data-act="ans-clear">${esc(t('clearAll'))}</button>
+  </span>`);
   return parts.join('');
 }
 
@@ -1322,16 +1422,18 @@ function mountPicker(v: M.View): void {
     const opts = new Set(ev.options);
     const ds = M.optionDates(ev);
     const label = (x: string, val: number) => `${fmtDate(x, 'long')}: ${answerWord(val)}`;
-    area.innerHTML = calendarHtml({
-      start: ev.start,
-      end: ev.end,
-      months: M.monthsBetween(ds[0], ds[ds.length - 1]),
+    const legend = ([[M.YES, 'canCome'], ...(ev.settings.maybe ? [[M.MAYBE, 'ifNeedBe']] : []), [0, 'cannot']] as [number, Key][])
+      .map(([val, key]) => `<span><i class="sw a${val}"></i>${esc(t(key))}</span>`)
+      .join('');
+    area.innerHTML = `<p class="ans-legend">${legend}</p>${calendarHtml({
+      start: ds[0],
+      end: ds[ds.length - 1],
       dayHtml: (x) => {
         if (!opts.has(x)) return `<span class="cal-day off">${Number(x.slice(8))}</span>`;
         const val = a.answers[x] || 0;
         return `<button type="button" class="cal-day ans a${val}" data-d="${x}" aria-label="${esc(label(x, val))}">${Number(x.slice(8))}</button>`;
       },
-    });
+    })}`;
     bindPaint(area, '.cal-day[data-d]', {
       next: (el) => cycle(a.answers[data(el, 'd')] || 0),
       apply: (el, val) => {
@@ -1555,15 +1657,19 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
     store.forget(data(b, 'id'));
     render();
   },
-  'close-sub': () => closeSub(),
+  'close-sub': async () => {
+    if (await leaveOk()) closeSub();
+  },
 
   // Event form
   'sel-all': () => {
+    shaped();
     selectDates(draft(), rangeDays(), true);
     refreshDays();
     refreshTimes();
   },
   'sel-none': () => {
+    shaped();
     selectDates(draft(), rangeDays(), false);
     refreshDays();
     refreshTimes();
@@ -1636,7 +1742,8 @@ document.addEventListener('click', (e) => {
   const a = target.closest('a[data-link]');
   if (a && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
     e.preventDefault();
-    go(a.getAttribute('href') ?? '/');
+    const href = a.getAttribute('href') ?? '/';
+    leaveOk().then((ok) => ok && go(href));
     return;
   }
   const b = target.closest<HTMLElement>('[data-act]');
@@ -1645,6 +1752,11 @@ document.addEventListener('click', (e) => {
   if (!fn) return;
   e.preventDefault();
   fn(b);
+});
+
+// Closing or reloading the tab with unsaved changes: the browser asks.
+window.addEventListener('beforeunload', (e) => {
+  if (unsaved()) e.preventDefault();
 });
 
 document.addEventListener('focusin', (e) => {

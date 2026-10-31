@@ -5,7 +5,8 @@ import { pad, weekday, isoWeek, addDays, monthsBetween } from '../shared/model.t
 import { monthTitle, weekdayShort, t } from './i18n.ts';
 
 // One block per month. Days inside [start, end] are rendered by dayHtml(date);
-// weekHtml(monday, weekNumber) renders the week-number cell.
+// weekHtml(monday, weekNumber) renders the week-number cell. Weeks with no
+// day in [start, end] are left out.
 export function calendarHtml({
   start,
   end,
@@ -27,6 +28,7 @@ export function calendarHtml({
     html += `<span class="cal-h wk" aria-hidden="true">${t('weekShort')}</span>`;
     html += names.map((n, i) => `<span class="cal-h${i >= 5 ? ' we' : ''}">${n}</span>`).join('');
     for (let mon = addDays(first, -weekday(first)); mon <= last; mon = addDays(mon, 7)) {
+      if (addDays(mon, 6) < start || mon > end) continue;
       html += weekHtml ? weekHtml(mon, isoWeek(mon)) : `<span class="cal-wk">${isoWeek(mon)}</span>`;
       for (let i = 0; i < 7; i++) {
         const d = addDays(mon, i);
