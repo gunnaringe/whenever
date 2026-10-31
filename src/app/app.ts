@@ -5,7 +5,7 @@
 // Sub-views of an event (hash): #answer, #answer=<pid>, #edit
 
 import * as M from '../shared/model.ts';
-import { t, tx, getLang, setLang, LANG_NAMES, fmtDate, fmtRange, slotLabel, windowLabel, weekdayShort, weekdayLong, durationLabel, cap } from './i18n.ts';
+import { t, tx, getLang, setLang, LANG_NAMES, fmtDate, fmtRange, monthName, slotLabel, windowLabel, weekdayShort, weekdayLong, durationLabel, cap } from './i18n.ts';
 import type { Key, Lang } from './i18n.ts';
 import { api, ApiError } from './api.ts';
 import * as store from './store.ts';
@@ -26,8 +26,6 @@ interface Draft extends M.DayWindow {
   description: string;
   location: string;
   mode: M.Mode;
-  start: string;
-  end: string;
   duration: number;
   tz: string;
   settings: M.Settings;
@@ -35,9 +33,8 @@ interface Draft extends M.DayWindow {
   dates: Set<string>;
   times: Set<string>;
   pattern: Set<number> | null; // times a newly added day gets (null = all)
-  rangeError: string | null;
+  until: string; // the calendar shows months up to this day
   dirty: boolean; // changed since it was opened or saved
-  shaped: boolean; // days or times changed by hand: keep them when the mode changes
 }
 
 // The answer editor's state while it is open.
@@ -353,15 +350,11 @@ function marks(from: number, to: number): Set<number> {
 }
 
 function newDraft(): Draft {
-  const start = M.localToday();
-  const end = M.addDays(start, 27);
   return {
     name: '',
     description: '',
     location: '',
     mode: 'dates',
-    start,
-    end,
     slot: 30,
     dayStart: 480,
     dayEnd: 1320,
@@ -369,24 +362,14 @@ function newDraft(): Draft {
     tz: browserTz(),
     settings: { ...M.DEFAULT_SETTINGS },
     email: '',
-    dates: new Set(M.dateRange(start, end)),
+    dates: new Set(),
     times: new Set(),
-    pattern: null,
-    rangeError: null,
+    // In times mode a picked day starts with working hours.
+    pattern: marks(...PRESETS.work),
+    // At least six weeks ahead, to the end of that month.
+    until: M.monthEnd(M.addDays(M.localToday(), 42)),
     dirty: false,
-    shaped: false,
   };
-}
-
-// A new event's days and times for a mode. Times start smaller: two weeks of
-// weekdays, 9 to 17, which participants can answer without paging much.
-function modeDefaults(d: Draft, mode: M.Mode): void {
-  d.start = M.localToday();
-  d.end = M.addDays(d.start, mode === 'times' ? 13 : 27);
-  const days = M.dateRange(d.start, d.end);
-  d.dates = new Set(mode === 'times' ? days.filter((x) => !M.isWeekend(x)) : days);
-  d.times = new Set();
-  d.pattern = mode === 'times' ? marks(...PRESETS.work) : null;
 }
 
 function draftFromView(v: M.View): Draft {
@@ -397,8 +380,6 @@ function draftFromView(v: M.View): Draft {
     description: ev.description,
     location: ev.location,
     mode: ev.mode,
-    start: ev.start,
-    end: ev.end,
     settings: { ...ev.settings },
     email: v.adminEmail ?? '',
   });
@@ -409,14 +390,24 @@ function draftFromView(v: M.View): Draft {
   } else {
     d.dates = new Set(ev.options);
   }
-  d.shaped = true;
+  if (ev.end > d.until) d.until = M.monthEnd(ev.end);
   return d;
 }
 
+// The days the event offers: the picked ones (in times mode, those with times).
+function offeredDays(d: Draft): string[] {
+  const days = [...d.dates].sort();
+  return d.mode === 'times' ? days.filter((x) => hasTimes(d, x)) : days;
+}
+
 // What the form would send (sanitizeEvent checks it like the server does).
+// The event's period is its first to its last offered day.
 function draftToEvent(d: Draft): Record<string, unknown> & { options: string[] } {
-  const ev = { name: d.name, description: d.description, location: d.location, mode: d.mode, start: d.start, end: d.end, settings: { ...d.settings } };
-  if (d.mode === 'dates') return { ...ev, options: [...d.dates].sort() };
+  const days = offeredDays(d);
+  const start = days[0] ?? M.localToday();
+  const end = days[days.length - 1] ?? start;
+  const ev = { name: d.name, description: d.description, location: d.location, mode: d.mode, start, end, settings: { ...d.settings } };
+  if (d.mode === 'dates') return { ...ev, options: days };
   return {
     ...ev,
     slot: d.slot,
@@ -426,6 +417,16 @@ function draftToEvent(d: Draft): Record<string, unknown> & { options: string[] }
     tz: d.tz,
     options: [...d.times].filter((k) => d.dates.has(k.slice(0, 10))).sort(),
   };
+}
+
+// Too long from the first to the last offered day?
+function spanError(d: Draft): string | null {
+  const days = offeredDays(d);
+  if (days.length < 2) return null;
+  const n = M.diffDays(days[0], days[days.length - 1]) + 1;
+  if (d.mode === 'times' && n > M.LIMITS.daysTimes) return 'rangeLongTimes';
+  if (n > M.LIMITS.daysDates) return 'rangeLong';
+  return null;
 }
 
 function hasTimes(d: Draft, date: string): boolean {
@@ -452,28 +453,6 @@ function selectDates(d: Draft, dates: Iterable<string>, on: boolean): void {
       if (d.mode === 'times' && !hasTimes(d, date)) fillDate(d, date);
     }
   }
-}
-
-function rangeError(start: string, end: string, mode: M.Mode): string | null {
-  if (!M.isDate(start) || !M.isDate(end) || end < start) return 'range';
-  const n = M.diffDays(start, end) + 1;
-  if (mode === 'times' && n > M.LIMITS.daysTimes) return 'rangeLongTimes';
-  if (n > M.LIMITS.daysDates) return 'rangeLong';
-  return null;
-}
-
-// Days leaving the range drop out; days joining it are selected unless every
-// day of that weekday was unselected (so "no weekends" survives a longer range).
-function setRange(d: Draft, start: string, end: string): void {
-  const oldDays = M.dateRange(d.start, d.end);
-  const old = new Set(oldDays);
-  const states = [0, 1, 2, 3, 4, 5, 6].map((wd) => M.weekdayState(d.dates, oldDays, wd));
-  const days = M.dateRange(start, end);
-  const inRange = new Set(days);
-  for (const x of [...d.dates]) if (!inRange.has(x)) d.dates.delete(x);
-  d.start = start;
-  d.end = end;
-  selectDates(d, days.filter((x) => !old.has(x) && states[M.weekday(x)] !== 'none'), true);
 }
 
 // New window or slot length: keep what was selected (resampled to the new
@@ -553,11 +532,6 @@ function renderForm(v: M.View | null): void {
       <section class="card">
         <h2>${esc(t('whatToFind'))}</h2>
         <div class="choice">${modeCard('dates')}${modeCard('times')}</div>
-        <div class="grid2">
-          ${field('start', t('earliest'), `<input type="date" name="start" value="${d.start}" required>`)}
-          ${field('end', t('latest'), `<input type="date" name="end" value="${d.end}" required>`)}
-        </div>
-        <p class="err" id="range-err" ${d.rangeError ? '' : 'hidden'}>${d.rangeError ? esc(tx(`err.${d.rangeError}`)) : ''}</p>
         <div id="times-opts" ${d.mode === 'times' ? '' : 'hidden'}>
           <div class="grid4">
             ${field('dayStart', t('fromHour'), `<select name="dayStart">${hourOptions(0, 23, d.dayStart)}</select>`)}
@@ -573,7 +547,9 @@ function renderForm(v: M.View | null): void {
         <p class="muted">${esc(t('possibleDaysHint'))}</p>
         <div id="f-chips"></div>
         <div id="f-cal"></div>
+        <button type="button" class="btn small" id="more-months" data-act="more-months">${icon('plus')}${esc(t('moreMonths'))}</button>
         <p id="f-count" class="count-line" aria-live="polite"></p>
+        <p class="err" id="range-err" hidden></p>
       </section>
       <section class="card" id="times-card" ${d.mode === 'times' ? '' : 'hidden'}>
         <h2>${esc(t('possibleTimes'))}</h2>
@@ -615,9 +591,7 @@ function bindForm(): void {
     const el = e.target as HTMLInputElement;
     const n = el.name;
     d.dirty = true;
-    if (n === 'start' || n === 'end' || n === 'dayStart' || n === 'dayEnd' || n === 'slot') d.shaped = true;
     if (n === 'mode') setMode(el.value as M.Mode);
-    else if (n === 'start' || n === 'end') changeRange(n);
     else if (n === 'dayStart' || n === 'dayEnd' || n === 'slot') changeWindow(n);
     else if (n === 'duration') d.duration = Number(el.value);
     else if (n === 'tz') d.tz = el.value;
@@ -638,7 +612,7 @@ function bindForm(): void {
   bindPaint($('#f-cal'), '.cal-day[data-d]', {
     next: (el) => !d.dates.has(data(el, 'd')),
     apply: (el, on) => {
-      shaped();
+      changed();
       selectDates(d, [data(el, 'd')], on);
       el.classList.toggle('on', on);
       el.setAttribute('aria-pressed', String(on));
@@ -651,52 +625,18 @@ function bindForm(): void {
   });
 }
 
-function showRangeError(err: string | null): void {
-  draft().rangeError = err;
-  const el = $('#range-err');
-  el.hidden = !err;
-  el.textContent = err ? tx(`err.${err}`) : '';
-}
-
 // The organiser changed days or times by hand.
-function shaped(): void {
-  const d = draft();
-  d.shaped = true;
-  d.dirty = true;
+function changed(): void {
+  draft().dirty = true;
 }
 
 function setMode(mode: M.Mode): void {
   const d = draft();
   d.mode = mode;
-  if (!d.shaped) {
-    modeDefaults(d, mode);
-    const form = $<HTMLFormElement>('#ev-form');
-    control(form, 'start').value = d.start;
-    control(form, 'end').value = d.end;
-  }
   if (mode === 'times') for (const date of d.dates) if (!hasTimes(d, date)) fillDate(d, date);
-  showRangeError(rangeError(d.start, d.end, mode));
   $('#times-opts').hidden = mode !== 'times';
   $('#times-card').hidden = mode !== 'times';
-  refreshDays();
-  refreshTimes();
-}
-
-function changeRange(which: 'start' | 'end'): void {
-  const d = draft();
-  const form = $<HTMLFormElement>('#ev-form');
-  const start = control(form, 'start').value;
-  let end = control(form, 'end').value;
-  // Moving the start past the end keeps the length of the range.
-  if (which === 'start' && M.isDate(start) && M.isDate(end) && end < start) {
-    end = M.addDays(start, Math.max(0, M.diffDays(d.start, d.end)));
-    control(form, 'end').value = end;
-  }
-  const err = rangeError(start, end, d.mode);
-  showRangeError(err);
-  if (err) return;
-  setRange(d, start, end);
-  refreshDays();
+  refreshCount();
   refreshTimes();
 }
 
@@ -720,53 +660,74 @@ function changeWindow(which: string): void {
   refreshTimes();
 }
 
+// The form calendar: from today (or an earlier picked day, when editing) to
+// the end of the last month shown. Past days can only be unpicked.
 function refreshDays(): void {
   const d = draft();
-  const hol = M.holidaysIn(d.start, d.end);
+  const today = M.localToday();
+  const first = [...d.dates].sort()[0];
+  const start = first && first < today ? first : today;
+  const hol = M.holidaysIn(start, d.until);
   $('#f-cal').innerHTML = calendarHtml({
-    start: d.start,
-    end: d.end,
+    start,
+    end: d.until,
     weekHtml: (mon, wk) => `<button type="button" class="cal-wk" data-act="week" data-mon="${mon}" title="${esc(t('toggleWeek', { n: wk }))}" aria-label="${esc(t('toggleWeek', { n: wk }))}">${wk}</button>`,
     dayHtml: (x) => {
       const on = d.dates.has(x);
+      if (x < today && !on) return `<span class="cal-day out">${Number(x.slice(8))}</span>`;
       const h = hol.get(x);
       const name = h ? tx(`holiday.${h}`) : '';
       return `<button type="button" class="cal-day pick${on ? ' on' : ''}${h ? ' hol' : ''}${M.isWeekend(x) ? ' we' : ''}" data-d="${x}" aria-pressed="${on}" aria-label="${esc(fmtDate(x, 'long'))}${name ? ` (${esc(name)})` : ''}"${name ? ` title="${esc(name)}"` : ''}>${Number(x.slice(8))}</button>`;
     },
   });
+  $('#more-months').hidden = d.until >= M.monthEnd(today, MAX_MONTHS);
   refreshChips();
   refreshCount();
 }
 
-function rangeDays(): string[] {
-  const d = draft();
-  return M.dateRange(d.start, d.end);
+// How far ahead the calendar goes: this month and MAX_MONTHS more.
+const MAX_MONTHS = 12;
+
+// What the quick buttons act on: every day shown, from today on.
+function scopeDays(): string[] {
+  return M.dateRange(M.localToday(), draft().until);
 }
 
 function groupDays(g: string): string[] {
-  const d = draft();
-  const days = rangeDays();
+  const days = scopeDays();
   if (g === 'weekdays') return days.filter((x) => !M.isWeekend(x));
   if (g === 'weekends') return days.filter(M.isWeekend);
   if (g === 'holidays') {
-    const hol = M.holidaysIn(d.start, d.end);
+    const hol = M.holidaysIn(days[0], days[days.length - 1]);
     return days.filter((x) => hol.has(x));
   }
   return days;
 }
 
+type Period = '2w' | '4w' | 'month';
+// The days a period button picks.
+function periodDays(p: Period): string[] {
+  const today = M.localToday();
+  if (p === 'month') return M.dateRange(M.monthStart(today, 1), M.monthEnd(today, 1));
+  return M.dateRange(today, M.addDays(today, p === '2w' ? 13 : 27));
+}
+
 function refreshChips(): void {
   const d = draft();
-  const days = rangeDays();
+  const days = scopeDays();
   const short = weekdayShort();
   const long = weekdayLong();
+  const nextMonth = M.monthStart(M.localToday(), 1);
   const chip = (attrs: string, label: string, state: M.ChipState, title: string) => `
     <button type="button" class="chip st-${state}" ${attrs} ${state === 'empty' ? 'disabled' : ''}
       aria-pressed="${state === 'all' ? 'true' : state === 'some' ? 'mixed' : 'false'}" title="${esc(title)}">${state === 'all' ? icon('check') : state === 'some' ? icon('minus') : ''}${esc(label)}</button>`;
+  const period = (p: Period, label: string) => `<button type="button" class="btn small" data-act="period" data-p="${p}" title="${esc(t('periodHint'))}">${esc(label)}</button>`;
   $('#f-chips').innerHTML = `
     <div class="chip-row">
-      <button type="button" class="btn small" data-act="sel-all">${esc(t('selAll'))}</button>
+      ${period('2w', t('period2w'))}${period('4w', t('period4w'))}${period('month', t('periodMonth', { month: monthName(nextMonth) }))}
       <button type="button" class="btn small" data-act="sel-none">${esc(t('selNone'))}</button>
+    </div>
+    <div class="chip-row">
       ${(['weekdays', 'weekends', 'holidays'] as const).map((g) => chip(`data-act="sel-group" data-g="${g}"`, t(g), M.groupState(d.dates, groupDays(g)), t(`${g}Hint`))).join('')}
     </div>
     <div class="chip-row wd">${short.map((n, wd) => chip(`data-act="sel-wd" data-wd="${wd}"`, n, M.weekdayState(d.dates, days, wd), t('weekdayHint', { day: long[wd] }))).join('')}</div>`;
@@ -774,22 +735,27 @@ function refreshChips(): void {
 
 function refreshCount(): void {
   const d = draft();
+  const offered = offeredDays(d);
   let s = t('nDays', { n: d.dates.size });
   if (d.mode === 'times') {
-    const valid = new Set(M.allKeys(d));
-    const n = draftToEvent(d).options.filter((k) => valid.has(k)).length;
+    const n = draftToEvent(d).options.length;
     s += ` · ${t('nSlots', { n })}`;
-    const empty = [...d.dates].filter((x) => !M.daySlots(d).some((m) => d.times.has(M.slotKey(x, m)))).length;
+    const empty = d.dates.size - offered.length;
     if (empty) s += ` · ${t('nDaysNoTimes', { n: empty })}`;
   }
+  if (offered.length) s += ` · ${fmtRange(offered[0], offered[offered.length - 1])}`;
   $('#f-count').textContent = s;
+  const err = spanError(d);
+  const errEl = $('#range-err');
+  errEl.hidden = !err;
+  errEl.textContent = err ? tx(`err.${err}`) : '';
   // Participants answer one week at a time on a phone (see TimeGrid).
   const warn = $opt('#f-warn');
   if (warn) {
-    const withTimes = [...d.dates].filter((x) => hasTimes(d, x)).sort();
-    const weeks = d.mode === 'times' ? weekPages(withTimes).length : 0;
-    warn.hidden = weeks <= 2;
-    warn.textContent = weeks > 2 ? t('manyWeeks', { n: weeks }) : '';
+    const weeks = d.mode === 'times' ? weekPages(offered).length : 0;
+    // Two weeks from a Saturday already touch three calendar weeks.
+    warn.hidden = weeks <= 3;
+    warn.textContent = weeks > 3 ? t('manyWeeks', { n: weeks }) : '';
   }
 }
 
@@ -807,7 +773,7 @@ function refreshTimes(): void {
     value: (k) => (draft().times.has(k) ? 1 : 0),
     brush: () => 1,
     onPaint: (keys, val) => {
-      shaped();
+      changed();
       const times = draft().times;
       for (const k of keys) {
         if (val) times.add(k);
@@ -828,7 +794,7 @@ async function dayMenu(date: string): Promise<void> {
     { id: 'remove', label: t('dayRemove'), danger: true },
   ]);
   if (r === '') return;
-  shaped();
+  changed();
   const mins = M.daySlots(d);
   if (r === 'all') setDateTimes(d, date, mins);
   else if (r === 'clear') setDateTimes(d, date, []);
@@ -845,7 +811,7 @@ async function dayMenu(date: string): Promise<void> {
 }
 
 function applyPreset(p: Preset): void {
-  shaped();
+  changed();
   const d = draft();
   const [from, to] = PRESETS[p];
   d.pattern = p === 'all' ? null : marks(from, to);
@@ -855,10 +821,12 @@ function applyPreset(p: Preset): void {
   refreshTimes();
 }
 
+// A quick button: if any of its days are picked it drops them, otherwise it
+// picks them all.
 function selectGroup(list: string[]): void {
-  shaped();
+  changed();
   const d = draft();
-  selectDates(d, list, M.groupState(d.dates, list) !== 'all');
+  selectDates(d, list, !list.some((x) => d.dates.has(x)));
   refreshDays();
   refreshTimes();
 }
@@ -877,8 +845,8 @@ async function submitForm(): Promise<void> {
     focus?.focus();
   };
   if (!d.name.trim()) return fail(t('err.name'), control(form, 'name'));
-  const re = rangeError(d.start, d.end, d.mode);
-  if (re) return fail(tx(`err.${re}`), control(form, 'start'));
+  const re = spanError(d);
+  if (re) return fail(tx(`err.${re}`));
   const r = M.sanitizeEvent(draftToEvent(d));
   if (!r.ok) return fail(tx(`err.${r.error}`));
   const em = M.cleanEmail(d.email);
@@ -1662,23 +1630,34 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   },
 
   // Event form
-  'sel-all': () => {
-    shaped();
-    selectDates(draft(), rangeDays(), true);
+  period: (b) => {
+    changed();
+    const d = draft();
+    const days = periodDays(data(b, 'p') as Period);
+    selectDates(d, [...d.dates], false);
+    selectDates(d, days, true);
+    const last = days[days.length - 1];
+    if (last > d.until) d.until = M.monthEnd(last);
     refreshDays();
     refreshTimes();
   },
+  'more-months': () => {
+    const d = draft();
+    d.until = M.monthEnd(d.until, 1);
+    refreshDays();
+  },
   'sel-none': () => {
-    shaped();
-    selectDates(draft(), rangeDays(), false);
+    changed();
+    const d = draft();
+    selectDates(d, [...d.dates], false);
     refreshDays();
     refreshTimes();
   },
   'sel-group': (b) => selectGroup(groupDays(data(b, 'g'))),
-  'sel-wd': (b) => selectGroup(rangeDays().filter((x) => M.weekday(x) === Number(b.dataset.wd))),
+  'sel-wd': (b) => selectGroup(scopeDays().filter((x) => M.weekday(x) === Number(b.dataset.wd))),
   week: (b) => {
-    const d = draft();
-    selectGroup([0, 1, 2, 3, 4, 5, 6].map((i) => M.addDays(data(b, 'mon'), i)).filter((x) => x >= d.start && x <= d.end));
+    const scope = new Set(scopeDays());
+    selectGroup([0, 1, 2, 3, 4, 5, 6].map((i) => M.addDays(data(b, 'mon'), i)).filter((x) => scope.has(x)));
   },
   preset: (b) => applyPreset(data(b, 'p') as Preset),
 

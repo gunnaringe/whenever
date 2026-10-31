@@ -40,6 +40,10 @@ test('dates: validation, weekday, ISO week', () => {
   assert.equal(M.addDays('2026-12-31', 1), '2027-01-01');
   assert.equal(M.dateRange('2026-11-29', '2026-12-02').length, 4);
   assert.deepEqual(M.monthsBetween('2026-11-20', '2027-01-03'), [[2026, 10], [2026, 11], [2027, 0]]);
+  assert.equal(M.monthStart('2026-10-31', 1), '2026-11-01');
+  assert.equal(M.monthEnd('2026-10-31'), '2026-10-31');
+  assert.equal(M.monthEnd('2026-10-31', 1), '2026-11-30');
+  assert.equal(M.monthEnd('2026-12-15', 2), '2027-02-28');
 });
 
 test('Norwegian holidays', () => {

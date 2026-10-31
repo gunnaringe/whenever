@@ -69,12 +69,21 @@ transforming (enums, namespaces, parameter properties) is off
   `options` is the allowed set; answers map key → 1 (yes) or 2 (maybe), and
   `cleanAnswers` drops keys that aren't options. Editing an event prunes
   answers to removed options (the form warns first).
-- **Selection helpers only change the selection.** Weekday/group chips
-  (Hverdager, Helger, Helligdager, Ma…Sø, week numbers) add or remove days and
-  show a tri-state (`weekdayState`, `groupState`); the stored event is just
-  the explicit set, so a single Saturday can always be picked by hand.
-  Extending the range adds the new days unless that weekday is currently
-  fully off. Keep it that way: never store a "no weekends" rule.
+- **Picking days: there is no date range in the form.** The organiser
+  picks days in a calendar that shows from today to `Draft.until` (at
+  least six weeks ahead, to a month's end; "Show next month" adds one, up
+  to `MAX_MONTHS`). Past days can only be unpicked (when editing). The
+  event's `start`/`end` are just its first and last offered day, filled in
+  by `draftToEvent`; the server still checks them and the limits.
+- **Selection helpers only change the selection.** Period buttons (next 2
+  weeks, next 4 weeks, all of next month) replace the selection with those
+  days. Weekday/group chips (Hverdager, Helger, Helligdager, Ma…Sø, week
+  numbers) act on the days shown from today: if any of theirs are picked
+  they drop them, otherwise they pick them all (`selectGroup`), so "next 4
+  weeks" then "Helger" drops the weekends. They show a tri-state
+  (`weekdayState`, `groupState`). The stored event is just the explicit
+  set, so a single Saturday can always be picked by hand. Keep it that way:
+  never store a "no weekends" rule.
 - **Ranking:** most available (yes + maybe) first, then most yes, then
   earliest. Times mode ranks windows of `duration` built from consecutive
   slots, and the top windows don't overlap.
@@ -105,11 +114,10 @@ transforming (enums, namespaces, parameter properties) is off
   the grid is at least `WIDE` px, picked with week buttons (a dot = something
   marked there). The day names are sticky; in paint mode they open the
   whole-day menu. The event form warns when participants would page
-  through more than two weeks.
-- **New-event defaults:** dates mode offers today + 27 days; times mode
-  two weeks of weekdays, 9 to 17 (`modeDefaults`). Switching mode resets
-  to that mode's defaults only while the days and times are untouched
-  (`Draft.shaped`).
+  through more than three weeks.
+- **New-event defaults:** nothing picked. In times mode a picked day gets
+  9 to 17 (`Draft.pattern`; the presets and "copy to all days" change it).
+  Switching mode keeps the picked days.
 - **Unsaved changes:** `Draft.dirty` / `AnswerDraft.dirty`. In-app links,
   Back and Cancel ask (`leaveOk`), closing the tab triggers
   `beforeunload`, and the browser's back button keeps the form in memory

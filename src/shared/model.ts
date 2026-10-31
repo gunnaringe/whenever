@@ -176,6 +176,13 @@ export function isoWeek(s: string): number {
 // Monday of the week containing s.
 export const weekStart = (s: string): string => addDays(s, -weekday(s));
 
+// The first day of the month `add` months after the month of s, and the last.
+export function monthStart(s: string, add = 0): string {
+  const [y, m] = s.split('-').map(Number);
+  return fromTime(Date.UTC(y, m - 1 + add, 1));
+}
+export const monthEnd = (s: string, add = 0): string => addDays(monthStart(s, add + 1), -1);
+
 // The browser's local date.
 export function localToday(now = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
