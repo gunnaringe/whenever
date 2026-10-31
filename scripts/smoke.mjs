@@ -1,4 +1,4 @@
-// End-to-end check against `npx wrangler dev` (needs LINK_SECRET in .dev.vars).
+// End-to-end check against `npx wrangler dev`.
 // Screenshots go to $SHOTS (default /tmp/whenever-shots).
 //   BASE=http://127.0.0.1:8787 node scripts/smoke.mjs
 // Needs Playwright (`npm i --no-save playwright`); set PWCHROME to a
@@ -89,9 +89,9 @@ check((await admin.locator('.cal-day.pick.on').count()) === 21 - 4 + 0, 'Monday 
 await admin.click('[data-act="sel-wd"][data-wd="0"]'); // and back
 await shot(admin, '02-new-event');
 await admin.click('button[type=submit]');
-await admin.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[A-Za-z0-9_-]{56}$/);
+await admin.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/);
 const adminUrl = admin.url();
-const eventUrl = adminUrl.replace(/\/[A-Za-z0-9_-]{56}$/, '');
+const eventUrl = adminUrl.replace(/\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/, '');
 check(await admin.locator('.notice.ok').isVisible(), 'created notice shown');
 check((await admin.locator('.share input').first().inputValue()) === eventUrl, 'share box has the event link');
 await shot(admin, '03-created');
@@ -109,7 +109,7 @@ await day(kari, '2026-12-11').click(); // twice = maybe
 check(await day(kari, '2026-12-11').evaluate((b) => b.classList.contains('a2')), 'second tap is "maybe"');
 await shot(kari, '04-answer-dates');
 await kari.click('[data-act="save-answer"]');
-await kari.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[A-Za-z0-9_-]{56}$/);
+await kari.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/);
 const kariUrl = kari.url();
 check(kariUrl !== adminUrl && kariUrl.startsWith(eventUrl), 'Kari got her own link');
 check(await kari.locator('.notice.ok .linkbox input').inputValue().then((v) => v === kariUrl), 'personal link shown after saving');
@@ -124,7 +124,7 @@ await ola.click('[data-act="ans-view"][data-v="list"]');
 for (const d of ['2026-11-27', '2026-11-28']) await ola.click(`[data-act="ans-set"][data-k="${d}"][data-val="1"]`);
 await ola.click('[data-act="ans-set"][data-k="2026-12-04"][data-val="2"]');
 await ola.click('[data-act="save-answer"]');
-await ola.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[A-Za-z0-9_-]{56}$/);
+await ola.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/);
 
 // --- C) Results --------------------------------------------------------------------------
 await admin.reload();
@@ -205,8 +205,8 @@ const afterErase = await boss.locator('#f-grid .tg-cell.v1').count();
 check(afterErase === 5 * 16 + 4 - 4, `drag from a marked cell erases (${afterErase})`);
 await shot(boss, '09-new-times');
 await boss.click('button[type=submit]');
-await boss.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[A-Za-z0-9_-]{56}$/);
-const timesUrl = boss.url().replace(/\/[A-Za-z0-9_-]{56}$/, '');
+await boss.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/);
+const timesUrl = boss.url().replace(/\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/, '');
 
 for (const [name, from, to, maybeFrom, maybeTo] of [
   ['Anne', '2026-11-17T09:00', '2026-11-19T11:30', null, null],
@@ -225,7 +225,7 @@ for (const [name, from, to, maybeFrom, maybeTo] of [
   }
   if (name === 'Per') await shot(pp, '10-answer-times');
   await pp.click('[data-act="save-answer"]');
-  await pp.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[A-Za-z0-9_-]{56}$/);
+  await pp.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/);
 }
 await boss.reload();
 await boss.waitForSelector('.best-item');

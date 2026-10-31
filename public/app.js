@@ -51,11 +51,14 @@ function errText(e) {
 
 // --- Routing ------------------------------------------------------------------------
 
+const ROUTE_RE = new RegExp(`^/e/([A-Za-z0-9]{12})(?:/(${M.TOKEN}))?$`);
+const ANSWER_RE = new RegExp(`^answer=(${M.PID})$`);
+
 function parseRoute() {
   const p = location.pathname.replace(/\/+$/, '') || '/';
   if (p === '/') return { page: 'home' };
   if (p === '/new') return { page: 'new' };
-  const m = p.match(/^\/e\/([A-Za-z0-9]{12})(?:\/([A-Za-z0-9_-]{56}))?$/);
+  const m = p.match(ROUTE_RE);
   if (m) return { page: 'event', id: m[1], token: m[2] ?? null };
   return { page: 'missing' };
 }
@@ -64,7 +67,7 @@ function subView() {
   const h = location.hash.slice(1);
   if (h === 'edit') return { kind: 'edit' };
   if (h === 'answer') return { kind: 'answer', pid: null };
-  const m = h.match(/^answer=([0-9a-f]{16})$/);
+  const m = h.match(ANSWER_RE);
   if (m) return { kind: 'answer', pid: m[1] };
   return { kind: 'overview' };
 }

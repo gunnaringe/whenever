@@ -1,53 +1,21 @@
-// Personal links without a token table. A link is /e/<eventId>/<token>, where
-// the token is AES-256-GCM over a tiny record:
+// Admin and personal links. A link is /e/<eventId>/<token>, and the token is
+// two fixed-length parts, back to back (38 characters):
 //
-//   role (1 byte: 1 admin, 2 participant) | generation (uint32) | participant id (8 bytes)
+//   selector  16 hex: a participant id, or the event's admin id
+//   secret    22 base64url: 16 random bytes stored with that row
 //
-// The key is derived per event with HKDF-SHA256 from the LINK_SECRET Worker
-// secret (info = event id), and the event id is also the additional
-// authenticated data, so a token only opens on its own event. The wire format
-// is base64url(version | iv | ciphertext+tag): 56 characters.
-//
-// Revocation needs no stored tokens either: the event keeps a generation
-// counter per participant (and one for the admin). Resetting a link bumps it,
-// so older tokens decrypt fine but no longer match. Deleting the participant
-// or the event kills their links too.
+// The selector finds the row (it isn't secret); the secret is compared in
+// constant time. Resetting a link stores a new secret, so the old link stops
+// working; deleting the participant or the event kills their links too.
+// Secrets are stored as they are, not hashed, so the admin can copy a
+// participant's current link again: whoever can read an event's storage can
+// change the event anyway. There is no key or secret outside the event.
 
-const VERSION = 1;
-const ROLE_CODE = { admin: 1, participant: 2 };
-const ROLE_NAME = { 1: 'admin', 2: 'participant' };
-const PLAIN = 13;
-const IV = 12;
-const TAG = 16;
-export const TOKEN_RE = /^[A-Za-z0-9_-]{56}$/;
-export const PID_RE = /^[0-9a-f]{16}$/;
-const MIN_SECRET = 32;
+import { PID_RE, TOKEN_RE } from '../public/model.js';
 
-const enc = new TextEncoder();
-const SALT = enc.encode('whenever link v1');
+export { PID_RE, TOKEN_RE };
 
-export const usableSecret = (secret) => typeof secret === 'string' && secret.length >= MIN_SECRET;
-
-let cached = { secret: null, key: null };
-async function baseKey(secret) {
-  if (cached.secret !== secret) {
-    const key = await crypto.subtle.importKey('raw', enc.encode(secret), 'HKDF', false, ['deriveKey']);
-    cached = { secret, key };
-  }
-  return cached.key;
-}
-
-async function eventKey(secret, eventId) {
-  return crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt: SALT, info: enc.encode(eventId) },
-    await baseKey(secret),
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt'],
-  );
-}
-
-const aad = (eventId) => enc.encode(`${VERSION}:${eventId}`);
+const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 
 function b64url(bytes) {
   let s = '';
@@ -55,46 +23,20 @@ function b64url(bytes) {
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function unb64url(s) {
-  const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
-  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
-}
-
-const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-const unhex = (s) => Uint8Array.from(s.match(/../g), (h) => parseInt(h, 16));
-
 export const newPid = () => hex(crypto.getRandomValues(new Uint8Array(8)));
+export const newSecret = () => b64url(crypto.getRandomValues(new Uint8Array(16)));
+export const token = (sel, secret) => sel + secret;
 
-// { role: 'admin' | 'participant', gen, pid? } -> token
-export async function seal(secret, eventId, { role, gen, pid }) {
-  if (!usableSecret(secret)) throw new Error('LINK_SECRET missing or too short');
-  const plain = new Uint8Array(PLAIN);
-  plain[0] = ROLE_CODE[role];
-  new DataView(plain.buffer).setUint32(1, gen >>> 0);
-  if (role === 'participant') plain.set(unhex(pid), 5);
-  const iv = crypto.getRandomValues(new Uint8Array(IV));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(eventId) }, await eventKey(secret, eventId), plain));
-  const out = new Uint8Array(1 + IV + ct.length);
-  out[0] = VERSION;
-  out.set(iv, 1);
-  out.set(ct, 1 + IV);
-  return b64url(out);
+// token -> { sel, secret } or null when it isn't shaped like one.
+export function parse(t) {
+  if (typeof t !== 'string' || !TOKEN_RE.test(t)) return null;
+  return { sel: t.slice(0, 16), secret: t.slice(16) };
 }
 
-// token -> { role, gen, pid } or null (wrong event, tampered, wrong key, junk).
-export async function open(secret, eventId, token) {
-  if (!usableSecret(secret) || typeof token !== 'string' || !TOKEN_RE.test(token)) return null;
-  try {
-    const raw = unb64url(token);
-    if (raw.length !== 1 + IV + PLAIN + TAG || raw[0] !== VERSION) return null;
-    const plain = new Uint8Array(
-      await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.subarray(1, 1 + IV), additionalData: aad(eventId) }, await eventKey(secret, eventId), raw.subarray(1 + IV)),
-    );
-    const role = ROLE_NAME[plain[0]];
-    if (!role) return null;
-    const gen = new DataView(plain.buffer).getUint32(1);
-    return role === 'admin' ? { role, gen } : { role, gen, pid: hex(plain.subarray(5)) };
-  } catch {
-    return null;
-  }
+// Constant-time string comparison (for equal lengths; lengths aren't secret).
+export function same(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }

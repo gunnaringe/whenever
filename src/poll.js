@@ -1,23 +1,24 @@
 // One event: its settings and every participant's answers, in SQLite.
 //
-//   meta(k, v)   'created', 'event' (JSON), 'adminGen', 'adminEmail'
-//   people(...)  one row per entry; gen is the link generation (see link.js)
+//   meta(k, v)   'created', 'event' (JSON), 'adminId', 'adminSecret', 'adminEmail'
+//   people(...)  one row per entry; secret is their link's (see link.js)
 //
-// The Worker decrypts the caller's link and passes what it says as `cred`:
-// null (no link), { bad: true } (a link that doesn't open), or
-// { role, gen, pid }. Everything about who may do what is decided here.
+// The Worker passes the caller's link as `cred`: null (no link), { bad: true }
+// (not shaped like a link) or { sel, secret }. Everything about who may do
+// what is decided here, and links are made here.
 // Methods return data, or { error, status } for the Worker to send.
 // Storage is wiped by an alarm 30 days after the event's last date.
 
 import { DurableObject } from 'cloudflare:workers';
 import { LIMITS, sanitizeEntry, cleanAnswers, canAdd, canEdit, expiresAt } from '../public/model.js';
-import { newPid } from './link.js';
+import { newPid, newSecret, token, same } from './link.js';
 
 const NOT_FOUND = { error: 'notFound', status: 404 };
 // An event whose dates are already past still lives a week.
 const MIN_LIFE = 7 * 24 * 60 * 60 * 1000;
 const deleteAt = (ev) => Math.max(expiresAt(ev), Date.now() + MIN_LIFE);
 const FORBIDDEN = { error: 'forbidden', status: 403 };
+const ADMIN = { role: 'admin', me: null, link: 'ok' };
 
 export class Poll extends DurableObject {
   constructor(ctx, env) {
@@ -33,7 +34,7 @@ export class Poll extends DurableObject {
       name TEXT NOT NULL,
       comment TEXT NOT NULL DEFAULT '',
       email TEXT NOT NULL DEFAULT '',
-      gen INTEGER NOT NULL DEFAULT 1,
+      secret TEXT NOT NULL,
       answers TEXT NOT NULL,
       created INTEGER NOT NULL,
       updated INTEGER NOT NULL
@@ -63,11 +64,11 @@ export class Poll extends DurableObject {
     const visitor = (link) => ({ role: 'visitor', me: null, link });
     if (!cred) return visitor('none');
     if (cred.bad) return visitor('invalid');
-    if (cred.role === 'admin') {
-      return Number(this.getMeta('adminGen')) === cred.gen ? { role: 'admin', me: null, link: 'ok' } : visitor('invalid');
+    if (cred.sel === this.getMeta('adminId')) {
+      return same(cred.secret, this.getMeta('adminSecret')) ? ADMIN : visitor('invalid');
     }
-    const row = this.sql.exec(`SELECT gen FROM people WHERE id = ?`, cred.pid).toArray()[0];
-    return row && row.gen === cred.gen ? { role: 'participant', me: cred.pid, link: 'ok' } : visitor('invalid');
+    const row = this.sql.exec(`SELECT secret FROM people WHERE id = ?`, cred.sel).toArray()[0];
+    return row && same(cred.secret, row.secret) ? { role: 'participant', me: cred.sel, link: 'ok' } : visitor('invalid');
   }
 
   // What the caller gets to see. Emails are only ever returned to their owner
@@ -93,12 +94,15 @@ export class Poll extends DurableObject {
   async create(event, email) {
     if (this.exists()) return null;
     this.tables();
+    const adminId = newPid();
+    const secret = newSecret();
     this.setMeta('event', JSON.stringify(event));
-    this.setMeta('adminGen', 1);
+    this.setMeta('adminId', adminId);
+    this.setMeta('adminSecret', secret);
     this.setMeta('adminEmail', email || '');
     this.setMeta('created', Date.now());
     await this.ctx.storage.setAlarm(deleteAt(event));
-    return { gen: 1 };
+    return { token: token(adminId, secret), view: this.view(ADMIN) };
   }
 
   get(cred) {
@@ -138,15 +142,17 @@ export class Poll extends DurableObject {
     if (n >= LIMITS.people) return { error: 'full', status: 409 };
     const r = sanitizeEntry({ ...input, email: input?.email ?? '' }, ev);
     if (!r.ok) return { error: r.error, status: 400 };
-    const pid = newPid();
+    let pid = newPid();
+    while (pid === this.getMeta('adminId') || this.sql.exec(`SELECT 1 FROM people WHERE id = ?`, pid).toArray().length) pid = newPid();
+    const secret = newSecret();
     const now = Date.now();
     this.sql.exec(
-      `INSERT INTO people (id, seq, name, comment, email, gen, answers, created, updated) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-      pid, seq + 1, r.entry.name, r.entry.comment, r.entry.email, JSON.stringify(r.entry.answers), now, now,
+      `INSERT INTO people (id, seq, name, comment, email, secret, answers, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      pid, seq + 1, r.entry.name, r.entry.comment, r.entry.email, secret, JSON.stringify(r.entry.answers), now, now,
     );
     // An admin adding an entry stays admin; anyone else is now that participant.
     const viewer = who.role === 'admin' ? who : { role: 'participant', me: pid, link: 'ok' };
-    return { pid, gen: 1, view: this.view(viewer) };
+    return { pid, token: token(pid, secret), view: this.view(viewer) };
   }
 
   edit(cred, pid, input) {
@@ -181,22 +187,22 @@ export class Poll extends DurableObject {
     if (!this.exists()) return NOT_FOUND;
     const who = this.who(cred);
     if (!(who.role === 'admin' || who.me === pid)) return FORBIDDEN;
-    const row = this.sql.exec(`SELECT gen FROM people WHERE id = ?`, pid).toArray()[0];
+    const row = this.sql.exec(`SELECT secret FROM people WHERE id = ?`, pid).toArray()[0];
     if (!row) return { error: 'person', status: 404 };
-    let gen = row.gen;
+    let secret = row.secret;
     if (reset) {
-      gen += 1;
-      this.sql.exec(`UPDATE people SET gen = ? WHERE id = ?`, gen, pid);
+      secret = newSecret();
+      this.sql.exec(`UPDATE people SET secret = ? WHERE id = ?`, secret, pid);
     }
-    return { gen };
+    return { token: token(pid, secret) };
   }
 
   resetAdmin(cred) {
     if (!this.exists()) return NOT_FOUND;
     if (this.who(cred).role !== 'admin') return FORBIDDEN;
-    const gen = Number(this.getMeta('adminGen')) + 1;
-    this.setMeta('adminGen', gen);
-    return { gen };
+    const secret = newSecret();
+    this.setMeta('adminSecret', secret);
+    return { token: token(this.getMeta('adminId'), secret) };
   }
 
   async alarm() {

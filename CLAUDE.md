@@ -33,15 +33,18 @@ language (`finn-tid.` → nb, `whenever.` → en, anything else → browser).
   deletes everything at `max(last date + 31 days, now + 7 days)`
   (`expiresAt`, `deleteAt`); `RETENTION_DAYS` is what the UI and privacy page
   say.
-- **Links are encrypted, not stored.** `/e/<eventId>` is the public event
-  link; `/e/<eventId>/<token>` is an admin or personal link. The token is
-  `base64url(version | iv | AES-256-GCM(role | gen | pid))`, 56 chars, with
-  a per-event key from HKDF(`LINK_SECRET`, info = eventId) and the event id
-  as AAD, so a token only opens for its own event. Revoking = bumping the
-  person's (or the admin's) `gen`; a token with an old `gen` reads as
-  `link: 'invalid'`. Never put tokens in query strings or logs; the client
-  sends them as `Authorization: Bearer`. Changing `LINK_SECRET` invalidates
-  every link ever handed out.
+- **Links are random secrets stored with the event.** `/e/<eventId>` is
+  the public event link; `/e/<eventId>/<token>` is an admin or personal
+  link. The token (`src/link.js`, patterns `TOKEN`/`TOKEN_RE` in
+  `model.js`) is a 16-hex selector (the participant id, or the event's
+  `adminId`) followed by a 22-char random secret (128 bits): 38 chars, no
+  separator. The Poll object finds the row by selector and compares the
+  secret in constant time (`same()`); it also makes every token. Resetting
+  a link stores a new secret, and the old one reads as `link: 'invalid'`.
+  Secrets are stored unhashed on purpose, so the admin can copy a
+  participant's current link again. There is no Worker secret or key. Never
+  put tokens in query strings or logs; the client sends them as
+  `Authorization: Bearer`.
 - **Option keys:** dates mode `YYYY-MM-DD`, times mode `YYYY-MM-DDTHH:MM`
   (wall-clock in the event's `tz`; nothing converts time zones). An event's
   `options` is the allowed set; answers map key → 1 (yes) or 2 (maybe), and
@@ -90,10 +93,8 @@ language (`finn-tid.` → nb, `whenever.` → en, anything else → browser).
 
 ## Testing
 
-- `npm test`: model, link sealing and i18n (node:test).
-- `npx wrangler dev` (needs `LINK_SECRET` in `.dev.vars`, at least 32
-  chars: `echo "LINK_SECRET=$(openssl rand -base64 32)" > .dev.vars`), then
-  `BASE=http://127.0.0.1:8787 node scripts/smoke.mjs`: a browser end-to-end
+- `npm test`: model, link tokens and i18n (node:test).
+- `npx wrangler dev`, then `BASE=http://127.0.0.1:8787 node scripts/smoke.mjs`: a browser end-to-end
   check (dates and times events, chips, drag and touch painting, several
   participants, permissions, link reset). Needs `npm i --no-save
   playwright`; if Playwright's browser version isn't installed, point
@@ -111,7 +112,6 @@ to it), Workers Builds on push to `main`; other branches run `wrangler
 preview`, which needs the `previews` block in `wrangler.jsonc`: give any new
 binding a Preview-safe copy there. Rate-limit namespaces are account-wide:
 `3001` production, `3002` previews (1001 is scoreboard, 2001/2002 scorepad).
-`LINK_SECRET` is a Worker secret, set by hand (see README); without it the
-API answers 503 `config`. Agent sessions can't deploy or set secrets
-(Cloudflare credentials there are read-only). Free plan: SQLite-backed
+No secrets or other manual setup. Agent sessions can't deploy (Cloudflare
+credentials there are read-only). Free plan: SQLite-backed
 Durable Objects only, which this uses.

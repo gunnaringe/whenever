@@ -26,7 +26,6 @@
   // Branch builds run `wrangler preview`, which needs this block. Each Preview
   // gets its own Durable Object namespace automatically; the binding just has
   // to be declared again. Previews use their own rate-limit namespace (3002).
-  // The LINK_SECRET secret is set separately (see README).
   "previews": {
     "durable_objects": {
       "bindings": [{ "name": "POLLS", "class_name": "Poll" }]

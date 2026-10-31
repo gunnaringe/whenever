@@ -3,8 +3,9 @@
 // convenience: every link works on any device without it. All keys used by
 // the app start with whenever-.
 
+import { TOKEN_RE, PID_RE } from './model.js';
+
 const KEY = 'whenever-v1';
-const TOKEN_RE = /^[A-Za-z0-9_-]{56}$/;
 
 function read() {
   try {
@@ -27,7 +28,7 @@ const clean = (e) => ({
   name: typeof e.name === 'string' ? e.name : '',
   admin: TOKEN_RE.test(e.admin ?? '') ? e.admin : undefined,
   me: TOKEN_RE.test(e.me ?? '') ? e.me : undefined,
-  pid: /^[0-9a-f]{16}$/.test(e.pid ?? '') ? e.pid : undefined,
+  pid: PID_RE.test(e.pid ?? '') ? e.pid : undefined,
   seen: Number(e.seen) || 0,
 });
 

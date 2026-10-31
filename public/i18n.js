@@ -251,7 +251,6 @@ const nb = {
   'err.hours': 'Velg et gyldig tidsrom.',
   'err.options': 'Velg minst én mulig dag eller tid.',
   'err.tooMany': 'For mange mulige tider (høyst 2000). Velg færre dager eller lengre ruter.',
-  'err.config': 'Tjenesten er ikke ferdig satt opp. Prøv igjen senere.',
   'err.server': 'Noe gikk galt. Prøv igjen.',
 
   'holiday.newYear': '1. nyttårsdag',
@@ -515,7 +514,6 @@ const en = {
   'err.hours': 'Pick a valid time window.',
   'err.options': 'Pick at least one possible day or time.',
   'err.tooMany': 'Too many possible times (at most 2000). Pick fewer days or longer slots.',
-  'err.config': 'The service isn’t fully set up yet. Try again later.',
   'err.server': 'Something went wrong. Try again.',
 
   'holiday.newYear': 'New Year’s Day',

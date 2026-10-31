@@ -25,6 +25,13 @@ export const YES = 1;
 export const MAYBE = 2;
 export const DEFAULT_SETTINGS = { maybe: true, openEdit: false, hidden: false, closed: false };
 
+// Participant ids and link tokens (a 16-hex selector, then a 22-character
+// random secret; see src/link.js).
+export const PID = '[0-9a-f]{16}';
+export const TOKEN = `${PID}[A-Za-z0-9_-]{22}`;
+export const PID_RE = new RegExp(`^${PID}$`);
+export const TOKEN_RE = new RegExp(`^${TOKEN}$`);
+
 const DAY = 86400000;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const KEY_RE = /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}):(\d{2}))?$/;

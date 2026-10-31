@@ -1,5 +1,6 @@
 // API. Static files never reach this Worker (see run_worker_first in
-// wrangler.jsonc). Personal links travel as `Authorization: Bearer <token>`.
+// wrangler.jsonc). Admin and personal links travel as
+// `Authorization: Bearer <token>`; the Poll object checks them (src/link.js).
 //
 //   POST   /api/events                       { event, email? } -> { id, token, view }
 //   GET    /api/events/:id                   -> { view }
@@ -12,7 +13,7 @@
 //   POST   /api/events/:id/people/:pid/link  { reset? } (self or admin) -> { token }
 
 import { Poll } from './poll.js';
-import { seal, open, usableSecret, PID_RE } from './link.js';
+import { parse, PID_RE } from './link.js';
 import { sanitizeEvent, cleanEmail } from '../public/model.js';
 
 export { Poll };
@@ -62,14 +63,10 @@ async function readJson(req) {
   }
 }
 
-async function credential(req, env, id) {
+function credential(req) {
   const m = /^Bearer\s+(\S+)$/i.exec(req.headers.get('authorization') ?? '');
   if (!m) return null;
-  return (await open(env.LINK_SECRET, id, m[1])) ?? { bad: true };
-}
-
-function needSecret(env) {
-  if (!usableSecret(env.LINK_SECRET)) throw new HttpError(503, 'config');
+  return parse(m[1]) ?? { bad: true };
 }
 
 const send = (r) => (r.error ? json({ error: r.error }, r.status) : json(r));
@@ -95,17 +92,13 @@ async function route(req, env) {
 
   if (pathname === '/api/events') {
     if (method !== 'POST') throw new HttpError(405, 'method');
-    needSecret(env);
     const body = await readJson(req);
     const ev = event(body);
     const email = adminEmail(body, false);
     for (let i = 0; i < 5; i++) {
       const id = newId();
       const made = await stub(env, id).create(ev, email);
-      if (!made) continue;
-      const token = await seal(env.LINK_SECRET, id, { role: 'admin', gen: made.gen });
-      const { view } = await stub(env, id).get({ role: 'admin', gen: made.gen });
-      return json({ id, token, view });
+      if (made) return json({ id, ...made });
     }
     throw new HttpError(503, 'busy');
   }
@@ -114,7 +107,7 @@ async function route(req, env) {
   if (!m || !ID_RE.test(m[1])) throw new HttpError(404, 'notFound');
   const [, id, sub, pid, linkPath] = m;
   if (pid !== undefined && !PID_RE.test(pid)) throw new HttpError(404, 'person');
-  const cred = await credential(req, env, id);
+  const cred = credential(req);
   const poll = stub(env, id);
 
   if (!sub) {
@@ -129,28 +122,18 @@ async function route(req, env) {
 
   if (sub === 'admin-link') {
     if (method !== 'POST' || pid) throw new HttpError(405, 'method');
-    needSecret(env);
-    const r = await poll.resetAdmin(cred);
-    if (r.error) return send(r);
-    return json({ token: await seal(env.LINK_SECRET, id, { role: 'admin', gen: r.gen }) });
+    return send(await poll.resetAdmin(cred));
   }
 
   // people
   if (!pid) {
     if (method !== 'POST') throw new HttpError(405, 'method');
-    needSecret(env);
-    const r = await poll.add(cred, await readJson(req));
-    if (r.error) return send(r);
-    const token = await seal(env.LINK_SECRET, id, { role: 'participant', gen: r.gen, pid: r.pid });
-    return json({ pid: r.pid, token, view: r.view });
+    return send(await poll.add(cred, await readJson(req)));
   }
   if (linkPath) {
     if (method !== 'POST') throw new HttpError(405, 'method');
-    needSecret(env);
     const body = await readJson(req);
-    const r = await poll.link(cred, pid, body?.reset === true);
-    if (r.error) return send(r);
-    return json({ token: await seal(env.LINK_SECRET, id, { role: 'participant', gen: r.gen, pid }) });
+    return send(await poll.link(cred, pid, body?.reset === true));
   }
   if (method === 'PUT') return send(await poll.edit(cred, pid, await readJson(req)));
   if (method === 'DELETE') return send(await poll.drop(cred, pid));

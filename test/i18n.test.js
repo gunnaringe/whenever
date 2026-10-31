@@ -21,7 +21,7 @@ test('every literal t() key in the code exists', () => {
 });
 
 test('every error code the server can send has a message', () => {
-  const codes = new Set(['notFound', 'forbidden', 'closed', 'full', 'person', 'personName', 'email', 'name', 'range', 'rangeLong', 'hours', 'options', 'tooMany', 'config', 'rate', 'server']);
+  const codes = new Set(['notFound', 'forbidden', 'closed', 'full', 'person', 'personName', 'email', 'name', 'range', 'rangeLong', 'hours', 'options', 'tooMany', 'rate', 'server']);
   for (const c of codes) assert.ok(`err.${c}` in STRINGS.nb, c);
 });
 

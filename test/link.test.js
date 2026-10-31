@@ -1,37 +1,37 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { seal, open, newPid, TOKEN_RE, usableSecret } from '../src/link.js';
+import { newPid, newSecret, token, parse, same, TOKEN_RE, PID_RE } from '../src/link.js';
 
-const SECRET = 'x'.repeat(40);
-
-test('a participant link round-trips and is 56 URL-safe characters', async () => {
+test('a token is a participant id and a 22-character secret, 38 URL-safe characters', () => {
   const pid = newPid();
-  const token = await seal(SECRET, 'AbCdEfGhIjKl', { role: 'participant', gen: 3, pid });
-  assert.match(token, TOKEN_RE);
-  assert.deepEqual(await open(SECRET, 'AbCdEfGhIjKl', token), { role: 'participant', gen: 3, pid });
+  const secret = newSecret();
+  assert.match(pid, PID_RE);
+  assert.match(secret, /^[A-Za-z0-9_-]{22}$/);
+  const t = token(pid, secret);
+  assert.equal(t.length, 38);
+  assert.match(t, TOKEN_RE);
+  assert.deepEqual(parse(t), { sel: pid, secret });
 });
 
-test('an admin link round-trips; two seals of the same thing differ', async () => {
-  const a = await seal(SECRET, 'AbCdEfGhIjKl', { role: 'admin', gen: 1 });
-  const b = await seal(SECRET, 'AbCdEfGhIjKl', { role: 'admin', gen: 1 });
-  assert.notEqual(a, b);
-  assert.deepEqual(await open(SECRET, 'AbCdEfGhIjKl', a), { role: 'admin', gen: 1 });
+test('secrets and ids are random', () => {
+  const secrets = new Set(Array.from({ length: 1000 }, newSecret));
+  const pids = new Set(Array.from({ length: 1000 }, newPid));
+  assert.equal(secrets.size, 1000);
+  assert.equal(pids.size, 1000);
 });
 
-test('a link only opens on its own event, with the right key, untampered', async () => {
-  const token = await seal(SECRET, 'AbCdEfGhIjKl', { role: 'admin', gen: 1 });
-  assert.equal(await open(SECRET, 'AbCdEfGhIjKm', token), null);
-  assert.equal(await open('y'.repeat(40), 'AbCdEfGhIjKl', token), null);
-  const flipped = token.slice(0, 20) + (token[20] === 'A' ? 'B' : 'A') + token.slice(21);
-  assert.equal(await open(SECRET, 'AbCdEfGhIjKl', flipped), null);
-  assert.equal(await open(SECRET, 'AbCdEfGhIjKl', 'short'), null);
-  assert.equal(await open(SECRET, 'AbCdEfGhIjKl', '!'.repeat(56)), null);
+test('anything not shaped like a token is refused', () => {
+  const t = token(newPid(), newSecret());
+  for (const bad of [undefined, null, 42, '', 'short', t + 'x', t.slice(1), t.toUpperCase().replace(/^[0-9A-F]{16}/, 'ABCDEF0123456789'), '!'.repeat(38)]) {
+    assert.equal(parse(bad), null, String(bad));
+  }
 });
 
-test('no usable secret: sealing refuses, opening says no', async () => {
-  assert.ok(!usableSecret(undefined));
-  assert.ok(!usableSecret('short'));
-  await assert.rejects(seal('short', 'AbCdEfGhIjKl', { role: 'admin', gen: 1 }));
-  const token = await seal(SECRET, 'AbCdEfGhIjKl', { role: 'admin', gen: 1 });
-  assert.equal(await open(undefined, 'AbCdEfGhIjKl', token), null);
+test('same() compares strings exactly', () => {
+  const s = newSecret();
+  assert.ok(same(s, s.slice()));
+  assert.ok(!same(s, s.slice(0, -1) + (s.endsWith('A') ? 'B' : 'A')));
+  assert.ok(!same(s, s.slice(1)));
+  assert.ok(!same(s, null));
+  assert.ok(!same(undefined, undefined));
 });
