@@ -190,9 +190,17 @@ input, select, textarea {
 }
 textarea { resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .75rem; }
-.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 .75rem; }
-@media (max-width: 560px) { .grid4 { grid-template-columns: 1fr 1fr; } }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 .75rem; }
+.grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 .75rem; }
+@media (max-width: 560px) { .grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Date inputs have a wide built-in minimum; let them fit the column. */
+.grid2 input, .grid4 select { min-width: 0; }
+
+.fold > summary { display: inline-flex; align-items: center; gap: .4rem; margin: .1rem 0 .75rem; color: var(--accent); font-weight: 600; cursor: pointer; list-style: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "+"; display: inline-grid; place-items: center; width: 1.2rem; height: 1.2rem; border: 1.5px solid currentColor; border-radius: 50%; font-size: .9rem; line-height: 1; }
+.fold[open] > summary::before { content: "−"; }
+.note.warn { margin: .6rem 0 0; padding: .5rem .7rem; border-radius: 8px; background: var(--warn-bg); font-size: .875rem; }
 .err { color: var(--danger); font-weight: 600; }
 .count-line { margin: .75rem 0 0; color: var(--muted); font-weight: 600; font-size: .9rem; }
 
@@ -259,6 +267,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .seg.brush .b2 .sw { background: var(--maybe); }
 .toolbar { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: .6rem; }
 .toolbar .seg { margin: 0; }
+.toolbar .tb-end { display: flex; gap: .4rem; margin-left: auto; }
 
 .linkbox { display: flex; gap: .4rem; align-items: center; margin: .25rem 0 .75rem; }
 .linkbox input { flex: 1; min-width: 0; font-size: .875rem; font-family: ui-monospace, monospace; background: var(--soft); }
@@ -339,6 +348,11 @@ button.cal-day { cursor: pointer; }
 .cal-day.we:not(.on) { color: var(--accent); }
 .cal-day.hol::after { content: ""; position: absolute; bottom: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--danger); }
 .cal-day.ans { border: 2px solid var(--line); background: var(--card); }
+.ans-legend { display: flex; flex-wrap: wrap; gap: .3rem 1rem; margin: 0 0 .6rem; color: var(--muted); font-size: .85rem; }
+.ans-legend span { display: inline-flex; align-items: center; gap: .35rem; }
+.ans-legend .sw { width: .95rem; height: .95rem; border-radius: 4px; border: 2px solid var(--line); background: var(--card); }
+.ans-legend .sw.a1 { background: var(--yes); border-color: var(--yes); }
+.ans-legend .sw.a2 { background: repeating-linear-gradient(135deg, var(--maybe) 0 3px, var(--maybe-soft) 3px 5px); border-color: var(--maybe); }
 .cal-day.ans.a1 { background: var(--yes); border-color: var(--yes); color: var(--yes-ink); font-weight: 700; }
 .cal-day.ans.a2 { background: repeating-linear-gradient(135deg, var(--maybe) 0 6px, var(--maybe-soft) 6px 10px); border-color: var(--maybe); color: var(--maybe-ink); font-weight: 700; }
 .cal-day.res {
