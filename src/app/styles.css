@@ -385,6 +385,8 @@ button.cal-day { cursor: pointer; }
 .tg:focus-visible { outline-offset: 4px; }
 /* The day names stay in view while the grid scrolls past. */
 .tg-corner, .tg-day { grid-row: 1; height: auto; position: sticky; top: 0; z-index: 2; background: var(--card); }
+/* No background on the corner: the first time label reaches up into it. */
+.tg > .tg-corner { background: transparent; }
 .tg > .tg-corner { grid-column: 1; }
 .tg-day { display: flex; align-items: stretch; padding-bottom: 4px; }
 .tg-day > * {
