@@ -80,6 +80,40 @@ async function touchDrag(p, from, to, hold = true) {
   );
 }
 
+// The same for calendar days: hold a day, then drag to another (hold = false:
+// a swipe, which has to leave the days alone).
+async function touchRange(p, from, to, hold = true) {
+  await p.locator(`.cal-day[data-d="${from}"]`).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await p.evaluate(
+    async ([f, t, hold]) => {
+      const el = (d) => document.querySelector(`.cal-day[data-d="${d}"]`);
+      const at = (e) => {
+        const r = e.getBoundingClientRect();
+        return { clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
+      };
+      const opts = { bubbles: true, pointerId: 9, pointerType: 'touch', isPrimary: true, button: 0 };
+      el(f).dispatchEvent(new PointerEvent('pointerdown', { ...opts, ...at(el(f)) }));
+      if (hold) await new Promise((r) => setTimeout(r, 450));
+      el(f).dispatchEvent(new PointerEvent('pointermove', { ...opts, ...at(el(t)) }));
+      el(f).dispatchEvent(new PointerEvent(hold ? 'pointerup' : 'pointercancel', { ...opts, ...at(el(t)) }));
+    },
+    [from, to, hold],
+  );
+}
+
+// Press on one day and drag the mouse to others, then let go.
+async function mouseRange(p, from, ...to) {
+  await day(p, from).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  const box = async (d) => {
+    const b = await day(p, d).boundingBox();
+    return [b.x + b.width / 2, b.y + b.height / 2];
+  };
+  await p.mouse.move(...(await box(from)));
+  await p.mouse.down();
+  for (const d of to) await p.mouse.move(...(await box(d)), { steps: 2 });
+  await p.mouse.up();
+}
+
 // --- A) Organiser makes a dates event --------------------------------------------------
 const admin = await page();
 await admin.goto(`${BASE}/`);
@@ -101,6 +135,25 @@ check(await day(admin, firstSaturday).evaluate((b) => b.classList.contains('on')
 check(await admin.locator('[data-g="weekends"]').evaluate((b) => b.classList.contains('st-some')), 'weekend chip shows partly picked');
 await admin.click('[data-act="sel-none"]');
 check((await picked(admin)) === 0, '"None" clears the selection');
+
+// Ranges: drag, drag back, Shift-click, Shift+Enter.
+await mouseRange(admin, D(0), D(9));
+check((await picked(admin)) === 10, `dragging from one day to another picks every day between (${await picked(admin)})`);
+await admin.click('[data-act="sel-none"]');
+await mouseRange(admin, D(0), D(9), D(4));
+check((await picked(admin)) === 5 && !(await day(admin, D(5)).evaluate((b) => b.classList.contains('on'))), 'dragging back gives the days left behind their old state');
+await mouseRange(admin, D(2), D(3));
+check((await picked(admin)) === 3, 'a drag starting on a picked day unpicks the range');
+await day(admin, D(14)).click();
+await day(admin, D(16)).click({ modifiers: ['Shift'] });
+check((await picked(admin)) === 6, 'Shift-click picks from the last day clicked');
+await day(admin, D(20)).focus();
+await admin.keyboard.press('Enter');
+await day(admin, D(22)).focus();
+await admin.keyboard.press('Shift+Enter');
+check((await picked(admin)) === 9, 'Shift+Enter does the same from the keyboard');
+check((await admin.locator('#f-count').textContent()).includes('9'), 'the count line follows ranges');
+await admin.click('[data-act="sel-none"]');
 
 // The event: weekdays D(0)..D(25) and the Saturday D(12).
 await admin.click('[data-act="more-months"]');
@@ -138,6 +191,16 @@ check(
 await kari.click('#answer-form .fold summary'); // email is folded away
 await kari.fill('form [name=email]', 'kari@example.no');
 await kari.fill('form [name=comment]', 'Helst fredag');
+// A finger: hold a day and drag; the range gets the first day's next answer.
+const ans = (p, cls) => p.locator(`#pick-area .cal-day.${cls}`).count();
+await touchRange(kari, D(0), D(3), false);
+check((await ans(kari, 'a1')) + (await ans(kari, 'a2')) === 0, 'a swipe over the days changes nothing');
+await touchRange(kari, D(0), D(3));
+check((await ans(kari, 'a1')) === 4, `hold and drag answers "yes" for the whole range (${await ans(kari, 'a1')})`);
+await touchRange(kari, D(0), D(3));
+check((await ans(kari, 'a2')) === 4 && (await ans(kari, 'a1')) === 0, 'again: "maybe" for the whole range');
+await touchRange(kari, D(0), D(3));
+check((await ans(kari, 'a1')) + (await ans(kari, 'a2')) === 0, 'and again clears it');
 for (const n of [4, 11, 12, 18]) await day(kari, D(n)).click();
 await day(kari, D(25)).click();
 await day(kari, D(25)).click(); // twice = maybe

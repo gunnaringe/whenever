@@ -5,8 +5,8 @@ and everyone marks when they can. At
 [finn-tid.apphub.casa](https://finn-tid.apphub.casa) (nb) and
 [whenever.apphub.casa](https://whenever.apphub.casa) (en).
 
-- **Dates or times.** Tap possible days in a calendar, or days plus times
-  of day. Quick buttons (next 2 or 4 weeks, next month, weekdays, weekends,
+- **Dates or times.** Tap possible days in a calendar (drag, Shift-click or
+  hold and drag for a range), or days plus times of day. Quick buttons (next 2 or 4 weeks, next month, weekdays, weekends,
   holidays, single weekdays, week numbers) only change the selection, so any
   single day can still be added or removed afterwards.
 - **One link to share.** Participants answer yes / maybe per day or drag
