@@ -4,13 +4,13 @@
 // Routes (path): /  ·  /new  ·  /e/<id>  ·  /e/<id>/<token>
 // Sub-views of an event (hash): #answer, #answer=<pid>, #edit
 
-import * as M from './model.js';
-import { t, getLang, setLang, LANG_NAMES, fmtDate, fmtRange, slotLabel, windowLabel, weekdayShort, weekdayLong, durationLabel, cap } from './i18n.js';
-import { api } from './api.js';
-import * as store from './store.js';
-import { $, $$, esc, icon, toast, ask, menu, dialog, copyText, shareUrl, qrSvg } from './ui.js';
-import { calendarHtml, bindPaint } from './calendar.js';
-import { TimeGrid } from './timegrid.js';
+import * as M from '../shared/model.ts';
+import { t, getLang, setLang, LANG_NAMES, fmtDate, fmtRange, slotLabel, windowLabel, weekdayShort, weekdayLong, durationLabel, cap } from './i18n.ts';
+import { api } from './api.ts';
+import * as store from './store.ts';
+import { $, $$, esc, icon, toast, ask, menu, dialog, copyText, shareUrl, qrSvg } from './ui.ts';
+import { calendarHtml, bindPaint } from './calendar.ts';
+import { TimeGrid } from './timegrid.ts';
 
 const app = {
   route: null,

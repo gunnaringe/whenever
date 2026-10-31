@@ -3,7 +3,7 @@
 // convenience: every link works on any device without it. All keys used by
 // the app start with whenever-.
 
-import { TOKEN_RE, PID_RE } from './model.js';
+import { TOKEN_RE, PID_RE } from '../shared/model.ts';
 
 const KEY = 'whenever-v1';
 

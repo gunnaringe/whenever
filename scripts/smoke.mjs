@@ -1,10 +1,10 @@
-// End-to-end check against `npx wrangler dev`.
+// End-to-end check against `npm run dev` (wrangler dev).
 // Screenshots go to $SHOTS (default /tmp/whenever-shots).
-//   BASE=http://127.0.0.1:8787 node scripts/smoke.mjs
-// Needs Playwright (`npm i --no-save playwright`); set PWCHROME to a
-// chromium/headless-shell binary if Playwright's own browser isn't installed.
+//   BASE=http://127.0.0.1:8787 npm run smoke
+// Uses playwright-core, which brings no browser: set PWCHROME to a Chromium
+// or chrome-headless-shell binary (e.g. under ~/.cache/ms-playwright/).
 import { mkdirSync } from 'node:fs';
-import { chromium } from 'playwright';
+import { chromium } from 'playwright-core';
 
 const BASE = process.env.BASE ?? 'http://127.0.0.1:8787';
 const SHOTS = process.env.SHOTS ?? '/tmp/whenever-shots';

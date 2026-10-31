@@ -3,10 +3,18 @@
   // Must match the Worker created by the Workers Builds import (it owns the
   // custom domains). Never rename.
   "name": "whenever",
-  "main": "src/worker.js",
+  "main": "src/worker/index.ts",
   "compatibility_date": "2026-10-01",
+  // `npm run build` writes dist/ (public/ plus the bundled, hashed app and
+  // stylesheet; see scripts/build.mjs). wrangler dev and a local deploy run it
+  // through "build", but Workers Builds ignores that field: its Build command
+  // (production and Previews Base) must be `npm run build`.
+  "build": {
+    "command": "node scripts/build.mjs",
+    "watch_dir": ["src/app", "src/shared", "public"]
+  },
   "assets": {
-    "directory": "public",
+    "directory": "dist",
     // /e/<id> and /e/<id>/<token> get index.html; the app routes client-side.
     "not_found_handling": "single-page-application",
     // Only the API runs the Worker; everything else is free static assets.

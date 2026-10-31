@@ -1,8 +1,8 @@
 // Month calendars (Monday first, ISO week numbers) and drag-to-paint for
 // buttons in them.
 
-import { pad, weekday, isoWeek, addDays, monthsBetween } from './model.js';
-import { monthTitle, weekdayShort, t } from './i18n.js';
+import { pad, weekday, isoWeek, addDays, monthsBetween } from '../shared/model.ts';
+import { monthTitle, weekdayShort, t } from './i18n.ts';
 
 // One block per month. Days inside [start, end] are rendered by dayHtml(date);
 // weekHtml(monday, weekNumber) renders the week-number cell.

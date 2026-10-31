@@ -12,9 +12,9 @@
 //   DELETE /api/events/:id/people/:pid       -> { view }
 //   POST   /api/events/:id/people/:pid/link  { reset? } (self or admin) -> { token }
 
-import { Poll } from './poll.js';
-import { parse, PID_RE } from './link.js';
-import { sanitizeEvent, cleanEmail } from '../public/model.js';
+import { Poll } from './poll.ts';
+import { parse, PID_RE } from './link.ts';
+import { sanitizeEvent, cleanEmail } from '../shared/model.ts';
 
 export { Poll };
 

@@ -10,8 +10,8 @@
 // Storage is wiped by an alarm 30 days after the event's last date.
 
 import { DurableObject } from 'cloudflare:workers';
-import { LIMITS, sanitizeEntry, cleanAnswers, canAdd, canEdit, expiresAt } from '../public/model.js';
-import { newPid, newSecret, token, same } from './link.js';
+import { LIMITS, sanitizeEntry, cleanAnswers, canAdd, canEdit, expiresAt } from '../shared/model.ts';
+import { newPid, newSecret, token, same } from './link.ts';
 
 const NOT_FOUND = { error: 'notFound', status: 404 };
 // An event whose dates are already past still lives a week.

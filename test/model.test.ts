@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as M from '../public/model.js';
+import * as M from '../src/shared/model.ts';
 
 test('dates: validation, weekday, ISO week', () => {
   assert.ok(M.isDate('2026-02-28'));

@@ -1,7 +1,7 @@
 // Small DOM helpers: escaping, icons, toast, dialogs, copy/share, QR codes.
 
-import qrcodegen from './qrcodegen.js';
-import { t } from './i18n.js';
+import qrcodegen from './vendor/qrcodegen.js';
+import { t } from './i18n.ts';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => [...r.querySelectorAll(s)];

@@ -2,7 +2,7 @@
 // date formatting. t() returns plain text: escape it before putting it in HTML.
 // A value can be { one, other }, picked by vars.n.
 
-import { toTime, hhmm, parseKey } from './model.js';
+import { toTime, hhmm, parseKey } from '../shared/model.ts';
 
 const nb = {
   appName: 'Finn tid',

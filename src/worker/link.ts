@@ -11,7 +11,7 @@
 // participant's current link again: whoever can read an event's storage can
 // change the event anyway. There is no key or secret outside the event.
 
-import { PID_RE, TOKEN_RE } from '../public/model.js';
+import { PID_RE, TOKEN_RE } from '../shared/model.ts';
 
 export { PID_RE, TOKEN_RE };
 

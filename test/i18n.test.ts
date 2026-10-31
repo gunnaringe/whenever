@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { STRINGS, t, setLang } from '../public/i18n.js';
+import { STRINGS, t, setLang } from '../src/app/i18n.ts';
 
 test('nb and en have the same keys', () => {
   const nb = Object.keys(STRINGS.nb).sort();
@@ -11,12 +11,19 @@ test('nb and en have the same keys', () => {
 });
 
 test('every literal t() key in the code exists', () => {
-  const dir = new URL('../public/', import.meta.url);
+  const dir = new URL('../src/app/', import.meta.url);
+  const files = readdirSync(dir).filter((x) => x.endsWith('.ts'));
+  assert.ok(files.length >= 7, `only found ${files.join(', ')}`);
   const missing = [];
-  for (const f of readdirSync(dir).filter((x) => x.endsWith('.js'))) {
+  let seen = 0;
+  for (const f of files) {
     const src = readFileSync(new URL(f, dir), 'utf8');
-    for (const m of src.matchAll(/\bt\('([A-Za-z0-9_.-]+)'/g)) if (!(m[1] in STRINGS.nb)) missing.push(`${f}: ${m[1]}`);
+    for (const m of src.matchAll(/\bt\('([A-Za-z0-9_.-]+)'/g)) {
+      seen += 1;
+      if (!(m[1] in STRINGS.nb)) missing.push(`${f}: ${m[1]}`);
+    }
   }
+  assert.ok(seen > 100, `only ${seen} t() calls found`);
   assert.deepEqual(missing, []);
 });
 

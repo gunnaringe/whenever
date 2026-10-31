@@ -10,9 +10,9 @@
 // brush() -> 1|2, onPaint(keys, v), decorate(key) -> { cls, h, text },
 // onPick(key, hover), onDay(date), page, onPage(page), empty (text).
 
-import { hhmm, slotKey, weekday } from './model.js';
-import { weekdayShort, shortDate, t, fmtDate } from './i18n.js';
-import { esc } from './ui.js';
+import { hhmm, slotKey, weekday } from '../shared/model.ts';
+import { weekdayShort, shortDate, t, fmtDate } from './i18n.ts';
+import { esc } from './ui.ts';
 
 const PER_PAGE = 7;
 

@@ -4,9 +4,15 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "test": "node --test test/"
+    "build": "node scripts/build.mjs",
+    "test": "node --test \"test/*.test.ts\"",
+    "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.64.0",
+    "typescript": "^7.0.2",
     "wrangler": "^4.149.0"
   }
 }
