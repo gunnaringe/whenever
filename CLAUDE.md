@@ -30,14 +30,18 @@ transforming (enums, namespaces, parameter properties) is off
   - `styles.css`: the one stylesheet.
   - `vendor/qrcodegen.js`: Nayuki's MIT QR library, copied from scorepad,
     with types in `qrcodegen.d.ts`. Don't edit by hand.
-- `src/worker/index.ts`: `/api/*` only (`run_worker_first`): routing, JSON
-  parsing, rate limit, turning the Bearer token into a credential.
+- `src/worker/index.ts`: `/api/*` (`run_worker_first`): routing, JSON
+  parsing, rate limit, turning the Bearer token into a credential; and the
+  app's pages (`page()`, see Link previews). `preview.ts`: the pages'
+  preview tags (pure).
   `poll.ts`: the `Poll` Durable Object, which decides everything about who
   may do what. `link.ts`: making and parsing link tokens. `lookup.ts`: the
   `Lookup` Durable Object (the email index and its codes), `codes.ts` the
   limits on codes (pure), `mail.ts` the code mail and a small SMTP client.
 - `public/`: static files copied as they are: `index.html`, `privacy.html`,
-  `_headers`, fonts, icons.
+  `_headers`, fonts, icons, and the link-preview cards `og-nb.png` /
+  `og-en.png` (drawn by `scripts/og-image.mjs`; run it again after changing
+  the name, tagline or icon, and commit the PNGs).
 - `scripts/build.mjs` writes `dist/` (what the Worker serves): `public/`
   plus `app-<hash>.js`, `styles-<hash>.css` and `theme-<hash>.js` (an
   iife, built separately), minified with sourcemaps. The pages refer to
@@ -273,6 +277,25 @@ transforming (enums, namespaces, parameter properties) is off
   link once more (and says an email code can bring it back, if there is an
   email), then forgets the event on this device and goes home with
   `replace`, so the token URL leaves the history entry.
+- **Link previews:** Messenger, Signal, iMessage, Slack and the like read
+  a link's Open Graph tags and never run the app. So the Worker also runs
+  first on the pages (`/`, `/new`, `/find`, `/e/*`): `page()` gets
+  `index.html` from the `ASSETS` binding (the single-page fallback) and fills
+  in the tags with `HTMLRewriter`, in the host's language
+  (`whenever.` → en, else nb). An event link (public, admin or personal)
+  gets the event's name, a line on what to do (or that it's closed) and its
+  description (`Poll.preview()`, read-only, only what any visitor sees).
+  An unknown event, or an IP over the rate limit, gets the app's own tags.
+  A failed lookup must never fail the page. The image is
+  `https://<host>/og-<lang>.png` (1200×630, under 300 KB, https always:
+  Signal drops http images). Never put the request URL in a tag (no
+  `og:url`): links carry tokens. `index.html` keeps nb tags as the static
+  fallback. `HTMLRewriter` escapes only `"` in attributes, so `withMeta`
+  escapes `&` itself; the smoke test reads the tags back with an HTML
+  parser. Pages go out with `no-cache` and no ETag, so an event's new name
+  shows at once. `_headers` still applies to them (CSP, `no-referrer`).
+  Messenger/Facebook cache a URL's preview, so a link shared before a change
+  keeps its old one for a while.
 - **Header menus:** the events, theme and language buttons (`menuButton`)
   open popover menus (`.dropdown`, `#events-menu` / `#theme-menu` /
   `#lang-menu`, items from `dropItems`). The browser closes them on Esc or a
@@ -304,7 +327,7 @@ transforming (enums, namespaces, parameter properties) is off
 
 - `npm run check`: `wrangler types`, then `tsc` for each directory. Must be
   clean; esbuild and wrangler don't type-check.
-- `npm test`: model, link tokens, i18n, the picker's undo history, the code limits and the SMTP client
+- `npm test`: model, link tokens, i18n, the picker's undo history, the code limits, link-preview tags and the SMTP client
   against a scripted server (node:test, Node 22.18+ for type stripping; CI
   uses 26).
 - `npm run dev` (wrangler dev, which runs the build and rebuilds on
@@ -313,7 +336,7 @@ transforming (enums, namespaces, parameter properties) is off
   undo and redo in the picker, several participants, permissions, link reset, picking the date and the
   `.ics` download, ties and the ranking setting, holiday calendars, the
   events menu, finding events by an email code, the language menu and
-  nn/is dates, themes against a dark and a light device). The email-code
+  nn/is dates, themes against a dark and a light device, link-preview tags). The email-code
   part needs `MAIL_ECHO` (as `npm run dev` sets; with plain `wrangler dev`
   add `--var MAIL_ECHO:1`). It uses `playwright-core`, which has
   no browser: set `PWCHROME` to a Chromium or

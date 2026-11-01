@@ -26,6 +26,7 @@ import { LIMITS, sanitizeEntry, cleanAnswers, canAdd, canEdit, expiresAt } from 
 import type { Added, Created, LinkState, Person, PollEvent, View, Who } from '../shared/model.ts';
 import { newPid, newSecret, token, same } from './link.ts';
 import type { Credential } from './link.ts';
+import type { EventPreview } from './preview.ts';
 
 // What the Worker makes of the Authorization header.
 export type Cred = Credential | { bad: true } | null;
@@ -148,6 +149,14 @@ export class Poll extends DurableObject<Env> {
     if (!this.exists()) return NOT_FOUND;
     if (this.getMeta('indexed') !== '1') await this.reindex();
     return { view: this.view(this.who(cred)) };
+  }
+
+  // What a link preview of /e/<id> shows (preview.ts): only what any visitor
+  // sees. Reads and changes nothing else, so a wrong id leaves no storage.
+  preview(): EventPreview | null {
+    if (!this.exists()) return null;
+    const ev = this.event();
+    return { name: ev.name, description: ev.description, mode: ev.mode, closed: ev.settings.closed };
   }
 
   // The links an address has here (admin and/or personal), for the email

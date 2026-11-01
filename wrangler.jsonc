@@ -17,8 +17,11 @@
     "directory": "dist",
     // /e/<id> and /e/<id>/<token> get index.html; the app routes client-side.
     "not_found_handling": "single-page-application",
-    // Only the API runs the Worker; everything else is free static assets.
-    "run_worker_first": ["/api/*"]
+    // The API and the app's pages run the Worker: the pages get their link
+    // preview tags filled in (src/worker/preview.ts). Scripts, styles, fonts
+    // and images are plain static assets.
+    "run_worker_first": ["/api/*", "/", "/new", "/find", "/e/*"],
+    "binding": "ASSETS"
   },
   // One SQLite-backed Durable Object per event (the free plan only allows
   // SQLite-backed classes).
