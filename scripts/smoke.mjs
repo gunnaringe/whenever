@@ -522,6 +522,12 @@ await hc.close();
   check((await cells()) === full - 4, 'a grid stroke is a step');
   await un.keyboard.press('Control+z');
   check((await cells()) === full, 'and Ctrl+Z takes the whole stroke back');
+  await un.click('[data-act="sel-none"]');
+  check(await toastEl.locator('.toast-act').isVisible(), '"None" shows its Undo toast');
+  await un.click('a.brand');
+  await un.click('#dlg button[value="yes"]');
+  await un.waitForURL(`${BASE}/`);
+  check(await toastEl.isHidden(), 'leaving the form takes that toast away');
   await un.close();
 }
 
@@ -743,7 +749,7 @@ check((await toastText()).includes('Vent et minutt'), 'a new code for the same a
 await fm.fill('#find-form [name=code]', `${asked.echo.slice(0, 3)} ${asked.echo.slice(3)}`);
 await fm.click('#find-form [type=submit]');
 await fm.waitForURL(`${BASE}/`);
-check((await toastText()).includes('Fant 1 avtale'), 'the right code finds the event');
+check((await toastText()).includes('Fant 1 avstemning'), 'the right code finds the event');
 check((await fm.locator('.mine').textContent()).includes('Juletrefest'), 'and adds it to this device');
 check(await fm.evaluate(() => Object.values(JSON.parse(localStorage.getItem('whenever-v1')).events).some((e) => e.name === 'Juletrefest' && e.admin)), 'with its admin link');
 const postJson = (p, url, body) => p.evaluate(async ([url, body]) => (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json(), [url, body]);
@@ -784,7 +790,7 @@ await fm.close();
   const mp = await page();
   await mp.setContent(m.html);
   check(await mp.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'the mail fits a phone screen');
-  check((await mp.locator('a').count()) === 1 && (await mp.locator('a').textContent()) === 'Vis avtalene mine', 'with one button');
+  check((await mp.locator('a').count()) === 1 && (await mp.locator('a').textContent()) === 'Vis avstemningene mine', 'with one button');
   await mp.screenshot({ path: `${SHOTS}/34-code-mail.png`, fullPage: true });
   await mp.close();
 }
