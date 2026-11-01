@@ -217,9 +217,36 @@ function closeSub(): void {
 
 // --- Shell ----------------------------------------------------------------------------
 
-// Browsers from before 2024 (Safari 16, Firefox 124) have no popovers: the
-// language button opens the dialog menu there instead.
+// The header's theme and language menus are popovers (see the handlers
+// near the end). Browsers from before 2024 (Safari 16, Firefox 124) have
+// none: there the buttons open the dialog menu instead. Never put data-act
+// on a popover's button: the click delegation's preventDefault() would
+// stop it opening.
 const canPopover = 'popover' in HTMLElement.prototype;
+
+interface DropItem {
+  attrs: string; // data-act and its data
+  label: string;
+  hint?: string;
+  on: boolean;
+}
+const dropItems = (items: DropItem[]) =>
+  items
+    .map(
+      (i) =>
+        `<button type="button" class="menu-item${i.on ? ' on' : ''}" ${i.attrs}${i.on ? ' aria-current="true" autofocus' : ''}><span>${i.on ? icon('check') : ''}${esc(i.label)}</span>${i.hint ? `<small>${esc(i.hint)}</small>` : ''}</button>`,
+    )
+    .join('');
+
+// The button that opens a header menu: a popover, or the dialog without.
+const menuButton = (cls: string, menuId: string, fallbackAct: string, label: string, title: string, face: string) =>
+  `<button type="button" class="btn ghost small menu-btn ${cls}" ${canPopover ? `popovertarget="${menuId}"` : `data-act="${fallbackAct}"`} aria-label="${esc(label)}" title="${esc(title)}">${face}<span class="chev" aria-hidden="true">▾</span></button>`;
+
+const themeItems = () => {
+  const cur = store.getTheme();
+  return dropItems(THEMES.map((x) => ({ attrs: `data-act="theme-set" data-theme="${x}"`, label: t(`theme.${x}`), hint: x === 'auto' ? t('theme.autoHint') : undefined, on: x === cur })));
+};
+const themeLabel = () => `${t('theme')}: ${t(`theme.${store.getTheme()}`)}`;
 
 function paint(inner: string): void {
   const cur = getLang();
@@ -227,13 +254,12 @@ function paint(inner: string): void {
     <header class="bar">
       <a class="brand" href="/" data-link><img src="/icons/icon.svg" alt="" width="28" height="28"><span>${esc(t('appName'))}</span></a>
       <span class="grow"></span>
-      <button type="button" class="btn ghost small" data-act="theme" aria-label="${esc(t('theme'))}" title="${esc(t('theme'))}">${icon('theme')}</button>
-      <button type="button" class="btn ghost small lang-btn" ${canPopover ? 'popovertarget="lang-menu"' : 'data-act="lang-pick"'} aria-label="${esc(`${t('language')}: ${LANG_NAMES[cur]}`)}" title="${esc(t('language'))}">${cur.toUpperCase()}<span class="chev" aria-hidden="true">▾</span></button>
+      ${menuButton('theme-btn', 'theme-menu', 'theme', themeLabel(), t('theme'), icon('theme'))}
+      ${menuButton('lang-btn', 'lang-menu', 'lang-pick', `${t('language')}: ${LANG_NAMES[cur]}`, t('language'), cur.toUpperCase())}
       ${
         canPopover
-          ? `<div id="lang-menu" class="dropdown" popover>
-        ${LANGS.map((l) => `<button type="button" class="menu-item${l === cur ? ' on' : ''}" data-act="lang" data-lang="${l}" lang="${l}"${l === cur ? ' aria-current="true" autofocus' : ''}><span>${l === cur ? icon('check') : ''}${esc(LANG_NAMES[l])}</span></button>`).join('')}
-      </div>`
+          ? `<div id="theme-menu" class="dropdown" popover>${themeItems()}</div>
+      <div id="lang-menu" class="dropdown" popover>${dropItems(LANGS.map((l) => ({ attrs: `data-act="lang" data-lang="${l}" lang="${l}"`, label: LANG_NAMES[l], on: l === cur })))}</div>`
           : ''
       }
     </header>
@@ -1743,17 +1769,26 @@ async function meMore(): Promise<void> {
   } else if (r === 'delete') deleteEntry(me);
 }
 
-// Only the attribute on <html> changes: no render, so a half-filled form
-// stays as it is.
+// The dialog menu, for browsers without popovers.
 async function pickTheme(): Promise<void> {
   const cur = store.getTheme();
-  const r = await menu(
-    t('theme'),
-    THEMES.map((x) => ({ id: x, label: t(`theme.${x}`), hint: x === 'auto' ? t('theme.autoHint') : undefined, on: x === cur })),
+  setTheme(
+    await menu(
+      t('theme'),
+      THEMES.map((x) => ({ id: x, label: t(`theme.${x}`), hint: x === 'auto' ? t('theme.autoHint') : undefined, on: x === cur })),
+    ),
   );
-  if (!isTheme(r)) return;
-  store.setTheme(r);
-  applyTheme(r);
+}
+
+// Only the attribute on <html> changes, and the menu's marks: no render, so
+// a half-filled form stays as it is.
+function setTheme(x: string): void {
+  if (!isTheme(x)) return;
+  store.setTheme(x);
+  applyTheme(x);
+  const m = $opt('#theme-menu');
+  if (m) m.innerHTML = themeItems();
+  $opt('.theme-btn')?.setAttribute('aria-label', themeLabel());
 }
 
 function switchLang(l: string): void {
@@ -1771,6 +1806,10 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   },
   'lang-pick': async () => switchLang(await menu(t('language'), LANGS.map((l) => ({ id: l, label: LANG_NAMES[l], on: l === getLang() })))),
   theme: () => pickTheme(),
+  'theme-set': (b) => {
+    $opt('#theme-menu')?.hidePopover();
+    setTheme(data(b, 'theme'));
+  },
   retry: () => {
     app.viewKey = null;
     render();
@@ -1894,13 +1933,13 @@ document.addEventListener('click', (e) => {
   fn(b);
 });
 
-// The language menu is a popover: the browser closes it on Esc or a click
-// outside, and focuses the current language (autofocus) when it opens. It
-// opens under its button, right-aligned with it; the arrow keys move
-// between the languages.
-const langMenuOpen = () => {
+// The header menus (.dropdown popovers): the browser closes them on Esc or
+// a click outside, and focuses the current choice (autofocus) when one
+// opens. A menu opens under its button, right-aligned with it; the arrow
+// keys move between the choices.
+const menuOpen = () => {
   try {
-    return Boolean($opt('#lang-menu')?.matches(':popover-open'));
+    return Boolean($opt('.dropdown:popover-open'));
   } catch {
     return false;
   }
@@ -1909,15 +1948,17 @@ document.addEventListener(
   'beforetoggle',
   (e) => {
     const menu = e.target as HTMLElement;
-    if (menu.id !== 'lang-menu' || (e as ToggleEvent).newState !== 'open') return;
-    const r = $('.lang-btn').getBoundingClientRect();
+    if (!menu.classList?.contains('dropdown') || (e as ToggleEvent).newState !== 'open') return;
+    const btn = $opt(`[popovertarget="${menu.id}"]`);
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
     menu.style.top = `${r.bottom + window.scrollY + 4}px`;
     menu.style.right = `${document.documentElement.clientWidth - r.right - window.scrollX}px`;
   },
   true,
 );
 document.addEventListener('keydown', (e) => {
-  const menu = (e.target as Element).closest?.('#lang-menu');
+  const menu = (e.target as Element).closest?.('.dropdown');
   if (!menu || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End')) return;
   e.preventDefault();
   const items = [...menu.querySelectorAll<HTMLElement>('button')];
@@ -1945,7 +1986,7 @@ window.addEventListener('popstate', () => {
 async function refreshIfIdle(): Promise<void> {
   const r = app.route;
   if (r?.page !== 'event' || subView().kind !== 'overview' || !app.view || document.visibilityState !== 'visible') return;
-  if ($opt('dialog[open]') || langMenuOpen()) return;
+  if ($opt('dialog[open]') || menuOpen()) return;
   try {
     const { view } = await api<{ view: M.View }>('GET', `/events/${r.id}`, { token: r.token });
     if (app.route !== r || subView().kind !== 'overview') return;
