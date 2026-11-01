@@ -604,6 +604,22 @@ await hc.close();
   await ad.click('#dlg button[value="yes"]');
   await ad.waitForSelector('.role [data-act="answer"]:has-text("Legg til dine svar")');
   check(new URL(ad.url()).pathname === adminPath, 'deleting your own answers keeps you on the admin link');
+  // Signing out: the link once more, then the event is gone from this device.
+  await ad.click('.role [data-act="leave"]');
+  await ad.waitForSelector('#dlg[open]');
+  check((await ad.locator('#dlg .linkbox input').inputValue()) === `${BASE}/e/${made.id}/${made.token}`, '"Logg ut" shows the admin link first');
+  check((await ad.locator('#dlg').textContent()).includes('kode til e-postadressen'), 'and that an email code can bring it back');
+  await ad.locator('#dlg').screenshot({ path: `${SHOTS}/35-leave.png` });
+  await ad.click('#dlg button[value=""]');
+  check(new URL(ad.url()).pathname === adminPath, 'cancelling stays');
+  await ad.click('.role [data-act="leave"]');
+  await ad.click('#dlg button[value="yes"]');
+  await ad.waitForURL(`${BASE}/`);
+  check((await ad.locator('#toast').textContent()).includes('Logget ut'), 'signing out goes home and says so');
+  check(!(await ad.evaluate((id) => Boolean(JSON.parse(localStorage.getItem('whenever-v1') ?? '{}').events?.[id]), made.id)), 'and the event is gone from this device');
+  await ad.goBack();
+  await ad.waitForTimeout(300);
+  check(!ad.url().includes(made.token), 'Back no longer leads to the admin link');
   await ad.close();
 }
 
