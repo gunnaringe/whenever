@@ -13,13 +13,28 @@ export const esc = (s: unknown): string => String(s ?? '').replace(/[&<>"']/g, (
 
 export const icon = (name: string, cls = ''): string => `<svg class="i${cls ? ` ${cls}` : ''}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
+// A short notice at the bottom. With an action (a data-act button, like
+// "Undo") it stays longer, so there is time to reach the button.
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
-export function toast(msg: string): void {
+export function toast(msg: string, action?: { label: string; act: string }): void {
   const el = $('#toast');
   el.textContent = msg;
+  if (action) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'toast-act';
+    b.dataset.act = action.act;
+    b.textContent = action.label;
+    el.append(b);
+  }
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.hidden = true), 2800);
+  toastTimer = setTimeout(hideToast, action ? 8000 : 2800);
+}
+
+export function hideToast(): void {
+  clearTimeout(toastTimer);
+  $('#toast').hidden = true;
 }
 
 // A modal built from HTML. Resolves with the value of the button that closed

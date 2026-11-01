@@ -473,6 +473,58 @@ await hc.click('[data-act="edit-event"]');
 check((await holSel.inputValue()) === 'dk', 'changing it to Danmark is saved');
 await hc.close();
 
+// --- U) Undo and redo in the event form's picker ------------------------------------------
+{
+  const un = await page({ mobile: false });
+  await un.goto(`${BASE}/new`);
+  await un.waitForSelector('#f-cal .cal-day');
+  const undoBtn = un.locator('.count-row [data-act="undo"]');
+  const redoBtn = un.locator('.count-row [data-act="redo"]');
+  const toastEl = un.locator('#toast');
+  check((await undoBtn.isDisabled()) && (await redoBtn.isDisabled()), 'undo and redo start disabled');
+  await mouseRange(un, D(0), D(2));
+  check((await picked(un)) === 3, 'a drag picks three days');
+  await undoBtn.click();
+  check((await picked(un)) === 0 && (await redoBtn.isEnabled()), 'one undo takes back the whole drag');
+  check((await un.evaluate(() => document.activeElement?.dataset.act)) === 'redo', 'with Undo used up, the focus moves to Redo');
+  await redoBtn.click();
+  check((await picked(un)) === 3, 'redo brings it back');
+  await un.click('[data-act="period"][data-p="2w"]');
+  check((await picked(un)) === 14, '"Next 2 weeks" replaces them');
+  await un.click('[data-act="sel-none"]');
+  check((await toastEl.isVisible()) && (await toastEl.textContent()).includes('Fjernet 14 dager'), '"None" says how many days went, with an Undo');
+  await un.locator('.count-row').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await shot(un, '30-undo', false);
+  await un.click('#toast [data-act="undo"]');
+  check((await picked(un)) === 14 && (await toastEl.isHidden()), "the toast's Undo brings all 14 back and closes it");
+  await un.keyboard.press('Control+z');
+  check((await picked(un)) === 3, 'Ctrl+Z goes one more step back');
+  await un.keyboard.press('Control+Shift+z');
+  check((await picked(un)) === 14, 'Ctrl+Shift+Z redoes');
+  await un.keyboard.press('Control+y');
+  check((await picked(un)) === 0, 'Ctrl+Y redoes too');
+  await un.keyboard.press('Control+z');
+  await day(un, D(20)).click();
+  check((await picked(un)) === 15 && (await redoBtn.isDisabled()), 'a new change clears redo');
+  await un.fill('form [name=name]', 'Angreprøve');
+  await un.locator('form [name=name]').press('Control+z');
+  check((await picked(un)) === 15, 'Ctrl+Z in the name field leaves the days alone');
+  await un.check('[name=mode][value=times]');
+  check(await undoBtn.isDisabled(), 'switching to times starts the history afresh');
+  const cells = () => un.locator('#f-grid .tg-cell.v1').count();
+  const full = await cells();
+  await un.click('[data-act="preset"][data-p="clear"]');
+  check((await cells()) === 0 && (await toastEl.textContent()).includes('Tidene er fjernet'), 'clearing the times says so');
+  await un.locator('#times-card .undo-btns [data-act="undo"]').click();
+  check(full > 0 && (await cells()) === full, `undo next to the presets brings the times back (${full})`);
+  const k0 = await un.locator('#f-grid .tg-cell.v1').first().getAttribute('data-k'); // 09:00 on the first day shown
+  await dragCells(un, k0, `${k0.slice(0, 10)}T10:30`);
+  check((await cells()) === full - 4, 'a grid stroke is a step');
+  await un.keyboard.press('Control+z');
+  check((await cells()) === full, 'and Ctrl+Z takes the whole stroke back');
+  await un.close();
+}
+
 // --- R) Ties beyond the first three, and the footer -----------------------------------------
 const tie = await page();
 await tie.goto(`${BASE}/`);
