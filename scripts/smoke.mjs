@@ -552,8 +552,10 @@ await fm.evaluate(
 check((await fm.locator('.events-btn').count()) === 0, 'a new device has no events');
 await fm.click('.find-link a');
 await fm.waitForSelector('#find-form [name=email]');
-await fm.fill('#find-form [name=email]', ` ${mailAddr.toUpperCase()} `);
+await fm.fill('#find-form [name=email]', mailAddr);
 await shot(fm, '25-find-email', false);
+// Typed differently from when it was entered: still the same address.
+await fm.fill('#find-form [name=email]', ` ${mailAddr.toUpperCase()} `);
 const askedResp = fm.waitForResponse((r) => r.url().endsWith('/api/lookup'));
 await fm.click('#find-form [type=submit]');
 const asked = await (await askedResp).json();

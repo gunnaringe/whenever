@@ -135,9 +135,10 @@ function lookupEmail(body: unknown): string {
 // After the reply (so known and unknown addresses answer alike). Failures go
 // to the log with the step and the server's reply, never the address or code.
 async function deliver(auth: { user: string; pass: string }, mail: Mail): Promise<void> {
-  const socket = connect({ hostname: SMTP_HOST, port: SMTP_PORT }, { secureTransport: 'on', allowHalfOpen: false });
+  let socket: ReturnType<typeof connect> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
+    socket = connect({ hostname: SMTP_HOST, port: SMTP_PORT }, { secureTransport: 'on', allowHalfOpen: false });
     await Promise.race([
       sendMail(socket, auth, mail),
       new Promise((_, no) => {
@@ -149,7 +150,7 @@ async function deliver(auth: { user: string; pass: string }, mail: Mail): Promis
     console.error(e instanceof SmtpError ? e.message : `smtp: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200));
   } finally {
     if (timer !== null) clearTimeout(timer);
-    socket.close().catch(() => {});
+    socket?.close().catch(() => {});
   }
 }
 
