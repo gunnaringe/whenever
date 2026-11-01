@@ -431,6 +431,9 @@ const shownDays = await hc.locator('#f-cal .cal-day.pick').evaluateAll((els) => 
 const expectHol = (cal) => [...holidaysIn(shownDays[0], shownDays[shownDays.length - 1], cal).keys()].sort().join();
 check((await holDays()) === expectHol('no'), 'the dots are the Norwegian holidays');
 check((await hc.locator('#f-cal .cal-day.hol[title="Julaften"]').count()) >= 1, 'julaften has a dot');
+// Two holidays on one day (17 May is Whitsun or Whit Monday in some years) show both names.
+const shared = [...holidaysIn(shownDays[0], shownDays[shownDays.length - 1], 'no')].find(([, ks]) => ks.length > 1);
+if (shared) check((await day(hc, shared[0]).getAttribute('title')).includes(' og '), `holidays on the same day are both named (${await day(hc, shared[0]).getAttribute('title')})`);
 await holSel.selectOption('se');
 check((await holDays()) === expectHol('se'), 'Sverige: the dots are the Swedish holidays');
 check((await hc.locator('#f-cal .cal-day.hol[title="Midtsommeraften"]').count()) >= 1, 'midsommarafton has a dot in Sweden');
