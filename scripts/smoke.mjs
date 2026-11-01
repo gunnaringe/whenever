@@ -5,6 +5,7 @@
 // or chrome-headless-shell binary (e.g. under ~/.cache/ms-playwright/).
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
+import { holidaysIn } from '../src/shared/model.ts';
 
 const BASE = process.env.BASE ?? 'http://127.0.0.1:8787';
 const SHOTS = process.env.SHOTS ?? '/tmp/whenever-shots';
@@ -417,6 +418,43 @@ check((await rk.locator('.best-item').nth(1).getAttribute('data-k')) === D(2), '
 check((await rk.locator('.best-item .bn').first().textContent()) === '3 av 3 kan · inkl. 1 kanskje', 'the count includes the maybes');
 check((await rk.locator('.best-more').count()) === 0, 'no "more" line without first-place ties');
 await rk.locator('.results').screenshot({ path: `${SHOTS}/14-ranking-maybe-counts.png` });
+
+// --- K) Holiday calendars: Norway with a clock in Oslo, a choice per event -----------------
+const hc = await page({ mobile: false });
+await hc.goto(`${BASE}/new`);
+const holSel = hc.locator('#ev-form [name=holidays]');
+const holDays = () => hc.locator('#f-cal .cal-day.hol').evaluateAll((els) => els.map((e) => e.dataset.d).sort().join());
+check((await holSel.inputValue()) === 'no', 'a clock in Oslo gets the Norwegian holidays');
+// The whole year ahead, so every calendar has something to mark.
+while (await hc.locator('#more-months').isVisible()) await hc.click('[data-act="more-months"]');
+const shownDays = await hc.locator('#f-cal .cal-day.pick').evaluateAll((els) => els.map((e) => e.dataset.d));
+const expectHol = (cal) => [...holidaysIn(shownDays[0], shownDays[shownDays.length - 1], cal).keys()].sort().join();
+check((await holDays()) === expectHol('no'), 'the dots are the Norwegian holidays');
+check((await hc.locator('#f-cal .cal-day.hol[title="Julaften"]').count()) >= 1, 'julaften has a dot');
+await holSel.selectOption('se');
+check((await holDays()) === expectHol('se'), 'Sverige: the dots are the Swedish holidays');
+check((await hc.locator('#f-cal .cal-day.hol[title="Midtsommeraften"]').count()) >= 1, 'midsommarafton has a dot in Sweden');
+await hc.click('[data-act="sel-group"][data-g="holidays"]');
+check((await picked(hc)) === expectHol('se').split(',').length, `the holiday button picks the Swedish holidays (${await picked(hc)})`);
+await hc.locator('#ev-form .card:has([name=holidays])').screenshot({ path: `${SHOTS}/15-holiday-setting.png` });
+await hc.locator('#f-cal .cal-month:has(.cal-day[title="Midtsommeraften"])').first().screenshot({ path: `${SHOTS}/16-holidays-sweden.png` });
+await holSel.selectOption('none');
+check((await holDays()) === '', 'Ingen: no dots');
+check((await hc.locator('[data-g="holidays"]').count()) === 0, 'Ingen: no holiday button');
+check((await picked(hc)) === expectHol('se').split(',').length, 'changing the calendar leaves the picked days alone');
+await holSel.selectOption('se');
+await hc.fill('form [name=name]', 'Midtsommer');
+await hc.click('button[type=submit]');
+await hc.waitForSelector('.role');
+await hc.click('[data-act="edit-event"]');
+check((await holSel.inputValue()) === 'se', 'the event keeps its calendar (Sverige)');
+check((await hc.locator('#f-cal .cal-day.hol[title="Midtsommeraften"]').count()) >= 1, 'and the edit form marks the Swedish holidays');
+await holSel.selectOption('dk');
+await hc.click('button[type=submit]');
+await hc.waitForSelector('.role');
+await hc.click('[data-act="edit-event"]');
+check((await holSel.inputValue()) === 'dk', 'changing it to Danmark is saved');
+await hc.close();
 
 // --- F) Admin deletes an entry and the event --------------------------------------------
 await admin.reload();

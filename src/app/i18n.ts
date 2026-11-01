@@ -92,7 +92,7 @@ const nb = {
   holidays: 'Helligdager',
   weekdaysHint: 'Fjern de valgte hverdagene (mandag–fredag), eller velg alle i kalenderen',
   weekendsHint: 'Fjern de valgte lørdagene og søndagene, eller velg alle i kalenderen',
-  holidaysHint: 'Fjern de valgte helligdagene, eller velg alle norske helligdager i kalenderen',
+  holidaysHint: 'Fjern de valgte helligdagene, eller velg alle helligdagene i kalenderen',
   weekdayHint: 'Fjern de valgte {day}ene, eller velg alle i kalenderen',
   toggleWeek: 'Velg eller fjern uke {n}',
   weekShort: 'U',
@@ -303,6 +303,20 @@ const nb = {
   'holiday.whitMonday': '2. pinsedag',
   'holiday.christmas': '1. juledag',
   'holiday.boxingDay': '2. juledag',
+  'holiday.christmasEve': 'Julaften',
+  'holiday.newYearsEve': 'Nyttårsaften',
+  'holiday.epiphany': 'Hellige tre kongers dag',
+  'holiday.nationalDaySe': 'Sveriges nasjonaldag',
+  'holiday.midsummerEve': 'Midtsommeraften',
+  'holiday.midsummerDay': 'Midtsommerdagen',
+  'holiday.allSaints': 'Allehelgensdag',
+  'holiday.greatPrayerDay': 'Store bededag',
+  holidayCal: 'Helligdager i kalenderen',
+  holidayCalHint: 'Helligdagene får en prikk, og knappen «Helligdager» velger dem. Julaften og nyttårsaften er med, i Sverige også midtsommeraften.',
+  'holidayCal.no': 'Norge',
+  'holidayCal.se': 'Sverige',
+  'holidayCal.dk': 'Danmark',
+  'holidayCal.none': 'Ingen',
 } satisfies Record<string, Text>;
 
 export type Key = keyof typeof nb;
@@ -394,7 +408,7 @@ const en: Record<Key, Text> = {
   holidays: 'Holidays',
   weekdaysHint: 'Drop the picked weekdays (Monday–Friday), or pick all of them in the calendar',
   weekendsHint: 'Drop the picked Saturdays and Sundays, or pick all of them in the calendar',
-  holidaysHint: 'Drop the picked public holidays, or pick all Norwegian ones in the calendar',
+  holidaysHint: 'Drop the picked public holidays, or pick all of them in the calendar',
   weekdayHint: 'Drop the picked {day}s, or pick all of them in the calendar',
   toggleWeek: 'Pick or drop week {n}',
   weekShort: 'Wk',
@@ -605,6 +619,20 @@ const en: Record<Key, Text> = {
   'holiday.whitMonday': 'Whit Monday',
   'holiday.christmas': 'Christmas Day',
   'holiday.boxingDay': 'Boxing Day',
+  'holiday.christmasEve': 'Christmas Eve',
+  'holiday.newYearsEve': 'New Year’s Eve',
+  'holiday.epiphany': 'Epiphany',
+  'holiday.nationalDaySe': 'National Day of Sweden',
+  'holiday.midsummerEve': 'Midsummer Eve',
+  'holiday.midsummerDay': 'Midsummer Day',
+  'holiday.allSaints': 'All Saints’ Day',
+  'holiday.greatPrayerDay': 'Great Prayer Day',
+  holidayCal: 'Public holidays in the calendar',
+  holidayCalHint: 'Holidays get a dot, and the “Holidays” button picks them. Christmas Eve and New Year’s Eve are included, in Sweden Midsummer Eve too.',
+  'holidayCal.no': 'Norway',
+  'holidayCal.se': 'Sweden',
+  'holidayCal.dk': 'Denmark',
+  'holidayCal.none': 'None',
 };
 
 export const STRINGS: Record<Lang, Record<Key, Text>> = { nb, en };
@@ -634,6 +662,10 @@ export function t(key: Key, vars: Vars = {}): string {
 // For keys built at run time (error codes from the server and the like):
 // unknown ones come back as the key itself.
 export const tx = (key: string, vars?: Vars): string => t(key as Key, vars);
+
+// The names of the holidays on one date: "Grunnlovsdagen og 2. pinsedag".
+export const holidayNames = (keys: readonly string[]): string =>
+  new Intl.ListFormat(LOCALES[lang], { type: 'conjunction' }).format(keys.map((k) => tx(`holiday.${k}`)));
 
 export const cap = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) : s);
 

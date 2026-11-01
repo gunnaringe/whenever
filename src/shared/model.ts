@@ -39,6 +39,9 @@ interface EventBase {
   // The organiser's pick: an option, or in times mode the start of a
   // window of `duration` (see decisionKeys).
   decided?: string;
+  // Which public holidays the form marks (see holidays). Events stored
+  // before this existed have none: read it with holidayCal().
+  holidays?: HolidayCalendar;
 }
 export interface DatesEvent extends EventBase {
   mode: 'dates';
@@ -207,7 +210,16 @@ export function monthsBetween(start: string, end: string): [number, number][] {
   return out;
 }
 
-// --- Norwegian public holidays --------------------------------------------------
+// --- Public holidays --------------------------------------------------------------
+// The official public holidays of Norway, Sweden or Denmark, plus Christmas
+// Eve and New Year's Eve (and Sweden's Midsummer Eve, which its working-time
+// law treats like a Sunday), since most people have them off. The event's
+// `holidays` picks the calendar; only the organiser's form uses it.
+
+export type HolidayCalendar = 'no' | 'se' | 'dk' | 'none';
+export const HOLIDAY_CALENDARS: readonly HolidayCalendar[] = ['no', 'se', 'dk', 'none'];
+export const isHolidayCalendar = (x: unknown): x is HolidayCalendar => HOLIDAY_CALENDARS.includes(x as HolidayCalendar);
+export const holidayCal = (ev: Pick<PollEvent, 'holidays'>): HolidayCalendar => (isHolidayCalendar(ev.holidays) ? ev.holidays : 'no');
 
 // Easter Sunday (anonymous Gregorian algorithm).
 export function easter(y: number): string {
@@ -228,30 +240,68 @@ export function easter(y: number): string {
   return `${y}-${pad(month)}-${pad(day)}`;
 }
 
-// Map date -> i18n key (holiday.<key>).
-export function holidays(year: number): Map<string, string> {
+// The first Saturday on or after a date.
+const saturdayFrom = (d: string): string => addDays(d, (5 - weekday(d) + 7) % 7);
+
+// Map date -> i18n keys (holiday.<key>): more than one when holidays share a
+// date, as Grunnlovsdagen and 2. pinsedag do in 2027 (fixed dates first).
+export function holidays(year: number, cal: HolidayCalendar = 'no'): Map<string, string[]> {
   const e = easter(year);
-  return new Map([
-    [`${year}-01-01`, 'newYear'],
-    [addDays(e, -3), 'maundyThursday'],
+  const md = (x: string) => `${year}-${x}`;
+  const easterDays: [string, string][] = [
     [addDays(e, -2), 'goodFriday'],
     [e, 'easter'],
     [addDays(e, 1), 'easterMonday'],
-    [`${year}-05-01`, 'mayDay'],
-    [`${year}-05-17`, 'constitutionDay'],
     [addDays(e, 39), 'ascension'],
     [addDays(e, 49), 'whitsun'],
-    [addDays(e, 50), 'whitMonday'],
-    [`${year}-12-25`, 'christmas'],
-    [`${year}-12-26`, 'boxingDay'],
-  ]);
+  ];
+  const christmas: [string, string][] = [
+    [md('12-24'), 'christmasEve'],
+    [md('12-25'), 'christmas'],
+    [md('12-26'), 'boxingDay'],
+    [md('12-31'), 'newYearsEve'],
+  ];
+  let list: [string, string][] = [];
+  if (cal === 'no') {
+    // Lov om helligdager og helligdagsfred; lov om 1. og 17. mai.
+    list = [[md('01-01'), 'newYear'], [md('05-01'), 'mayDay'], [md('05-17'), 'constitutionDay'], ...christmas, [addDays(e, -3), 'maundyThursday'], ...easterDays, [addDays(e, 50), 'whitMonday']];
+  } else if (cal === 'se') {
+    // Lag (1989:253) om allmänna helgdagar: no Maundy Thursday and, since
+    // 2005, no Whit Monday. Midsummer and All Saints' fall on Saturdays.
+    const midsummer = saturdayFrom(md('06-20'));
+    list = [
+      [md('01-01'), 'newYear'],
+      [md('01-06'), 'epiphany'],
+      [md('05-01'), 'mayDay'],
+      [md('06-06'), 'nationalDaySe'],
+      ...christmas,
+      ...easterDays,
+      [addDays(midsummer, -1), 'midsummerEve'],
+      [midsummer, 'midsummerDay'],
+      [saturdayFrom(md('10-31')), 'allSaints'],
+    ];
+  } else if (cal === 'dk') {
+    // Helligdagsloven; Store bededag (fourth Friday after Easter) was
+    // abolished from 2024.
+    list = [
+      [md('01-01'), 'newYear'],
+      ...christmas,
+      [addDays(e, -3), 'maundyThursday'],
+      ...easterDays,
+      ...(year <= 2023 ? ([[addDays(e, 26), 'greatPrayerDay']] as [string, string][]) : []),
+      [addDays(e, 50), 'whitMonday'],
+    ];
+  }
+  const out = new Map<string, string[]>();
+  for (const [d, k] of list.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) out.set(d, [...(out.get(d) ?? []), k]);
+  return out;
 }
 
-export function holidaysIn(start: string, end: string): Map<string, string> {
-  const out = new Map<string, string>();
+export function holidaysIn(start: string, end: string, cal: HolidayCalendar = 'no'): Map<string, string[]> {
+  const out = new Map<string, string[]>();
   if (!isDate(start) || !isDate(end)) return out;
   for (let y = Number(start.slice(0, 4)); y <= Number(end.slice(0, 4)); y++) {
-    for (const [d, k] of holidays(y)) if (d >= start && d <= end) out.set(d, k);
+    for (const [d, k] of holidays(y, cal)) if (d >= start && d <= end) out.set(d, k);
   }
   return out;
 }
@@ -388,6 +438,7 @@ export function sanitizeEvent(input: unknown): { ok: true; event: PollEvent } | 
   const base = {
     v: 1 as const,
     name,
+    holidays: isHolidayCalendar(o.holidays) ? o.holidays : ('no' as HolidayCalendar),
     description: cleanText(o.description, LIMITS.description),
     location: cleanLine(o.location, LIMITS.location),
     start,

@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { STRINGS, t, setLang } from '../src/app/i18n.ts';
+import { STRINGS, t, setLang, holidayNames } from '../src/app/i18n.ts';
+import { HOLIDAY_CALENDARS, holidays } from '../src/shared/model.ts';
 
 test('nb and en have the same keys', () => {
   const nb = Object.keys(STRINGS.nb).sort();
@@ -39,4 +40,22 @@ test('plurals and placeholders', () => {
   assert.equal(t('hiName', { name: 'Kari' }), 'Hei, Kari!');
   setLang('en');
   assert.equal(t('nOfM', { n: 2, m: 5 }), '2 of 5 can');
+});
+
+test('every holiday and holiday calendar has a name', () => {
+  const keys = new Set<string>();
+  for (const cal of HOLIDAY_CALENDARS) {
+    assert.ok(`holidayCal.${cal}` in STRINGS.nb, cal);
+    for (let y = 2020; y <= 2045; y++) for (const ks of holidays(y, cal).values()) for (const k of ks) keys.add(k);
+  }
+  assert.ok(keys.size >= 20, `only ${keys.size} holidays`);
+  for (const k of keys) assert.ok(`holiday.${k}` in STRINGS.nb, k);
+});
+
+test('holidays on the same date are named together', () => {
+  setLang('nb');
+  assert.equal(holidayNames(['constitutionDay', 'whitMonday']), 'Grunnlovsdagen og 2. pinsedag');
+  assert.equal(holidayNames(['christmasEve']), 'Julaften');
+  setLang('en');
+  assert.equal(holidayNames(['constitutionDay', 'whitMonday']), 'Constitution Day and Whit Monday');
 });

@@ -9,6 +9,9 @@ and everyone marks when they can. At
   hold and drag for a range), or days plus times of day. Quick buttons (next 2 or 4 weeks, next month, weekdays, weekends,
   holidays, single weekdays, week numbers) only change the selection, so any
   single day can still be added or removed afterwards.
+- **Public holidays** of Norway, Sweden or Denmark (or none), per event,
+  are marked in the calendar, including Christmas Eve and New Year's Eve.
+  A new event guesses the country from the browser's time zone.
 - **One link to share.** Participants answer yes / maybe per day or drag
   across a time grid, and get a personal link to change their answers later
   from any device. The organiser gets an admin link.

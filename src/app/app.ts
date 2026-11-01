@@ -5,7 +5,7 @@
 // Sub-views of an event (hash): #answer, #answer=<pid>, #edit
 
 import * as M from '../shared/model.ts';
-import { t, tx, getLang, setLang, LANG_NAMES, fmtDate, fmtRange, monthName, slotLabel, windowLabel, weekdayShort, weekdayLong, durationLabel, cap } from './i18n.ts';
+import { t, tx, holidayNames, getLang, setLang, LANG_NAMES, fmtDate, fmtRange, monthName, slotLabel, windowLabel, weekdayShort, weekdayLong, durationLabel, cap } from './i18n.ts';
 import type { Key, Lang } from './i18n.ts';
 import { api, ApiError } from './api.ts';
 import * as store from './store.ts';
@@ -31,6 +31,7 @@ interface Draft extends M.DayWindow {
   duration: number;
   tz: string;
   settings: M.Settings;
+  holidays: M.HolidayCalendar; // which holidays the calendar marks
   email: string;
   dates: Set<string>;
   times: Set<string>;
@@ -140,6 +141,20 @@ const touch = () => matchMedia('(pointer: coarse)').matches;
 
 const eventUrl = (id: string) => `${location.origin}/e/${id}`;
 const linkUrl = (id: string, token: string | null) => `${location.origin}/e/${id}/${token}`;
+
+// A new event's holiday calendar: where the browser's clock is, else its
+// languages, else none (a foreign calendar would be worse than none).
+function guessHolidays(): M.HolidayCalendar {
+  const byZone: Record<string, M.HolidayCalendar> = { 'Europe/Oslo': 'no', 'Arctic/Longyearbyen': 'no', 'Europe/Stockholm': 'se', 'Europe/Copenhagen': 'dk' };
+  const zone = byZone[browserTz()];
+  if (zone) return zone;
+  for (const l of navigator.languages ?? [navigator.language]) {
+    if (/^(nb|nn|no)\b/i.test(l)) return 'no';
+    if (/^sv\b/i.test(l)) return 'se';
+    if (/^da\b/i.test(l)) return 'dk';
+  }
+  return 'none';
+}
 
 function browserTz(): string {
   try {
@@ -365,6 +380,7 @@ function newDraft(): Draft {
     duration: 60,
     tz: browserTz(),
     settings: { ...M.DEFAULT_SETTINGS },
+    holidays: guessHolidays(),
     email: '',
     dates: new Set(),
     times: new Set(),
@@ -386,6 +402,7 @@ function draftFromView(v: M.View): Draft {
     location: ev.location,
     mode: ev.mode,
     settings: { ...ev.settings },
+    holidays: M.holidayCal(ev),
     email: v.adminEmail ?? '',
     decided: ev.decided ?? null,
   });
@@ -412,7 +429,7 @@ function draftToEvent(d: Draft): Record<string, unknown> & { options: string[] }
   const days = offeredDays(d);
   const start = days[0] ?? M.localToday();
   const end = days[days.length - 1] ?? start;
-  const ev = { name: d.name, description: d.description, location: d.location, mode: d.mode, start, end, settings: { ...d.settings }, decided: d.decided ?? undefined };
+  const ev = { name: d.name, description: d.description, location: d.location, mode: d.mode, start, end, settings: { ...d.settings }, holidays: d.holidays, decided: d.decided ?? undefined };
   if (d.mode === 'dates') return { ...ev, options: days };
   return {
     ...ev,
@@ -568,6 +585,7 @@ function renderForm(v: M.View | null): void {
       <section class="card">
         <h2>${esc(t('settings'))}</h2>
         ${check('maybe')}${check('maybeCounts')}${check('openEdit')}${check('hidden')}${editing ? check('closed') : ''}
+        ${field('holidays', t('holidayCal'), `<select name="holidays">${M.HOLIDAY_CALENDARS.map((c) => `<option value="${c}"${d.holidays === c ? ' selected' : ''}>${esc(t(`holidayCal.${c}`))}</option>`).join('')}</select>`, t('holidayCalHint'))}
         ${field('email', t('yourEmailOptional'), `<input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(d.email)}" autocomplete="email" inputmode="email">`, t('adminEmailHint'))}
       </section>
       <p class="err" id="form-err" hidden></p>
@@ -602,6 +620,11 @@ function bindForm(): void {
     else if (n === 'dayStart' || n === 'dayEnd' || n === 'slot') changeWindow(n);
     else if (n === 'duration') d.duration = Number(el.value);
     else if (n === 'tz') d.tz = el.value;
+    else if (n === 'holidays' && M.isHolidayCalendar(el.value)) {
+      // Only the dots and the Helligdager button change, never the picked days.
+      d.holidays = el.value;
+      refreshDays();
+    }
     else if (n.startsWith('s-')) {
       d.settings[n.slice(2) as keyof M.Settings] = el.checked;
       if (n === 's-hidden') {
@@ -677,7 +700,7 @@ function refreshDays(): void {
   const today = M.localToday();
   const first = [...d.dates].sort()[0];
   const start = first && first < today ? first : today;
-  const hol = M.holidaysIn(start, d.until);
+  const hol = M.holidaysIn(start, d.until, d.holidays);
   $('#f-cal').innerHTML = calendarHtml({
     start,
     end: d.until,
@@ -686,7 +709,7 @@ function refreshDays(): void {
       const on = d.dates.has(x);
       if (x < today && !on) return `<span class="cal-day out">${Number(x.slice(8))}</span>`;
       const h = hol.get(x);
-      const name = h ? tx(`holiday.${h}`) : '';
+      const name = h ? holidayNames(h) : '';
       return `<button type="button" class="cal-day pick${on ? ' on' : ''}${h ? ' hol' : ''}${M.isWeekend(x) ? ' we' : ''}" data-d="${x}" aria-pressed="${on}" aria-label="${esc(fmtDate(x, 'long'))}${name ? ` (${esc(name)})` : ''}"${name ? ` title="${esc(name)}"` : ''}>${Number(x.slice(8))}</button>`;
     },
   });
@@ -708,7 +731,7 @@ function groupDays(g: string): string[] {
   if (g === 'weekdays') return days.filter((x) => !M.isWeekend(x));
   if (g === 'weekends') return days.filter(M.isWeekend);
   if (g === 'holidays') {
-    const hol = M.holidaysIn(days[0], days[days.length - 1]);
+    const hol = M.holidaysIn(days[0], days[days.length - 1], draft().holidays);
     return days.filter((x) => hol.has(x));
   }
   return days;
@@ -738,7 +761,7 @@ function refreshChips(): void {
       <button type="button" class="btn small" data-act="sel-none">${esc(t('selNone'))}</button>
     </div>
     <div class="chip-row">
-      ${(['weekdays', 'weekends', 'holidays'] as const).map((g) => chip(`data-act="sel-group" data-g="${g}"`, t(g), M.groupState(d.dates, groupDays(g)), t(`${g}Hint`))).join('')}
+      ${(d.holidays === 'none' ? (['weekdays', 'weekends'] as const) : (['weekdays', 'weekends', 'holidays'] as const)).map((g) => chip(`data-act="sel-group" data-g="${g}"`, t(g), M.groupState(d.dates, groupDays(g)), t(`${g}Hint`))).join('')}
     </div>
     <div class="chip-row wd">${short.map((n, wd) => chip(`data-act="sel-wd" data-wd="${wd}"`, n, M.weekdayState(d.dates, days, wd), t('weekdayHint', { day: long[wd] }))).join('')}</div>`;
 }
