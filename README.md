@@ -17,8 +17,8 @@ and everyone marks when they can. At
   from any device. The organiser gets an admin link.
 - **No accounts, no cookies.** Each admin or personal link carries a random
   secret stored with the event. Email is optional: with it you can find
-  your events on another device, by a code sent to that address (limited
-  per address, per IP and per day).
+  your events on another device, by a code (and a one-tap link) sent to
+  that address (limited per address, per IP and per day).
 - **Pick the date.** The organiser picks the final day or time from the
   results. Everyone then sees it at the top and can download it as a
   calendar file (`.ics`).

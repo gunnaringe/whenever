@@ -15,22 +15,25 @@
 //   POST   /api/events/:id/people/:pid/link  { reset? } (self or admin) -> { token }
 //   POST   /api/lookup                       { email, lang } -> { ok } (a code by email, see below)
 //   POST   /api/lookup/code                  { email, code } -> { events: [{ id, name, admin?, me?, pid? }] }
+//   POST   /api/lookup/link                  { token } (the mail's one-tap link) -> { events } as above
 //
 // Email codes: asking answers { ok } whether or not the address is on any
 // event (only then is a code made and mailed, after the reply), or 429
 // { error: 'wait.minute' | 'wait.hour' | 'wait.day' } when a limit is
 // reached (codes.ts). Mail goes by SMTP (mail.ts) with the secrets SMTP_USER
 // and SMTP_PASS. In `wrangler dev --var MAIL_ECHO:1`, from this machine, nothing is
-// mailed: the reply carries the code as `echo`, and x-dev-ip stands in for
-// the client's IP, so the smoke test can run often.
+// mailed: the reply carries the code as `echo` and the link's token as
+// `echoLink`, and x-dev-ip stands in for the client's IP, so the smoke test
+// can run often. The link's token is never logged and never in a reply
+// outside dev.
 
 import { connect } from 'cloudflare:sockets';
 import { Poll } from './poll.ts';
 import type { Cred, Failure } from './poll.ts';
 import { Lookup } from './lookup.ts';
 import { parse, PID_RE } from './link.ts';
-import { cleanCode, dailyMax } from './codes.ts';
-import { SMTP_HOST, SMTP_PORT, MAILABLE_RE, isMailLang, codeMail, sendMail, SmtpError } from './mail.ts';
+import { cleanCode, cleanLinkToken, dailyMax } from './codes.ts';
+import { SMTP_HOST, SMTP_PORT, MAILABLE_RE, isMailLang, codeMail, linkHost, sendMail, SmtpError } from './mail.ts';
 import type { Mail } from './mail.ts';
 import { sanitizeEvent, cleanEmail } from '../shared/model.ts';
 
@@ -167,9 +170,22 @@ async function askCode(req: Request, env: Env & Vars, ctx: ExecutionContext): Pr
   if (await mailLimited(env, ip)) throw new HttpError(429, 'rate');
   const r = await lookup(env).ask(email, ip, dailyMax(env.MAIL_DAILY_MAX));
   if ('wait' in r) throw new HttpError(429, `wait.${r.wait}`);
-  if (r.code && echo) return json({ ok: true, echo: r.code });
-  if (r.code && auth) ctx.waitUntil(deliver(auth, codeMail(lang, r.code, auth.user, email)));
+  if (!r.code) return json({ ok: true });
+  if (echo) return json({ ok: true, echo: r.code, echoLink: r.link });
+  const link = `https://${linkHost(lang, new URL(req.url).host)}/find#t=${r.link}`;
+  if (auth) ctx.waitUntil(deliver(auth, codeMail(lang, r.code, link, auth.user, email)));
   return json({ ok: true });
+}
+
+// The links each event has for the address (gone events drop out).
+async function eventsFor(env: Env, email: string, ids: string[]): Promise<Response> {
+  const found = await Promise.all(
+    ids.map(async (id) => {
+      const links = await stub(env, id).linksFor(email);
+      return links ? { id, ...links } : null;
+    }),
+  );
+  return json({ events: found.filter((x) => x !== null) });
 }
 
 async function useCode(req: Request, env: Env & Vars): Promise<Response> {
@@ -180,13 +196,16 @@ async function useCode(req: Request, env: Env & Vars): Promise<Response> {
   if (await mailLimited(env, clientIp(req, echoing(req, env)))) throw new HttpError(429, 'rate');
   const r = await lookup(env).check(email, code);
   if (!r) throw new HttpError(400, 'code');
-  const found = await Promise.all(
-    r.events.map(async (id) => {
-      const links = await stub(env, id).linksFor(email);
-      return links ? { id, ...links } : null;
-    }),
-  );
-  return json({ events: found.filter((x) => x !== null) });
+  return eventsFor(env, email, r.events);
+}
+
+async function useLink(req: Request, env: Env & Vars): Promise<Response> {
+  const token = cleanLinkToken(field(await readJson(req), 'token'));
+  if (!token) throw new HttpError(400, 'link');
+  if (await mailLimited(env, clientIp(req, echoing(req, env)))) throw new HttpError(429, 'rate');
+  const r = await lookup(env).redeem(token);
+  if (!r) throw new HttpError(400, 'link');
+  return eventsFor(env, r.email, r.events);
 }
 
 // --- Routes --------------------------------------------------------------------------------
@@ -195,9 +214,10 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
   const { pathname } = new URL(req.url);
   const method = req.method;
 
-  if (pathname === '/api/lookup' || pathname === '/api/lookup/code') {
+  if (pathname === '/api/lookup' || pathname === '/api/lookup/code' || pathname === '/api/lookup/link') {
     if (method !== 'POST') throw new HttpError(405, 'method');
-    return pathname === '/api/lookup' ? askCode(req, env, ctx) : useCode(req, env);
+    if (pathname === '/api/lookup') return askCode(req, env, ctx);
+    return pathname === '/api/lookup/code' ? useCode(req, env) : useLink(req, env);
   }
 
   if (pathname === '/api/events') {

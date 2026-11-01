@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ADDRESS_RULES, IP_RULES, MINUTE, HOUR, DAY, allowedAt, waitWord, newCode, cleanCode, dailyMax, DAILY_MAX } from '../src/worker/codes.ts';
+import { ADDRESS_RULES, IP_RULES, MINUTE, HOUR, DAY, allowedAt, waitWord, newCode, cleanCode, dailyMax, DAILY_MAX, newLinkToken, cleanLinkToken, LINK_RE } from '../src/worker/codes.ts';
 
 const now = 1_800_000_000_000;
 
@@ -57,4 +57,23 @@ test('the daily mail cap comes from MAIL_DAILY_MAX, else the default', () => {
   assert.equal(dailyMax(undefined), DAILY_MAX);
   assert.equal(dailyMax('0'), DAILY_MAX);
   assert.equal(dailyMax('lots'), DAILY_MAX);
+});
+
+test('link tokens are 32 base64url characters, and differ', () => {
+  const seen = new Set<string>();
+  for (let i = 0; i < 200; i++) {
+    const t = newLinkToken();
+    assert.match(t, LINK_RE);
+    seen.add(t);
+  }
+  assert.equal(seen.size, 200);
+});
+
+test('only a well-formed link token is taken', () => {
+  const t = newLinkToken();
+  assert.equal(cleanLinkToken(t), t);
+  assert.equal(cleanLinkToken(`${t}x`), null);
+  assert.equal(cleanLinkToken(t.slice(1)), null);
+  assert.equal(cleanLinkToken(`${t.slice(1)}=`), null);
+  assert.equal(cleanLinkToken(42), null);
 });

@@ -443,9 +443,13 @@ function renderHome(): void {
 // --- Find your events by email ----------------------------------------------------------
 // An address entered on events gets a code by email (see src/worker/index.ts);
 // the code adds those events' links to this device. The page says the same
-// whether or not the address is known.
+// whether or not the address is known. The mail also has a one-tap link,
+// /find#t=<token>: the token goes into memory and out of the address bar at
+// once, and is only used when the button is tapped (a mail scanner that opens
+// links must not use it up).
 
-const find = { email: '', sent: false };
+const find = { email: '', sent: false, link: '' };
+const LINK_HASH_RE = /^#t=([A-Za-z0-9_-]{32})$/;
 
 interface Found {
   id: string;
@@ -457,6 +461,23 @@ interface Found {
 
 function renderFind(): void {
   document.title = `${t('findTitle')} · ${t('appName')}`;
+  const m = LINK_HASH_RE.exec(location.hash);
+  if (m) {
+    find.link = m[1];
+    history.replaceState(null, '', '/find');
+  }
+  if (find.link) {
+    paint(`
+      <section class="card find">
+        <h1>${esc(t('findTitle'))}</h1>
+        <p class="muted">${esc(t('findLinkLead'))}</p>
+        <div class="row wrap">
+          <button type="button" class="btn primary big" data-act="find-link">${esc(t('findShow'))}</button>
+          <button type="button" class="btn ghost" data-act="find-link-cancel">${esc(t('cancel'))}</button>
+        </div>
+      </section>`);
+    return;
+  }
   const actions = find.sent
     ? `<button type="submit" class="btn primary">${esc(t('findShow'))}</button>
        <button type="button" class="btn" data-act="find-again">${esc(t('findAgain'))}</button>
@@ -514,22 +535,42 @@ async function useCode(code: string): Promise<void> {
   setBusy(true);
   try {
     const r = await api<{ events: Found[] }>('POST', '/lookup/code', { body: { email: find.email, code: c } });
-    for (const e of r.events) {
-      const patch: Partial<Stored> = { name: e.name };
-      if (e.admin) patch.admin = e.admin;
-      if (e.me) Object.assign(patch, { me: e.me, pid: e.pid });
-      store.put(e.id, patch);
-    }
-    find.email = '';
-    find.sent = false;
-    toast(r.events.length ? t('findFound', { n: r.events.length }) : t('findNone'));
-    go('/');
+    found(r.events);
   } catch (err) {
     toast(errText(err));
     $opt<HTMLInputElement>('#find-form [name="code"]')?.select();
   } finally {
     setBusy(false);
   }
+}
+
+async function useLink(): Promise<void> {
+  if (app.busy || !find.link) return;
+  setBusy(true);
+  try {
+    const r = await api<{ events: Found[] }>('POST', '/lookup/link', { body: { token: find.link } });
+    found(r.events);
+  } catch (err) {
+    // Used or expired: back to asking for a code.
+    find.link = '';
+    toast(errText(err));
+    renderFind();
+  } finally {
+    setBusy(false);
+  }
+}
+
+// A code or link worked: these events' links are now on this device.
+function found(events: Found[]): void {
+  for (const e of events) {
+    const patch: Partial<Stored> = { name: e.name };
+    if (e.admin) patch.admin = e.admin;
+    if (e.me) Object.assign(patch, { me: e.me, pid: e.pid });
+    store.put(e.id, patch);
+  }
+  Object.assign(find, { email: '', sent: false, link: '' });
+  toast(events.length ? t('findFound', { n: events.length }) : t('findNone'));
+  go('/');
 }
 
 // --- Event form (create and edit) ----------------------------------------------------------
@@ -2099,6 +2140,11 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
     $opt<HTMLElement>('#best [data-act="best-more"]')?.focus();
   },
   'find-again': () => askCode(find.email, true),
+  'find-link': () => useLink(),
+  'find-link-cancel': () => {
+    find.link = '';
+    renderFind();
+  },
   'find-other': () => {
     find.sent = false;
     renderFind();

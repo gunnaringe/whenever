@@ -152,7 +152,16 @@ transforming (enums, namespaces, parameter properties) is off
   on the entry (`setOwn`), since the entry's personal link can set that,
   and a personal link must never lead to the admin link.
 - **Email codes (`/find`):** an address entered on events gets a 6-digit
-  code by email, and the code adds those events' links to the device.
+  code by email, and the code adds those events' links to the device. The
+  mail (multipart text + HTML, inline styles, no remote images) also has a
+  one-tap link, `https://<host>/find#t=<token>`, to the site the code was
+  asked on (`linkHost`; localStorage is per site). The page takes the token
+  out of the address bar at once and only redeems it on a tap
+  (`POST /api/lookup/link`), never by itself: mail scanners open links. The
+  token is 32 base64url characters (`codes.ts`); the `Lookup` keeps its HMAC
+  and the address AES-GCM encrypted under a key derived from the token
+  (`links` table), since the events need the address. Code and link live
+  10 minutes, the link works once, and using either ends both (`used()`).
   - The `Lookup` object (one for the app, `getByName('lookup')`) stores HMACs of
     addresses and IPs under a key it made itself and keeps in its own SQLite.
     It holds `entries` (address → event, until the event's deletion),

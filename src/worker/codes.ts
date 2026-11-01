@@ -59,3 +59,16 @@ export const cleanCode = (v: unknown): string | null => {
   const s = typeof v === 'string' ? v.replace(/[\s-]/g, '') : '';
   return CODE_RE.test(s) ? s : null;
 };
+
+// The one-tap link in the mail (/find#t=<token>): 24 random bytes as 32
+// base64url characters. Lives as long as the code, and either one used
+// ends both.
+export const LINK_RE = /^[A-Za-z0-9_-]{32}$/;
+
+export function newLinkToken(): string {
+  let bin = '';
+  for (const b of crypto.getRandomValues(new Uint8Array(24))) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+export const cleanLinkToken = (v: unknown): string | null => (typeof v === 'string' && LINK_RE.test(v) ? v : null);
