@@ -1,11 +1,17 @@
-// Strings (nb = Norwegian bokmål, en = English; same keys, a test checks) and
-// date formatting. t() returns plain text: escape it before putting it in HTML.
-// A value can be { one, other }, picked by vars.n.
+// Strings and date formatting. nb (Norwegian bokmål) is the source and
+// defines the keys; en is below it, the other languages are in lang/ (each
+// typed Record<Key, Text>, so a missing or extra key doesn't compile).
+// t() returns plain text: escape it before putting it in HTML. A value can be
+// { one, other }, picked by vars.n (see PLURAL_ONE).
 
-import { toTime, hhmm, parseKey } from '../shared/model.ts';
+import { toTime, hhmm, parseKey, weekday } from '../shared/model.ts';
 import type { TimeWindow } from '../shared/model.ts';
+import { da } from './lang/da.ts';
+import { is } from './lang/is.ts';
+import { nn } from './lang/nn.ts';
+import { sv } from './lang/sv.ts';
 
-type Text = string | { one: string; other: string };
+export type Text = string | { one: string; other: string };
 
 const nb = {
   appName: 'Finn tid',
@@ -53,6 +59,7 @@ const nb = {
   name: 'Navn',
   sum: 'Kan',
   you: 'deg',
+  language: 'Språk',
 
   editEvent: 'Endre avtalen',
   aboutEvent: 'Om avtalen',
@@ -320,7 +327,7 @@ const nb = {
 } satisfies Record<string, Text>;
 
 export type Key = keyof typeof nb;
-export type Lang = 'nb' | 'en';
+export type Lang = 'nb' | 'nn' | 'sv' | 'da' | 'is' | 'en';
 
 // Record<Key, …>: a key missing in English (or extra) doesn't compile.
 const en: Record<Key, Text> = {
@@ -369,6 +376,7 @@ const en: Record<Key, Text> = {
   name: 'Name',
   sum: 'Can',
   you: 'you',
+  language: 'Language',
 
   editEvent: 'Edit event',
   aboutEvent: 'About the event',
@@ -635,15 +643,29 @@ const en: Record<Key, Text> = {
   'holidayCal.none': 'None',
 };
 
-export const STRINGS: Record<Lang, Record<Key, Text>> = { nb, en };
-export const LANG_NAMES: Record<Lang, string> = { nb: 'Norsk', en: 'English' };
-const LOCALES: Record<Lang, string> = { nb: 'nb-NO', en: 'en-GB' };
+export const STRINGS: Record<Lang, Record<Key, Text>> = { nb, nn, sv, da, is, en };
+// The language menu, in the order of each language's own name.
+export const LANGS: readonly Lang[] = ['da', 'en', 'is', 'nb', 'nn', 'sv'];
+export const LANG_NAMES: Record<Lang, string> = { da: 'Dansk', en: 'English', is: 'Íslenska', nb: 'Norsk bokmål', nn: 'Norsk nynorsk', sv: 'Svenska' };
+const LOCALES: Record<Lang, string> = { nb: 'nb-NO', nn: 'nn-NO', sv: 'sv-SE', da: 'da-DK', is: 'is-IS', en: 'en-GB' };
+// The calendars' column heads.
 const WEEKDAYS: Record<Lang, string[]> = {
   nb: ['ma', 'ti', 'on', 'to', 'fr', 'lø', 'sø'],
+  nn: ['må', 'ty', 'on', 'to', 'fr', 'la', 'sø'],
+  sv: ['må', 'ti', 'on', 'to', 'fr', 'lö', 'sö'],
+  da: ['ma', 'ti', 'on', 'to', 'fr', 'lø', 'sø'],
+  is: ['má', 'þr', 'mi', 'fi', 'fö', 'la', 'su'],
   en: ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'],
 };
+// When n takes the singular. Icelandic also uses it for 21, 31, ... (not
+// 11); Intl.PluralRules can't say so, as Chromium has no Icelandic data.
+const one = (n: number) => n === 1;
+const PLURAL_ONE: Record<Lang, (n: number) => boolean> = { nb: one, nn: one, sv: one, da: one, en: one, is: (n) => n % 10 === 1 && n % 100 !== 11 };
+const AND: Record<Lang, string> = { nb: 'og', nn: 'og', sv: 'och', da: 'og', is: 'og', en: 'and' };
+// Hours and minutes in durations ("1 t 30 min").
+const UNITS: Record<Lang, [h: string, min: string]> = { nb: ['t', 'min'], nn: ['t', 'min'], sv: ['tim', 'min'], da: ['t', 'min'], is: ['klst.', 'mín.'], en: ['h', 'min'] };
 
-export const isLang = (l: unknown): l is Lang => l === 'nb' || l === 'en';
+export const isLang = (l: unknown): l is Lang => (LANGS as readonly unknown[]).includes(l);
 
 let lang: Lang = 'nb';
 export const getLang = (): Lang => lang;
@@ -655,7 +677,7 @@ export type Vars = Record<string, string | number>;
 
 export function t(key: Key, vars: Vars = {}): string {
   let s: Text = STRINGS[lang][key] ?? STRINGS.en[key] ?? key;
-  if (typeof s === 'object') s = vars.n === 1 ? s.one : s.other;
+  if (typeof s === 'object') s = PLURAL_ONE[lang](Number(vars.n)) ? s.one : s.other;
   return s.replace(/\{(\w+)\}/g, (m: string, k: string) => (vars[k] !== undefined ? String(vars[k]) : m));
 }
 
@@ -663,11 +685,47 @@ export function t(key: Key, vars: Vars = {}): string {
 // unknown ones come back as the key itself.
 export const tx = (key: string, vars?: Vars): string => t(key as Key, vars);
 
+// "A og B", "A, B og C".
+const joinAnd = (items: string[]): string => (items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} ${AND[lang]} ${items[items.length - 1]}`);
+
 // The names of the holidays on one date: "Grunnlovsdagen og 2. pinsedag".
-export const holidayNames = (keys: readonly string[]): string =>
-  new Intl.ListFormat(LOCALES[lang], { type: 'conjunction' }).format(keys.map((k) => tx(`holiday.${k}`)));
+export const holidayNames = (keys: readonly string[]): string => joinAnd(keys.map((k) => tx(`holiday.${k}`)));
 
 export const cap = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+// Chromium has no Intl data for nynorsk or Icelandic (it formats them as
+// bokmål or English), so those two use their own names, in the style of
+// bokmål's Intl output: "måndag 2. november", "2.–9. november 2026".
+interface DateNames {
+  months: string[];
+  monthsShort: string[];
+  days: string[]; // Monday first
+  daysShort: string[];
+  daySep: string; // between the weekday and the day
+  rangeSep: string; // between the ends of a range across months
+}
+const OWN_NAMES: Partial<Record<Lang, DateNames>> = {
+  nn: {
+    months: ['januar', 'februar', 'mars', 'april', 'mai', 'juni', 'juli', 'august', 'september', 'oktober', 'november', 'desember'],
+    monthsShort: ['jan.', 'feb.', 'mars', 'apr.', 'mai', 'juni', 'juli', 'aug.', 'sep.', 'okt.', 'nov.', 'des.'],
+    days: ['måndag', 'tysdag', 'onsdag', 'torsdag', 'fredag', 'laurdag', 'søndag'],
+    daysShort: ['må.', 'ty.', 'on.', 'to.', 'fr.', 'la.', 'sø.'],
+    daySep: ' ',
+    rangeSep: '–',
+  },
+  is: {
+    months: ['janúar', 'febrúar', 'mars', 'apríl', 'maí', 'júní', 'júlí', 'ágúst', 'september', 'október', 'nóvember', 'desember'],
+    monthsShort: ['jan.', 'feb.', 'mar.', 'apr.', 'maí', 'jún.', 'júl.', 'ágú.', 'sep.', 'okt.', 'nóv.', 'des.'],
+    days: ['mánudagur', 'þriðjudagur', 'miðvikudagur', 'fimmtudagur', 'föstudagur', 'laugardagur', 'sunnudagur'],
+    daysShort: ['mán.', 'þri.', 'mið.', 'fim.', 'fös.', 'lau.', 'sun.'],
+    daySep: ', ',
+    rangeSep: '\u2009–\u2009', // thin spaces, as ICU has them
+  },
+};
+const ymd = (d: string) => {
+  const [y, m, day] = d.split('-').map(Number);
+  return { y, m: m - 1, day };
+};
 
 const fmt = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(LOCALES[lang], { timeZone: 'UTC', ...opts });
 
@@ -680,10 +738,25 @@ const STYLES: Record<DateStyle, Intl.DateTimeFormatOptions> = {
 };
 
 export function fmtDate(d: string, style: DateStyle = 'long'): string {
-  return fmt(STYLES[style] ?? STYLES.long).format(toTime(d));
+  const own = OWN_NAMES[lang];
+  if (!own) return fmt(STYLES[style] ?? STYLES.long).format(toTime(d));
+  const { y, m, day } = ymd(d);
+  if (style === 'full') return `${day}. ${own.months[m]} ${y}`;
+  if (style === 'monthShort') return own.monthsShort[m];
+  if (style === 'medium') return `${own.daysShort[weekday(d)]}${own.daySep}${day}. ${own.monthsShort[m]}`;
+  return `${own.days[weekday(d)]}${own.daySep}${day}. ${own.months[m]}`;
 }
 
 export function fmtRange(start: string, end: string): string {
+  const own = OWN_NAMES[lang];
+  if (own) {
+    const a = ymd(start);
+    const b = ymd(end);
+    if (start === end) return fmtDate(start, 'full');
+    if (a.y === b.y && a.m === b.m) return `${a.day}.–${b.day}. ${own.months[a.m]} ${a.y}`;
+    if (a.y === b.y) return `${a.day}. ${own.months[a.m]}${own.rangeSep}${b.day}. ${own.months[b.m]} ${a.y}`;
+    return `${fmtDate(start, 'full')}${own.rangeSep}${fmtDate(end, 'full')}`;
+  }
   const f = fmt(STYLES.full);
   if (start === end) return f.format(toTime(start));
   try {
@@ -695,33 +768,37 @@ export function fmtRange(start: string, end: string): string {
 
 // "november" (nb) / "November" (en).
 export function monthName(d: string): string {
-  return fmt({ month: 'long' }).format(toTime(d));
+  const own = OWN_NAMES[lang];
+  return own ? own.months[ymd(d).m] : fmt({ month: 'long' }).format(toTime(d));
 }
 
 export function monthTitle(y: number, m: number): string {
-  return cap(fmt({ month: 'long', year: 'numeric' }).format(Date.UTC(y, m, 1)));
+  const own = OWN_NAMES[lang];
+  return cap(own ? `${own.months[m]} ${y}` : fmt({ month: 'long', year: 'numeric' }).format(Date.UTC(y, m, 1)));
 }
 
 export const weekdayShort = (): string[] => WEEKDAYS[lang];
 
 export function weekdayLong(): string[] {
+  const own = OWN_NAMES[lang];
+  if (own) return [...own.days];
   const f = fmt({ weekday: 'long' });
   // 2024-01-01 was a Monday.
   return Array.from({ length: 7 }, (_, i) => f.format(Date.UTC(2024, 0, 1 + i)));
 }
 
+// "2.11." or "2/11".
 export function shortDate(d: string): string {
-  const day = Number(d.slice(8));
-  const month = Number(d.slice(5, 7));
-  return lang === 'nb' ? `${day}.${month}.` : `${day}/${month}`;
+  const { m, day } = ymd(d);
+  return lang === 'en' || lang === 'sv' ? `${day}/${m + 1}` : `${day}.${m + 1}.`;
 }
 
 export function durationLabel(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
-  const hu = lang === 'nb' ? 't' : 'h';
-  if (!h) return `${m} min`;
-  return m ? `${h} ${hu} ${m} min` : `${h} ${hu}`;
+  const [hu, mu] = UNITS[lang];
+  if (!h) return `${m} ${mu}`;
+  return m ? `${h} ${hu} ${m} ${mu}` : `${h} ${hu}`;
 }
 
 export function slotLabel(key: string, slot: number): string {

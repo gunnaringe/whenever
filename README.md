@@ -29,6 +29,8 @@ and everyone marks when they can. At
   everyone edit or delete entries, hide answers from other participants,
   close the event.
 - **Themes:** automatic (follows the device), light, dark and hacker.
+- **Languages:** Norwegian (bokmål and nynorsk), Swedish, Danish, Icelandic
+  and English, from the language menu in the header.
 - Everything is deleted 30 days after the event's last date.
 
 ## Running locally

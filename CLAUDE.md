@@ -1,8 +1,9 @@
 # whenever
 
 Finn tid (nb) / Whenever (en): find the day or time that suits most people,
-at finn-tid.apphub.casa and whenever.apphub.casa. The host picks the default
-language (`finn-tid.` → nb, `whenever.` → en, anything else → browser).
+at finn-tid.apphub.casa and whenever.apphub.casa. In nb, nn, sv, da, is and
+en. The host picks the default language (`finn-tid.` → nb, `whenever.` →
+en, anything else → the browser's first Nordic language, else en).
 
 ## Layout
 
@@ -19,7 +20,8 @@ transforming (enums, namespaces, parameter properties) is off
   `windows`, `bestWindows`), `LIMITS`, retention.
 - `src/app/`: the frontend, bundled by esbuild into one file.
   - `app.ts`: UI, routing, the event form, overview/results, the answer
-    editor. `i18n.ts`: strings and date formatting. `api.ts`: fetch wrapper.
+    editor. `i18n.ts`: strings (nb and en) and date formatting; `lang/`
+    the other languages' strings. `api.ts`: fetch wrapper.
     `store.ts`: localStorage. `ui.ts`: `$`, `esc`, dialogs, toast, QR.
   - `calendar.ts`: month grids (`calendarHtml`) and drag/tap painting
     (`bindPaint`). `timegrid.ts`: the drag-to-paint time grid (`TimeGrid`).
@@ -178,10 +180,26 @@ transforming (enums, namespaces, parameter properties) is off
   contents. Hacker uses VT323 (self-hosted, OFL; only fetched there),
   square corners and scan lines; yes stays green and maybe amber, so they
   never blur. New colours go in every theme block.
-- **i18n:** `STRINGS.nb` / `STRINGS.en`, same keys, plurals as
-  `{ one, other }` (tests check parity, that literal `t('…')` keys exist and
-  that every API error code has an `err.*` string). User text always goes
-  through `esc()`.
+- **i18n:** nb is the source (its object defines `Key`); en is next to it
+  in `i18n.ts`, and nn, sv, da and is are in `src/app/lang/`, each typed
+  `Record<Key, Text>`, so a missing or extra key doesn't compile. All are
+  bundled (a lazy chunk could be gone after a deploy while an old tab still
+  wants it). Plurals are `{ one, other }`, picked by `PLURAL_ONE`:
+  Icelandic's "one" also covers 21, 31, ..., so its `one` strings say `{n}`.
+  Tests check the keys, that translations keep nb's placeholders, that
+  literal `t('…')` keys exist and that every API error code has an `err.*`
+  string. Chromium has no Intl data for nn and is (it formats them as
+  another language), so their dates come from `OWN_NAMES`, tested against
+  Node's ICU. `WEEKDAYS`, `UNITS`, `AND` and `shortDate` are per language
+  too: a new language needs an entry in each. Templates mustn't build words
+  across languages (`weekdayHint` adds a plural ending to `{day}` in the
+  Scandinavian ones; Icelandic says it differently). The header shows the
+  language code; it opens a popover menu (`#lang-menu`), placed under the
+  button on `beforetoggle`, with `autofocus` on the current language.
+  Browsers without popovers (Safari 16, Firefox 124) get the dialog
+  `menu()` instead (`canPopover`); never put `data-act` on the popover
+  button, as the click delegation's `preventDefault()` stops it opening. User
+  text always goes through `esc()`. The privacy page is nb + en only.
 - **CSS names:** `.page` is the container and `.bar` the header; the result
   meter is `.meter`. Don't reuse `.bar`/`.wrap`-style generic names (both
   collided once).
@@ -203,8 +221,9 @@ transforming (enums, namespaces, parameter properties) is off
   changes), then `BASE=http://127.0.0.1:8787 npm run smoke`: a browser
   end-to-end check (dates and times events, chips, drag and touch painting,
   several participants, permissions, link reset, picking the date and the
-  `.ics` download, ties and the ranking setting, holiday calendars, themes
-  against a dark and a light device). It uses `playwright-core`, which has
+  `.ics` download, ties and the ranking setting, holiday calendars, the
+  language menu and nn/is dates, themes against a dark and a light
+  device). It uses `playwright-core`, which has
   no browser: set `PWCHROME` to a Chromium or
   `chrome-headless-shell` binary, e.g. under `~/.cache/ms-playwright/`.
   Screenshots go to `$SHOTS` (default `/tmp/whenever-shots`).

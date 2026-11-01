@@ -1,14 +1,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { STRINGS, t, setLang, holidayNames } from '../src/app/i18n.ts';
+import { STRINGS, LANGS, t, setLang, holidayNames, fmtDate, fmtRange, monthName, monthTitle, weekdayLong, shortDate, durationLabel } from '../src/app/i18n.ts';
 import { HOLIDAY_CALENDARS, holidays } from '../src/shared/model.ts';
 
-test('nb and en have the same keys', () => {
+test('every language has the same keys as nb', () => {
   const nb = Object.keys(STRINGS.nb).sort();
-  const en = Object.keys(STRINGS.en).sort();
-  assert.deepEqual(nb.filter((k) => !en.includes(k)), []);
-  assert.deepEqual(en.filter((k) => !nb.includes(k)), []);
+  assert.deepEqual(Object.keys(STRINGS).sort(), [...LANGS].sort());
+  for (const l of LANGS) {
+    const keys = Object.keys(STRINGS[l]);
+    assert.deepEqual(nb.filter((k) => !keys.includes(k)), [], `${l} lacks`);
+    assert.deepEqual(keys.filter((k) => !nb.includes(k)), [], `${l} has extra`);
+  }
+});
+
+test('translations keep the placeholders', () => {
+  const vars = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join();
+  const bad = [];
+  for (const l of LANGS) {
+    for (const [k, src] of Object.entries(STRINGS.nb)) {
+      const v = STRINGS[l][k as keyof typeof STRINGS.nb];
+      const want = vars(typeof src === 'string' ? src : src.other);
+      if (typeof v === 'string') {
+        if (vars(v) !== want) bad.push(`${l} ${k}`);
+      } else if (vars(v.other) !== want || !vars(v.one).split(',').every((x) => !x || want.includes(x))) bad.push(`${l} ${k}`);
+    }
+  }
+  assert.deepEqual(bad, []);
 });
 
 test('every literal t() key in the code exists', () => {
@@ -58,4 +76,54 @@ test('holidays on the same date are named together', () => {
   assert.equal(holidayNames(['christmasEve']), 'Julaften');
   setLang('en');
   assert.equal(holidayNames(['constitutionDay', 'whitMonday']), 'Constitution Day and Whit Monday');
+});
+
+test('Icelandic uses the singular for 21 but not for 11', () => {
+  setLang('is');
+  assert.equal(t('nDays', { n: 1 }), '1 dagur valinn');
+  assert.equal(t('nDays', { n: 21 }), '21 dagur valinn');
+  assert.equal(t('nDays', { n: 11 }), '11 dagar valdir');
+  setLang('sv');
+  assert.equal(t('nDays', { n: 21 }), '21 dagar valda');
+});
+
+// Chromium has no Intl data for nn and is, so the app formats those itself.
+// Node has full ICU: its names must agree with ours.
+test('nynorsk and Icelandic dates match the Intl names', () => {
+  const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
+  for (const [l, loc] of [['nn', 'nn-NO'], ['is', 'is-IS']] as const) {
+    setLang(l);
+    const intl = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(loc, { timeZone: 'UTC', ...o });
+    for (let t = Date.UTC(2026, 0, 1); t < Date.UTC(2027, 0, 1); t += 864e5) {
+      const d = iso(t);
+      assert.equal(fmtDate(d, 'full'), intl({ day: 'numeric', month: 'long', year: 'numeric' }).format(t), `${l} full ${d}`);
+      assert.equal(fmtDate(d, 'medium'), intl({ weekday: 'short', day: 'numeric', month: 'short' }).format(t), `${l} medium ${d}`);
+      // Newer CLDR drops the dot after the day in Norwegian; browsers keep it.
+      assert.equal(fmtDate(d, 'long'), intl({ weekday: 'long', day: 'numeric', month: 'long' }).format(t).replace(/ (\d+) /, ' $1. '), `${l} long ${d}`);
+      assert.equal(monthName(d), intl({ month: 'long' }).format(t), `${l} month ${d}`);
+    }
+    const wd = intl({ weekday: 'long' });
+    assert.deepEqual(weekdayLong(), Array.from({ length: 7 }, (_, i) => wd.format(Date.UTC(2024, 0, 1 + i))));
+    const range = intl({ day: 'numeric', month: 'long', year: 'numeric' });
+    for (const [a, b] of [['2026-11-02', '2026-11-09'], ['2026-11-30', '2026-12-02'], ['2026-12-30', '2027-01-02'], ['2026-11-02', '2026-11-02']]) {
+      assert.equal(fmtRange(a, b), a === b ? range.format(Date.parse(a)) : range.formatRange(Date.parse(a), Date.parse(b)), `${l} range ${a}..${b}`);
+    }
+  }
+  setLang('nn');
+  assert.equal(fmtDate('2026-11-02'), 'måndag 2. november');
+  assert.equal(monthTitle(2026, 10), 'November 2026');
+  setLang('is');
+  assert.equal(fmtDate('2026-11-02'), 'mánudagur, 2. nóvember');
+});
+
+test('short dates, durations and "and" per language', () => {
+  const at = (l: Parameters<typeof setLang>[0], f: () => string) => (setLang(l), f());
+  assert.equal(at('nb', () => shortDate('2026-11-02')), '2.11.');
+  assert.equal(at('da', () => shortDate('2026-11-02')), '2.11.');
+  assert.equal(at('sv', () => shortDate('2026-11-02')), '2/11');
+  assert.equal(at('en', () => shortDate('2026-11-02')), '2/11');
+  assert.equal(at('nn', () => durationLabel(90)), '1 t 30 min');
+  assert.equal(at('sv', () => durationLabel(90)), '1 tim 30 min');
+  assert.equal(at('is', () => durationLabel(90)), '1 klst. 30 mín.');
+  assert.equal(at('sv', () => holidayNames(['constitutionDay', 'whitMonday'])), 'Norges nationaldag och Annandag pingst');
 });
