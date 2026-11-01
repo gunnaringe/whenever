@@ -19,6 +19,7 @@ export interface Mail {
   to: string;
   subject: string;
   text: string;
+  html?: string; // sent as multipart/alternative with the text
 }
 
 export interface Duplex {
@@ -28,51 +29,110 @@ export interface Duplex {
 
 // --- Text ------------------------------------------------------------------------------
 
-const NB_HOST = 'finn-tid.apphub.casa';
-const TEXT: Record<MailLang, { app: string; host: string; subject: string; body: string }> = {
+export const NB_HOST = 'finn-tid.apphub.casa';
+export const EN_HOST = 'whenever.apphub.casa';
+
+// Where the mail's link goes: the site the code was asked on (the device
+// keeps the events per site), else the language's.
+export function linkHost(lang: MailLang, host: string): string {
+  return host === NB_HOST || host === EN_HOST ? host : lang === 'en' ? EN_HOST : NB_HOST;
+}
+
+interface Text {
+  app: string;
+  subject: string;
+  intro: string; // before the code
+  or: string; // before the link
+  button: string;
+  valid: string; // {min}
+  ignore: string;
+}
+const TEXT: Record<MailLang, Text> = {
   nb: {
     app: 'Finn tid',
-    host: NB_HOST,
     subject: '{code} er koden din i Finn tid',
-    body: 'Koden for å finne avtalene dine i Finn tid er:\n\n{code}\n\nDen virker i {min} minutter. Har du ikke bedt om den, kan du se bort fra denne e-posten.',
+    intro: 'Koden for å finne avtalene dine i Finn tid er:',
+    or: 'Eller hent dem med ett trykk:',
+    button: 'Vis avtalene mine',
+    valid: 'Koden og lenken virker i {min} minutter, og lenken bare én gang.',
+    ignore: 'Har du ikke bedt om dette, kan du se bort fra denne e-posten.',
   },
   nn: {
     app: 'Finn tid',
-    host: NB_HOST,
     subject: '{code} er koden din i Finn tid',
-    body: 'Koden for å finne avtalane dine i Finn tid er:\n\n{code}\n\nDen verkar i {min} minutt. Har du ikkje bede om koden, kan du sjå bort frå denne e-posten.',
+    intro: 'Koden for å finne avtalane dine i Finn tid er:',
+    or: 'Eller hent dei med eitt trykk:',
+    button: 'Vis avtalane mine',
+    valid: 'Koden og lenkja verkar i {min} minutt, og lenkja berre éin gong.',
+    ignore: 'Har du ikkje bede om dette, kan du sjå bort frå denne e-posten.',
   },
   sv: {
     app: 'Hitta tid',
-    host: NB_HOST,
     subject: '{code} är din kod för Hitta tid',
-    body: 'Koden för att hitta dina träffar i Hitta tid är:\n\n{code}\n\nDen gäller i {min} minuter. Om du inte har bett om den kan du bortse från det här mejlet.',
+    intro: 'Koden för att hitta dina träffar i Hitta tid är:',
+    or: 'Eller hämta dem med ett tryck:',
+    button: 'Visa mina träffar',
+    valid: 'Koden och länken gäller i {min} minuter, och länken bara en gång.',
+    ignore: 'Om du inte har bett om det kan du bortse från det här mejlet.',
   },
   da: {
     app: 'Find tid',
-    host: NB_HOST,
     subject: '{code} er din kode til Find tid',
-    body: 'Koden til at finde dine aftaler i Find tid er:\n\n{code}\n\nDen gælder i {min} minutter. Har du ikke bedt om den, kan du se bort fra denne e-mail.',
+    intro: 'Koden til at finde dine aftaler i Find tid er:',
+    or: 'Eller hent dem med ét tryk:',
+    button: 'Vis mine aftaler',
+    valid: 'Koden og linket gælder i {min} minutter, og linket kun én gang.',
+    ignore: 'Har du ikke bedt om det, kan du se bort fra denne e-mail.',
   },
   is: {
     app: 'Finna tíma',
-    host: NB_HOST,
     subject: '{code} er kóðinn þinn fyrir Finna tíma',
-    body: 'Kóðinn til að finna viðburðina þína í Finna tíma er:\n\n{code}\n\nHann gildir í {min} mínútur. Ef þú baðst ekki um hann geturðu hunsað þennan tölvupóst.',
+    intro: 'Kóðinn til að finna viðburðina þína í Finna tíma er:',
+    or: 'Eða sæktu þá með einum smelli:',
+    button: 'Sýna viðburðina mína',
+    valid: 'Kóðinn og hlekkurinn gilda í {min} mínútur og hlekkurinn aðeins einu sinni.',
+    ignore: 'Ef þú baðst ekki um þetta geturðu hunsað þennan tölvupóst.',
   },
   en: {
     app: 'Whenever',
-    host: 'whenever.apphub.casa',
     subject: '{code} is your Whenever code',
-    body: 'Your code for finding your events in Whenever is:\n\n{code}\n\nIt works for {min} minutes. If you didn’t ask for it, you can ignore this email.',
+    intro: 'Your code for finding your events in Whenever is:',
+    or: 'Or get them with one tap:',
+    button: 'Show my events',
+    valid: 'The code and the link work for {min} minutes, and the link only once.',
+    ignore: 'If you didn’t ask for this, you can ignore this email.',
   },
 };
 
-// Only the code: no event names and no links.
-export function codeMail(lang: MailLang, code: string, from: string, to: string): Mail {
+const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ESC[c]);
+
+// The code and a one-tap link (`link`: https://<host>/find#t=<token>); no
+// event names. The HTML has inline styles only and no remote images, with the
+// code big and unspaced, so copying it gives just the digits.
+export function codeMail(lang: MailLang, code: string, link: string, from: string, to: string): Mail {
   const x = TEXT[lang];
-  const fill = (s: string) => s.replaceAll('{code}', code).replaceAll('{min}', String(CODE_MINUTES));
-  return { fromName: x.app, from, to, subject: fill(x.subject), text: `${fill(x.body)}\n\n${x.app} · ${x.host}\n` };
+  const host = new URL(link).host;
+  const valid = x.valid.replace('{min}', String(CODE_MINUTES));
+  const text = `${x.intro}\n\n${code}\n\n${x.or}\n${link}\n\n${valid} ${x.ignore}\n\n${x.app} · ${host}\n`;
+  const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+  const p = (html: string, style = '') => `<tr><td style="padding:0 28px 16px;font-size:16px;line-height:1.5;${style}">${html}</td></tr>`;
+  const html = `<!doctype html>
+<html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${esc(x.app)}</title></head>
+<body style="margin:0;padding:0;background:#f3f6f5;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f3f6f5;"><tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;background:#ffffff;border-radius:16px;font-family:${font};color:#172026;">
+<tr><td style="padding:28px 28px 16px;font-size:20px;font-weight:700;color:#0f766e;">${esc(x.app)}</td></tr>
+${p(esc(x.intro))}
+${p(`<div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:34px;font-weight:700;letter-spacing:8px;text-align:center;background:#eef3f2;border-radius:12px;padding:16px 8px;">${esc(code)}</div>`)}
+${p(esc(x.or))}
+<tr><td align="center" style="padding:0 28px 24px;"><a href="${esc(link)}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:12px 28px;border-radius:999px;">${esc(x.button)}</a></td></tr>
+${p(`${esc(valid)} ${esc(x.ignore)}`, 'font-size:14px;color:#5b6970;')}
+<tr><td style="padding:16px 28px 24px;border-top:1px solid #dde4e2;font-size:13px;color:#5b6970;">${esc(x.app)} · ${esc(host)}</td></tr>
+</table></td></tr></table>
+</body></html>
+`;
+  return { fromName: x.app, from, to, subject: x.subject.replaceAll('{code}', code), text, html };
 }
 
 // --- Message -------------------------------------------------------------------------------
@@ -104,21 +164,39 @@ export function headerText(s: string): string {
 // What can go in <...> on the envelope and in To: no spaces, brackets or quotes.
 export const MAILABLE_RE = /^[^\s@<>"()]+@[^\s@<>"()]+\.[^\s@<>"()]+$/;
 
+// A body part: base64 in lines of 76 (which never start with a dot or "--").
+const part = (s: string) => b64(s.replace(/\r?\n/g, '\r\n')).replace(/.{1,76}/g, '$&\r\n');
+
 export function message(m: Mail, now = new Date(), id: string = crypto.randomUUID()): string {
   const name = /^[A-Za-z0-9 ]*$/.test(m.fromName) ? `"${m.fromName}"` : headerText(m.fromName);
-  const body = b64(m.text.replace(/\r?\n/g, '\r\n')).replace(/.{1,76}/g, '$&\r\n');
-  return [
+  const head = [
     `From: ${name} <${m.from}>`,
     `To: <${m.to}>`,
     `Subject: ${headerText(m.subject)}`,
     `Date: ${now.toUTCString().replace(/GMT$/, '+0000')}`,
     `Message-ID: <${id}@${m.from.split('@')[1]}>`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    'Content-Transfer-Encoding: base64',
     'Auto-Submitted: auto-generated',
+  ];
+  const plain = ['Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64'];
+  if (!m.html) return [...head, ...plain, '', part(m.text)].join('\r\n');
+  // Base64 has no "=_", so the boundary can't turn up in a part.
+  const b = `=_whenever_${id}`;
+  return [
+    ...head,
+    `Content-Type: multipart/alternative; boundary="${b}"`,
     '',
-    body,
+    `--${b}`,
+    ...plain,
+    '',
+    part(m.text),
+    `--${b}`,
+    'Content-Type: text/html; charset=utf-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    part(m.html),
+    `--${b}--`,
+    '',
   ].join('\r\n');
 }
 

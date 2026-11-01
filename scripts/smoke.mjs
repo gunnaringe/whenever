@@ -746,7 +746,48 @@ await fm.waitForURL(`${BASE}/`);
 check((await toastText()).includes('Fant 1 avtale'), 'the right code finds the event');
 check((await fm.locator('.mine').textContent()).includes('Juletrefest'), 'and adds it to this device');
 check(await fm.evaluate(() => Object.values(JSON.parse(localStorage.getItem('whenever-v1')).events).some((e) => e.name === 'Juletrefest' && e.admin)), 'with its admin link');
+const postJson = (p, url, body) => p.evaluate(async ([url, body]) => (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json(), [url, body]);
+check((await postJson(fm, '/api/lookup/link', { token: asked.echoLink })).error === 'link', "the code used, the same mail's link is dead");
 await fm.close();
+
+// The mail's one-tap link (/find#t=…): out of the address bar at once, used
+// only on a tap, and once.
+{
+  const ln = await page({ refused: true });
+  await ln.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
+  await ln.goto(`${BASE}/`);
+  const linkAddr = `link-${Date.now()}@example.com`;
+  await postJson(ln, '/api/events', { event: { name: 'Påskelunsj', mode: 'dates', start: D(1), end: D(1), options: [D(1)] }, email: linkAddr });
+  const got = await postJson(ln, '/api/lookup', { email: linkAddr, lang: 'nb' });
+  check(/^[A-Za-z0-9_-]{32}$/.test(got.echoLink ?? ''), 'a code comes with a one-tap link');
+  await ln.goto(`${BASE}/find#t=${got.echoLink}`);
+  await ln.waitForSelector('[data-act="find-link"]');
+  check((await ln.evaluate(() => location.href)) === `${BASE}/find`, 'the token leaves the address bar at once');
+  check(!(await ln.evaluate(() => localStorage.getItem('whenever-v1') ?? '')).includes('Påskelunsj'), 'and nothing happens before the tap');
+  await shot(ln, '33-find-link', false);
+  await ln.click('[data-act="find-link"]');
+  await ln.waitForURL(`${BASE}/`);
+  check((await ln.locator('.mine').textContent()).includes('Påskelunsj'), 'a tap adds the event');
+  check((await postJson(ln, '/api/lookup/link', { token: got.echoLink })).error === 'link', 'the link works once');
+  check((await postJson(ln, '/api/lookup/code', { email: linkAddr, code: got.echo })).error === 'code', "and the same mail's code is used up with it");
+  await ln.goto(`${BASE}/find#t=${got.echoLink}`);
+  await ln.click('[data-act="find-link"]');
+  await ln.waitForSelector('#find-form [name=email]');
+  check((await ln.locator('#toast').textContent()).includes('allerede brukt'), 'a used link says so and offers a code instead');
+  await ln.close();
+}
+
+// The mail itself (HTML part) on a phone: fits, big code, one button.
+{
+  const { codeMail } = await import('../src/worker/mail.ts');
+  const m = codeMail('nb', '042137', 'https://finn-tid.apphub.casa/find#t=AbCdEfGhIjKlMnOpQrStUvWxYz012-_9', 'whenever@apphub.casa', 'kari@example.com');
+  const mp = await page();
+  await mp.setContent(m.html);
+  check(await mp.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'the mail fits a phone screen');
+  check((await mp.locator('a').count()) === 1 && (await mp.locator('a').textContent()) === 'Vis avtalene mine', 'with one button');
+  await mp.screenshot({ path: `${SHOTS}/34-code-mail.png`, fullPage: true });
+  await mp.close();
+}
 
 // An address on no event: the same reply and page, but no code.
 const fu = await page({ refused: true });
