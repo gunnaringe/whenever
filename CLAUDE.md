@@ -33,7 +33,9 @@ transforming (enums, namespaces, parameter properties) is off
 - `src/worker/index.ts`: `/api/*` only (`run_worker_first`): routing, JSON
   parsing, rate limit, turning the Bearer token into a credential.
   `poll.ts`: the `Poll` Durable Object, which decides everything about who
-  may do what. `link.ts`: making and parsing link tokens.
+  may do what. `link.ts`: making and parsing link tokens. `lookup.ts`: the
+  `Lookup` Durable Object (the email index and its codes), `codes.ts` the
+  limits on codes (pure), `mail.ts` the code mail and a small SMTP client.
 - `public/`: static files copied as they are: `index.html`, `privacy.html`,
   `_headers`, fonts, icons.
 - `scripts/build.mjs` writes `dist/` (what the Worker serves): `public/`
@@ -66,7 +68,7 @@ transforming (enums, namespaces, parameter properties) is off
   secret in constant time (`same()`); it also makes every token. Resetting
   a link stores a new secret, and the old one reads as `link: 'invalid'`.
   Secrets are stored unhashed on purpose, so the admin can copy a
-  participant's current link again. There is no Worker secret or key. Never
+  participant's current link again. Links need no Worker secret or key. Never
   put tokens in query strings or logs; the client sends them as
   `Authorization: Bearer`.
 - **Option keys:** dates mode `YYYY-MM-DD`, times mode `YYYY-MM-DDTHH:MM`
@@ -131,8 +133,36 @@ transforming (enums, namespaces, parameter properties) is off
   else; people edit their own entry; `openEdit` lets anyone edit/delete any
   entry (not with `hidden`, where only the admin sees others' answers).
   Emails are only returned to their owner (and `adminEmail` to the admin).
-  No email is sent yet; it's stored for magic links later.
-- **Routes:** paths `/`, `/new`, `/e/:id`, `/e/:id/:token` (SPA fallback
+- **Email codes (`/find`):** an address entered on events gets a 6-digit
+  code by email, and the code adds those events' links to the device.
+  - The `Lookup` object (one for the app, `getByName('lookup')`) stores HMACs of
+    addresses and IPs under a key it made itself and keeps in its own SQLite.
+    It holds `entries` (address → event, until the event's deletion),
+    `codes` (10 min, 5 tries) and `asks`.
+  - Each `Poll` calls `reindex()` after any write that touches an email.
+    The call comes after its own SQL, and it replaces that event's addresses,
+    expiring at its alarm time. If it fails, meta `indexed` stays unset and
+    `get()` tries again; that is also how events made before this got
+    indexed. `destroy` and `alarm` clear the event's entries.
+  - Using a code asks each event for `linksFor(email)`, which compares the
+    stored addresses, so a stale index entry brings nothing.
+  - Limits are in `codes.ts`:
+    - per address: 1 a minute, 3 an hour, 6 a day;
+    - per IP: 20 a day, plus the `MAIL_LIMIT` binding at 5 a minute;
+    - for the app: `MAIL_DAILY_MAX` a day.
+
+    Every ask counts whether or not the address is known; the reply is the
+    same (`{ ok }` or 429 `wait.*`); and only known addresses get a code.
+  - The mail is sent by `deliver()` in `ctx.waitUntil` after the reply,
+    over SMTP to `smtp.forwardemail.net:465` as `SMTP_USER` (also the From
+    address). Failures go to Workers Logs as `smtp <step>: <code> <reply>`
+    with addresses removed; never log an address or a code.
+  - In dev (`npm run dev` sets `--var MAIL_ECHO:1`), a request from this
+    machine (loopback `cf-connecting-ip`) gets the code back as `echo`
+    instead of a mail, and `x-dev-ip` stands in for its IP.
+    wrangler dev rewrites the URL and `Host` to the route's host, so a
+    hostname check can't tell dev from production.
+- **Routes:** paths `/`, `/new`, `/find`, `/e/:id`, `/e/:id/:token` (SPA fallback
   serves `index.html`), plus hash sub-views `#answer`, `#answer=<pid>`,
   `#edit`. Clicks go through `data-act` delegation to the `actions` map.
   The overview polls every 30 s and on tab focus, only while it's the
@@ -216,7 +246,8 @@ transforming (enums, namespaces, parameter properties) is off
   collided once).
 - **Privacy page:** `public/privacy.html`, static, nb + en. Keep it true
   when adding storage or a request: no cookies, analytics or third-party
-  requests. localStorage keys start with `whenever-`.
+  requests from the browser (the code mails go through Forward Email, and
+  the page says so). localStorage keys start with `whenever-`.
 - **Security headers:** `public/_headers` sets a strict same-origin CSP
   (no inline scripts) and `Referrer-Policy: no-referrer` (links carry
   tokens). The Worker sets `no-store`, `nosniff` and `no-referrer` on API
@@ -226,15 +257,18 @@ transforming (enums, namespaces, parameter properties) is off
 
 - `npm run check`: `wrangler types`, then `tsc` for each directory. Must be
   clean; esbuild and wrangler don't type-check.
-- `npm test`: model, link tokens and i18n (node:test, Node 22.18+ for type
-  stripping; CI uses 26).
+- `npm test`: model, link tokens, i18n, the code limits and the SMTP client
+  against a scripted server (node:test, Node 22.18+ for type stripping; CI
+  uses 26).
 - `npm run dev` (wrangler dev, which runs the build and rebuilds on
   changes), then `BASE=http://127.0.0.1:8787 npm run smoke`: a browser
   end-to-end check (dates and times events, chips, drag and touch painting,
   several participants, permissions, link reset, picking the date and the
   `.ics` download, ties and the ranking setting, holiday calendars, the
-  language menu and nn/is dates, themes against a dark and a light
-  device). It uses `playwright-core`, which has
+  events menu, finding events by an email code, the language menu and
+  nn/is dates, themes against a dark and a light device). The email-code
+  part needs `MAIL_ECHO` (as `npm run dev` sets; with plain `wrangler dev`
+  add `--var MAIL_ECHO:1`). It uses `playwright-core`, which has
   no browser: set `PWCHROME` to a Chromium or
   `chrome-headless-shell` binary, e.g. under `~/.cache/ms-playwright/`.
   Screenshots go to `$SHOTS` (default `/tmp/whenever-shots`).
@@ -254,7 +288,11 @@ doesn't exist). Branch builds are not enabled, so branches only get CI.
 If they are turned on, they run `wrangler preview`, which needs the
 `previews` block in `wrangler.jsonc`: keep giving any new binding a
 Preview-safe copy there. Rate-limit namespaces are account-wide:
-`3001` production, `3002` previews (1001 is scoreboard, 2001/2002 scorepad).
-No secrets or other manual setup besides that Build command. Agent sessions
+`3001`/`3003` production, `3002`/`3004` previews (1001 is scoreboard,
+2001/2002 scorepad). Secrets, set by the owner in the dashboard (type
+Secret, so deploys keep them): `SMTP_USER` (`whenever@apphub.casa`) and
+`SMTP_PASS` (its Forward Email SMTP password); without them asking for a
+code answers 503. Workers Logs is on for console output only (invocation
+logs off). Agent sessions
 can't deploy (Cloudflare credentials there are read-only). Free plan:
 SQLite-backed Durable Objects only, which this uses.

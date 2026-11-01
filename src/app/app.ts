@@ -17,7 +17,7 @@ import { THEMES, isTheme, applyTheme } from './theme.ts';
 import { TimeGrid, weekPages } from './timegrid.ts';
 import { icsFor, icsName } from './ics.ts';
 
-type Route = { page: 'home' } | { page: 'new' } | { page: 'missing' } | { page: 'event'; id: string; token: string | null };
+type Route = { page: 'home' } | { page: 'new' } | { page: 'find' } | { page: 'missing' } | { page: 'event'; id: string; token: string | null };
 type Sub = { kind: 'overview' } | { kind: 'edit' } | { kind: 'answer'; pid: string | null };
 type Tab = 'cal' | 'list' | 'table' | 'grid';
 type Flash = { kind: 'created' } | { kind: 'savedNew'; name: string };
@@ -179,6 +179,7 @@ function parseRoute(): Route {
   const p = location.pathname.replace(/\/+$/, '') || '/';
   if (p === '/') return { page: 'home' };
   if (p === '/new') return { page: 'new' };
+  if (p === '/find') return { page: 'find' };
   const m = p.match(ROUTE_RE);
   if (m) return { page: 'event', id: m[1], token: m[2] ?? null };
   return { page: 'missing' };
@@ -344,6 +345,7 @@ async function render(): Promise<void> {
 
   if (r.page === 'home') return renderHome();
   if (r.page === 'new') return renderForm(null);
+  if (r.page === 'find') return renderFind();
   if (r.page === 'missing') return renderMissing();
 
   const key = `${r.id}/${r.token ?? ''}`;
@@ -417,11 +419,104 @@ function renderHome(): void {
       <h1>${esc(t('heroTitle'))}</h1>
       <p class="lead">${esc(t('heroLead'))}</p>
       <a class="btn primary big" href="/new" data-link>${icon('plus')}${esc(t('newEvent'))}</a>
+      ${mine.length ? '' : `<p class="small find-link"><a href="/find" data-link>${esc(t('findLink'))}</a></p>`}
     </section>
-    ${mine.length ? `<section class="card"><h2>${esc(t('yourEvents'))}</h2><ul class="mine">${mine.map(row).join('')}</ul><p class="muted small">${esc(t('yourEventsHint'))}</p></section>` : ''}
+    ${mine.length ? `<section class="card"><h2>${esc(t('yourEvents'))}</h2><ul class="mine">${mine.map(row).join('')}</ul><p class="muted small">${esc(t('yourEventsHint'))} <a href="/find" data-link>${esc(t('findLink'))}</a></p></section>` : ''}
     <section class="steps">
       ${([1, 2, 3] as const).map((i) => `<div class="step"><span class="num">${i}</span><div><b>${esc(t(`step${i}`))}</b><p>${esc(t(`step${i}Text`))}</p></div></div>`).join('')}
     </section>`);
+}
+
+// --- Find your events by email ----------------------------------------------------------
+// An address entered on events gets a code by email (see src/worker/index.ts);
+// the code adds those events' links to this device. The page says the same
+// whether or not the address is known.
+
+const find = { email: '', sent: false };
+
+interface Found {
+  id: string;
+  name: string;
+  admin?: string;
+  me?: string;
+  pid?: string;
+}
+
+function renderFind(): void {
+  document.title = `${t('findTitle')} · ${t('appName')}`;
+  const actions = find.sent
+    ? `<button type="submit" class="btn primary">${esc(t('findShow'))}</button>
+       <button type="button" class="btn" data-act="find-again">${esc(t('findAgain'))}</button>
+       <button type="button" class="btn ghost" data-act="find-other">${esc(t('findOther'))}</button>`
+    : `<button type="submit" class="btn primary">${icon('mail')}${esc(t('findSend'))}</button>`;
+  paint(`
+    <section class="card find">
+      <h1>${esc(t('findTitle'))}</h1>
+      <p class="muted">${esc(t('findLead'))}</p>
+      <form id="find-form" novalidate>
+        ${field('email', t('findEmail'), `<input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(find.email)}" autocomplete="email" inputmode="email" required${find.sent ? ' readonly' : ''}>`)}
+        ${find.sent ? `<p class="sent" role="status">${esc(t('findSent'))}</p>${field('code', t('findCode'), '<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required>')}` : ''}
+        <div class="row wrap">${actions}</div>
+      </form>
+    </section>`);
+  const form = $<HTMLFormElement>('#find-form');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (find.sent) useCode($<HTMLInputElement>('#find-form [name="code"]').value);
+    else askCode($<HTMLInputElement>('#find-form [name="email"]').value);
+  });
+  $<HTMLInputElement>(`#find-form [name="${find.sent ? 'code' : 'email'}"]`).focus();
+}
+
+async function askCode(email: string, again = false): Promise<void> {
+  if (app.busy) return;
+  const e = M.cleanEmail(email);
+  if (!e.ok || !e.email) {
+    toast(t('err.email'));
+    $opt<HTMLInputElement>('#find-form [name="email"]')?.focus();
+    return;
+  }
+  setBusy(true);
+  try {
+    await api('POST', '/lookup', { body: { email: e.email, lang: getLang() } });
+    find.email = e.email;
+    find.sent = true;
+    if (again) toast(t('findAsked'));
+    renderFind();
+  } catch (err) {
+    toast(errText(err));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function useCode(code: string): Promise<void> {
+  if (app.busy) return;
+  const c = code.replace(/[\s-]/g, '');
+  if (!/^\d{6}$/.test(c)) {
+    toast(t('err.code'));
+    $opt<HTMLInputElement>('#find-form [name="code"]')?.focus();
+    return;
+  }
+  setBusy(true);
+  try {
+    const r = await api<{ events: Found[] }>('POST', '/lookup/code', { body: { email: find.email, code: c } });
+    for (const e of r.events) {
+      const patch: Partial<Stored> = { name: e.name };
+      if (e.admin) patch.admin = e.admin;
+      if (e.me) Object.assign(patch, { me: e.me, pid: e.pid });
+      store.put(e.id, patch);
+    }
+    find.email = '';
+    find.sent = false;
+    toast(r.events.length ? t('findFound', { n: r.events.length }) : t('findNone'));
+    go('/');
+  } catch (err) {
+    toast(errText(err));
+    $opt<HTMLInputElement>('#find-form [name="code"]')?.select();
+  } finally {
+    setBusy(false);
+  }
 }
 
 // --- Event form (create and edit) ----------------------------------------------------------
@@ -1841,6 +1936,11 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   'lang-pick': async () => switchLang(await menu(t('language'), LANGS.map((l) => ({ id: l, label: LANG_NAMES[l], on: l === getLang() })))),
   theme: () => pickTheme(),
   'events-pick': () => pickEvent(),
+  'find-again': () => askCode(find.email, true),
+  'find-other': () => {
+    find.sent = false;
+    renderFind();
+  },
   'theme-set': (b) => {
     $opt('#theme-menu')?.hidePopover();
     setTheme(data(b, 'theme'));

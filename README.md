@@ -16,8 +16,9 @@ and everyone marks when they can. At
   across a time grid, and get a personal link to change their answers later
   from any device. The organiser gets an admin link.
 - **No accounts, no cookies.** Each admin or personal link carries a random
-  secret stored with the event. Email is optional (stored for magic links;
-  none are sent yet).
+  secret stored with the event. Email is optional: with it you can find
+  your events on another device, by a code sent to that address (limited
+  per address, per IP and per day).
 - **Pick the date.** The organiser picks the final day or time from the
   results. Everyone then sees it at the top and can download it as a
   calendar file (`.ics`).
@@ -54,7 +55,8 @@ npm run build    # dist/: public/ plus the hashed app and stylesheet
 
 Cloudflare Worker `whenever` with static assets and one SQLite-backed Durable
 Object per event, deployed by Workers Builds on push to `main` (branch builds
-are off). The Build command is `npm run build`. There are no secrets to set.
+are off). The Build command is `npm run build`. The code mails need the
+secrets `SMTP_USER` and `SMTP_PASS` (Forward Email SMTP).
 
 ## Licence
 

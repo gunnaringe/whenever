@@ -19,7 +19,9 @@ const check = (ok, msg) => {
 
 const browser = await chromium.launch({ executablePath: process.env.PWCHROME });
 const errors = [];
-async function page({ mobile = true, lang = 'nb-NO' } = {}) {
+// refused: the page gets 4xx answers on purpose, so the browser's
+// "Failed to load resource" lines aren't errors there.
+async function page({ mobile = true, lang = 'nb-NO', refused = false } = {}) {
   const ctx = await browser.newContext({
     viewport: mobile ? { width: 390, height: 844 } : { width: 1180, height: 900 },
     deviceScaleFactor: 2,
@@ -28,7 +30,7 @@ async function page({ mobile = true, lang = 'nb-NO' } = {}) {
     hasTouch: mobile,
   });
   const p = await ctx.newPage();
-  p.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  p.on('console', (m) => m.type() === 'error' && !(refused && m.text().startsWith('Failed to load resource')) && errors.push(m.text()));
   p.on('pageerror', (e) => errors.push(e.message));
   return p;
 }
@@ -530,6 +532,71 @@ const headerFits = await many.evaluate(() => {
 check(headerFits, 'three header buttons fit on one line at 320 px in English');
 await many.screenshot({ path: `${SHOTS}/23-events-menu-many.png` });
 await many.close();
+
+// --- M) Find your events by email ------------------------------------------------------------
+// Needs `wrangler dev --var MAIL_ECHO:1` (npm run dev): the code comes back in
+// the reply instead of by mail. Each page gets its own x-dev-ip, and the
+// address is new each run, so the limits don't carry over between runs.
+const devIp = () => `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+const mailAddr = `smoke-${Date.now()}@example.com`;
+const fm = await page({ refused: true });
+await fm.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
+await fm.goto(`${BASE}/`);
+// The event was made on "another device": only its address is known here.
+await fm.evaluate(
+  async ([name, d, email]) => {
+    await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: { name, mode: 'dates', start: d, end: d, options: [d] }, email }) });
+  },
+  ['Juletrefest', D(0), mailAddr],
+);
+check((await fm.locator('.events-btn').count()) === 0, 'a new device has no events');
+await fm.click('.find-link a');
+await fm.waitForSelector('#find-form [name=email]');
+await fm.fill('#find-form [name=email]', mailAddr);
+await shot(fm, '25-find-email', false);
+// Typed differently from when it was entered: still the same address.
+await fm.fill('#find-form [name=email]', ` ${mailAddr.toUpperCase()} `);
+const askedResp = fm.waitForResponse((r) => r.url().endsWith('/api/lookup'));
+await fm.click('#find-form [type=submit]');
+const asked = await (await askedResp).json();
+check(/^\d{6}$/.test(asked.echo ?? ''), 'asking for a code makes one for an address on an event');
+await fm.waitForSelector('#find-form [name=code]');
+check((await fm.locator('#find-form .sent').textContent()).includes('10 minutter'), 'the page says a code is on its way');
+await shot(fm, '24-find-code', false);
+const toastText = async () => {
+  await fm.waitForSelector('#toast:not([hidden])', { timeout: 5000 });
+  const x = await fm.locator('#toast').textContent();
+  await fm.evaluate(() => (document.querySelector('#toast').hidden = true));
+  return x;
+};
+await fm.fill('#find-form [name=code]', asked.echo === '000000' ? '111111' : '000000');
+await fm.click('#find-form [type=submit]');
+check((await toastText()).includes('feil eller utløpt'), 'a wrong code is refused');
+await fm.click('[data-act="find-again"]');
+check((await toastText()).includes('Vent et minutt'), 'a new code for the same address has to wait a minute');
+await fm.fill('#find-form [name=code]', `${asked.echo.slice(0, 3)} ${asked.echo.slice(3)}`);
+await fm.click('#find-form [type=submit]');
+await fm.waitForURL(`${BASE}/`);
+check((await toastText()).includes('Fant 1 avtale'), 'the right code finds the event');
+check((await fm.locator('.mine').textContent()).includes('Juletrefest'), 'and adds it to this device');
+check(await fm.evaluate(() => Object.values(JSON.parse(localStorage.getItem('whenever-v1')).events).some((e) => e.name === 'Juletrefest' && e.admin)), 'with its admin link');
+await fm.close();
+
+// An address on no event: the same reply and page, but no code.
+const fu = await page({ refused: true });
+await fu.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
+await fu.goto(`${BASE}/find`);
+await fu.fill('#find-form [name=email]', `nobody-${Date.now()}@example.com`);
+const unkResp = fu.waitForResponse((r) => r.url().endsWith('/api/lookup'));
+await fu.click('#find-form [type=submit]');
+const unk = await unkResp;
+check(unk.status() === 200 && JSON.stringify(await unk.json()) === '{"ok":true}', 'an unknown address gets the same reply, without a code');
+await fu.waitForSelector('#find-form [name=code]');
+await fu.fill('#find-form [name=code]', '123456');
+await fu.click('#find-form [type=submit]');
+await fu.waitForSelector('#toast:not([hidden])');
+check((await fu.locator('#toast').textContent()).includes('feil eller utløpt'), 'and any code there is just "wrong or expired"');
+await fu.close();
 
 // --- L) Languages: a menu under the language code ----------------------------------------
 const lg = await page();

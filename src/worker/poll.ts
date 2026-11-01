@@ -8,6 +8,12 @@
 // what is decided here, and links are made here.
 // Methods return data, or { error, status } for the Worker to send.
 // Storage is wiped by an alarm 30 days after the event's last date.
+//
+// The email index (lookup.ts) learns which addresses this event has after
+// every change to them, and that they are gone when the event is. That call
+// comes last, after the event's own writes, and a failure never fails the
+// change: meta 'indexed' stays unset and the next get() tries again (which is
+// also how events made before the index got into it).
 
 import { DurableObject } from 'cloudflare:workers';
 import { LIMITS, sanitizeEntry, cleanAnswers, canAdd, canEdit, expiresAt } from '../shared/model.ts';
@@ -29,6 +35,7 @@ const NO_PERSON: Failure = { error: 'person', status: 404 };
 const MIN_LIFE = 7 * 24 * 60 * 60 * 1000;
 const deleteAt = (ev: PollEvent) => Math.max(expiresAt(ev), Date.now() + MIN_LIFE);
 const ADMIN: Who = { role: 'admin', me: null, link: 'ok' };
+const lookup = (env: Env) => env.LOOKUP.getByName('lookup');
 const visitor = (link: LinkState): Who => ({ role: 'visitor', me: null, link });
 
 type PersonRow = {
@@ -123,12 +130,59 @@ export class Poll extends DurableObject<Env> {
     this.setMeta('adminEmail', email || '');
     this.setMeta('created', Date.now());
     await this.ctx.storage.setAlarm(deleteAt(event));
-    return { token: token(adminId, secret), view: this.view(ADMIN) };
+    const out = { token: token(adminId, secret), view: this.view(ADMIN) };
+    await this.reindex();
+    return out;
   }
 
-  get(cred: Cred): Failure | { view: View } {
+  async get(cred: Cred): Promise<Failure | { view: View }> {
     if (!this.exists()) return NOT_FOUND;
+    if (this.getMeta('indexed') !== '1') await this.reindex();
     return { view: this.view(this.who(cred)) };
+  }
+
+  // The links an address has here (admin and/or personal), for the email
+  // code; null when the event is gone. Compares the stored addresses, so an
+  // index entry that is out of date brings nothing.
+  linksFor(email: string): { name: string; admin?: string; me?: string; pid?: string } | null {
+    if (!this.exists() || !email) return null;
+    const out: { name: string; admin?: string; me?: string; pid?: string } = { name: this.event().name };
+    if (this.getMeta('adminEmail') === email) out.admin = token(this.getMeta('adminId') ?? '', this.getMeta('adminSecret') ?? '');
+    const p = this.sql.exec<{ id: string; secret: string }>(`SELECT id, secret FROM people WHERE email = ? ORDER BY updated DESC LIMIT 1`, email).toArray()[0];
+    if (p) {
+      out.me = token(p.id, p.secret);
+      out.pid = p.id;
+    }
+    return out.admin || out.me ? out : null;
+  }
+
+  // Tell the index which addresses this event has now, and until when.
+  async reindex(): Promise<void> {
+    const id = this.ctx.id.name;
+    if (!id || !this.exists()) return;
+    this.setMeta('indexed', '0');
+    const emails = new Set<string>();
+    const admin = this.getMeta('adminEmail');
+    if (admin) emails.add(admin);
+    for (const r of this.sql.exec<{ email: string }>(`SELECT DISTINCT email FROM people WHERE email != ''`).toArray()) emails.add(r.email);
+    const until = (await this.ctx.storage.getAlarm()) ?? deleteAt(this.event());
+    try {
+      await lookup(this.env).index(id, [...emails], until);
+      if (this.exists()) this.setMeta('indexed', '1');
+    } catch (e) {
+      console.error('index:', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // The event is gone: so are its index entries (they also expire on their own).
+  async unindex(): Promise<void> {
+    const id = this.ctx.id.name;
+    if (!id) return;
+    try {
+      await lookup(this.env).index(id, [], 0);
+    } catch (e) {
+      console.error('unindex:', e instanceof Error ? e.message : String(e));
+    }
   }
 
   async update(cred: Cred, event: PollEvent, adminEmail: string | undefined): Promise<Failure | { view: View }> {
@@ -143,7 +197,9 @@ export class Poll extends DurableObject<Env> {
       if (a !== r.answers) this.sql.exec(`UPDATE people SET answers = ? WHERE id = ?`, a, r.id);
     }
     await this.ctx.storage.setAlarm(deleteAt(event));
-    return { view: this.view(who) };
+    const out = { view: this.view(who) };
+    await this.reindex();
+    return out;
   }
 
   async destroy(cred: Cred): Promise<Failure | { ok: true }> {
@@ -151,10 +207,11 @@ export class Poll extends DurableObject<Env> {
     if (this.who(cred).role !== 'admin') return FORBIDDEN;
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
+    await this.unindex();
     return { ok: true };
   }
 
-  add(cred: Cred, input: unknown): Failure | Added {
+  async add(cred: Cred, input: unknown): Promise<Failure | Added> {
     if (!this.exists()) return NOT_FOUND;
     const who = this.who(cred);
     const ev = this.event();
@@ -174,10 +231,12 @@ export class Poll extends DurableObject<Env> {
     );
     // An admin adding an entry stays admin; anyone else is now that participant.
     const viewer: Who = who.role === 'admin' ? who : { role: 'participant', me: pid, link: 'ok' };
-    return { pid, token: token(pid, secret), view: this.view(viewer) };
+    const out = { pid, token: token(pid, secret), view: this.view(viewer) };
+    if (r.entry.email) await this.reindex();
+    return out;
   }
 
-  edit(cred: Cred, pid: string, input: unknown): Failure | { view: View } {
+  async edit(cred: Cred, pid: string, input: unknown): Promise<Failure | { view: View }> {
     if (!this.exists()) return NOT_FOUND;
     const who = this.who(cred);
     const ev = this.event();
@@ -191,18 +250,23 @@ export class Poll extends DurableObject<Env> {
     if (!r.ok) return { error: r.error, status: 400 };
     this.sql.exec(`UPDATE people SET name = ?, comment = ?, answers = ?, updated = ? WHERE id = ?`, r.entry.name, r.entry.comment, JSON.stringify(r.entry.answers), Date.now(), pid);
     if (own) this.sql.exec(`UPDATE people SET email = ? WHERE id = ?`, r.entry.email ?? '', pid);
-    return { view: this.view(who) };
+    const out = { view: this.view(who) };
+    if (own) await this.reindex();
+    return out;
   }
 
-  drop(cred: Cred, pid: string): Failure | { view: View } {
+  async drop(cred: Cred, pid: string): Promise<Failure | { view: View }> {
     if (!this.exists()) return NOT_FOUND;
     const who = this.who(cred);
     const ev = this.event();
-    if (!this.sql.exec(`SELECT id FROM people WHERE id = ?`, pid).toArray().length) return NO_PERSON;
+    const row = this.sql.exec<{ email: string }>(`SELECT email FROM people WHERE id = ?`, pid).toArray()[0];
+    if (!row) return NO_PERSON;
     if (!canEdit(who, ev.settings, pid)) return FORBIDDEN;
     this.sql.exec(`DELETE FROM people WHERE id = ?`, pid);
     const viewer = who.me === pid ? visitor('none') : who;
-    return { view: this.view(viewer) };
+    const out = { view: this.view(viewer) };
+    if (row.email) await this.reindex();
+    return out;
   }
 
   // A participant's link: for themself or the admin. reset = invalidate the old one.
@@ -230,5 +294,6 @@ export class Poll extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     await this.ctx.storage.deleteAll();
+    await this.unindex();
   }
 }
