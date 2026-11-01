@@ -350,6 +350,8 @@ async function render(): Promise<void> {
     }
     app.pick = null;
     app.bestOpen = false;
+    // A toast's action (like the form's Undo) belongs to the view it came from.
+    if ($opt('#toast .toast-act')) hideToast();
     window.scrollTo(0, 0);
   }
   app.formGrid = null;

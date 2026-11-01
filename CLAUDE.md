@@ -260,7 +260,10 @@ transforming (enums, namespaces, parameter properties) is off
   string. Chromium has no Intl data for nn and is (it formats them as
   another language), so their dates come from `OWN_NAMES`, tested against
   Node's ICU. `WEEKDAYS`, `UNITS`, `AND` and `shortDate` are per language
-  too: a new language needs an entry in each. Templates mustn't build words
+  too: a new language needs an entry in each. What you make is an
+  «avstemning» in nb (in nn «avrøysting», which is feminine: «avrøystinga»,
+  «ho», «di»), never «avtale»: it isn't agreed until a date is picked
+  («Avtalt» is the picked date's card). Templates mustn't build words
   across languages (`weekdayHint` adds a plural ending to `{day}` in the
   Scandinavian ones; Icelandic says it differently). The header's language
   button shows the language code. User text always goes through `esc()`.
