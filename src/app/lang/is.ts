@@ -12,6 +12,7 @@ export const is: Record<Key, Text> = {
   newEvent: 'Nýr viðburður',
   yourEvents: 'Viðburðirnir þínir',
   yourEventsHint: 'Aðeins munað á þessu tæki. Hlekkirnir virka á öllum tækjum.',
+  showAllEvents: 'Sýna alla ({n})',
   openAdmin: 'Stjórna',
   openMine: 'Svörin mín',
   open: 'Opna',

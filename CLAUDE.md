@@ -196,13 +196,17 @@ transforming (enums, namespaces, parameter properties) is off
   Scandinavian ones; Icelandic says it differently). The header's language
   button shows the language code. User text always goes through `esc()`.
   The privacy page is nb + en only.
-- **Header menus:** the theme and language buttons (`menuButton`) open
-  popover menus (`.dropdown`, `#theme-menu` / `#lang-menu`, items from
-  `dropItems`). The browser closes them on Esc or a click outside and
-  focuses the current choice (`autofocus`); a `beforetoggle` handler puts
-  each under its button, and the arrow keys move between the choices.
-  Picking a language renders again; picking a theme only redraws the theme
-  menu's items (`setTheme`), so a form keeps its contents. Browsers without
+- **Header menus:** the events, theme and language buttons (`menuButton`)
+  open popover menus (`.dropdown`, `#events-menu` / `#theme-menu` /
+  `#lang-menu`, items from `dropItems`). The browser closes them on Esc or a
+  click outside and focuses the current choice (`autofocus`); a
+  `beforetoggle` handler puts each under its button, and the arrow keys move
+  between the choices. The events menu (`eventItems`) is there once this
+  device remembers an event: the latest `EVENTS_SHOWN` (8) as in-app links
+  (admin link, else personal), then "Show all" to the home page; leaving a
+  half-filled form asks first, like any in-app link. Picking a language
+  renders again; picking a theme only redraws the theme menu's items
+  (`setTheme`), so a form keeps its contents. Browsers without
   popovers (Safari 16, Firefox 124) get the dialog `menu()` instead
   (`canPopover`). Never put `data-act` on a popover's button: the click
   delegation's `preventDefault()` stops it opening. The 30 s refresh waits
