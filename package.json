@@ -1,6 +1,7 @@
 {
   "name": "whenever",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --var MAIL_ECHO:1",
