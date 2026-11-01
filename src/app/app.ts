@@ -291,7 +291,7 @@ function paint(inner: string): void {
       ${menuButton('lang-btn', 'lang-menu', 'lang-pick', `${t('language')}: ${LANG_NAMES[cur]}`, t('language'), cur.toUpperCase())}
       ${
         canPopover
-          ? `${events.length ? `<div id="events-menu" class="dropdown events" popover>${dropItems(events)}</div>` : ''}
+          ? `${events.length ? `<div id="events-menu" class="dropdown" popover>${dropItems(events)}</div>` : ''}
       <div id="theme-menu" class="dropdown" popover>${themeItems()}</div>
       <div id="lang-menu" class="dropdown" popover>${dropItems(LANGS.map((l) => ({ attrs: `data-act="lang" data-lang="${l}" lang="${l}"`, label: LANG_NAMES[l], on: l === cur })))}</div>`
           : ''

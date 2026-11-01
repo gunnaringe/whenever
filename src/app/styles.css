@@ -154,7 +154,8 @@ a { color: var(--accent); }
   background: var(--card);
   border-bottom: 1px solid var(--line);
 }
-.brand { display: flex; align-items: center; gap: .55rem; color: var(--ink); text-decoration: none; font: 600 1.2rem var(--head); }
+.brand { display: flex; align-items: center; gap: .55rem; min-width: 0; color: var(--ink); text-decoration: none; font: 600 1.2rem var(--head); }
+.brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .page { max-width: 780px; margin: 0 auto; padding: 1rem max(1rem, env(safe-area-inset-left)) 2rem; }
 .foot { display: flex; justify-content: center; gap: .5rem; padding: 1.5rem 1rem 2.5rem; color: var(--muted); font-size: .875rem; }
 .foot a { color: var(--muted); }
@@ -642,7 +643,12 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
 .menu-item.on > span { display: flex; align-items: center; gap: .4rem; }
 /* The header's menus (your events, theme, language): popovers under their buttons
    (placed by app.ts). */
-.menu-btn { gap: .3rem; padding-inline: .7rem; }
+.menu-btn { flex: none; gap: .3rem; padding-inline: .7rem; }
+/* Three menus and the name on a 320 px phone. */
+@media (max-width: 400px) {
+  .bar { gap: .35rem; }
+  .bar .menu-btn { padding-inline: .45rem; }
+}
 .menu-btn .chev { color: var(--muted); font-size: .7rem; }
 .lang-btn { letter-spacing: .03em; }
 .dropdown {

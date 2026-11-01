@@ -509,6 +509,27 @@ check(await sw.locator('#dlg[open]').isVisible(), 'with unsaved changes, it asks
 await sw.click('#dlg button[value="no"]');
 check((await sw.inputValue('form [name=name]')) === 'Sommerfest 2027' && !(await evMenu.isVisible()), 'staying keeps the form, and the menu is closed');
 await sw.close();
+// Nine remembered events on a narrow phone in English: eight, then "Show all".
+const many = await page({ lang: 'en-US' });
+await many.setViewportSize({ width: 320, height: 640 });
+await many.context().addInitScript(() => {
+  const events = {};
+  for (let i = 1; i <= 9; i++) events[`abcdefghijk${i}`] = { name: `Event ${i}`, admin: 'a'.repeat(38), seen: i };
+  localStorage.setItem('whenever-v1', JSON.stringify({ events }));
+});
+await many.goto(`${BASE}/`);
+await many.click('.events-btn');
+const manyItems = await many.locator('#events-menu .menu-item').allTextContents();
+check(manyItems.length === 9 && manyItems[0].startsWith('Event 9') && manyItems[8] === 'Show all (9)', `the latest eight, then "Show all" (${manyItems.join(' | ')})`);
+check((await many.locator('#events-menu .menu-item').last().getAttribute('href')) === '/', 'which goes to the home page');
+const headerFits = await many.evaluate(() => {
+  const r = document.querySelector('.lang-btn').getBoundingClientRect();
+  const b = document.querySelector('.brand').getBoundingClientRect();
+  return document.documentElement.scrollWidth <= innerWidth && r.right <= innerWidth && Math.abs(r.top - b.top) < 20;
+});
+check(headerFits, 'three header buttons fit on one line at 320 px in English');
+await many.screenshot({ path: `${SHOTS}/23-events-menu-many.png` });
+await many.close();
 
 // --- L) Languages: a menu under the language code ----------------------------------------
 const lg = await page();
