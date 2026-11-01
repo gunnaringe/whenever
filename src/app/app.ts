@@ -217,6 +217,10 @@ function closeSub(): void {
 
 // --- Shell ----------------------------------------------------------------------------
 
+// Browsers from before 2024 (Safari 16, Firefox 124) have no popovers: the
+// language button opens the dialog menu there instead.
+const canPopover = 'popover' in HTMLElement.prototype;
+
 function paint(inner: string): void {
   const cur = getLang();
   $('#app').innerHTML = `
@@ -224,10 +228,14 @@ function paint(inner: string): void {
       <a class="brand" href="/" data-link><img src="/icons/icon.svg" alt="" width="28" height="28"><span>${esc(t('appName'))}</span></a>
       <span class="grow"></span>
       <button type="button" class="btn ghost small" data-act="theme" aria-label="${esc(t('theme'))}" title="${esc(t('theme'))}">${icon('theme')}</button>
-      <button type="button" class="btn ghost small lang-btn" popovertarget="lang-menu" aria-label="${esc(`${t('language')}: ${LANG_NAMES[cur]}`)}" title="${esc(t('language'))}">${cur.toUpperCase()}<span class="chev" aria-hidden="true">▾</span></button>
-      <div id="lang-menu" class="dropdown" popover>
+      <button type="button" class="btn ghost small lang-btn" ${canPopover ? 'popovertarget="lang-menu"' : 'data-act="lang-pick"'} aria-label="${esc(`${t('language')}: ${LANG_NAMES[cur]}`)}" title="${esc(t('language'))}">${cur.toUpperCase()}<span class="chev" aria-hidden="true">▾</span></button>
+      ${
+        canPopover
+          ? `<div id="lang-menu" class="dropdown" popover>
         ${LANGS.map((l) => `<button type="button" class="menu-item${l === cur ? ' on' : ''}" data-act="lang" data-lang="${l}" lang="${l}"${l === cur ? ' aria-current="true" autofocus' : ''}><span>${l === cur ? icon('check') : ''}${esc(LANG_NAMES[l])}</span></button>`).join('')}
-      </div>
+      </div>`
+          : ''
+      }
     </header>
     <main class="page">${inner}</main>
     <footer class="foot"><a href="/privacy">${esc(t('privacy'))}</a><span aria-hidden="true">·</span><a href="https://apphub.casa">apphub.casa</a></footer>`;
@@ -1748,16 +1756,20 @@ async function pickTheme(): Promise<void> {
   applyTheme(r);
 }
 
+function switchLang(l: string): void {
+  if (!isLang(l) || l === getLang()) return;
+  setLang(l);
+  store.setLang(l);
+  render();
+}
+
 // data-act="<name>" -> what a click on it does.
 const actions: Record<string, (b: HTMLElement) => unknown> = {
   lang: (b) => {
-    const l = data(b, 'lang');
     $opt('#lang-menu')?.hidePopover();
-    if (!isLang(l) || l === getLang()) return;
-    setLang(l);
-    store.setLang(l);
-    render();
+    switchLang(data(b, 'lang'));
   },
+  'lang-pick': async () => switchLang(await menu(t('language'), LANGS.map((l) => ({ id: l, label: LANG_NAMES[l], on: l === getLang() })))),
   theme: () => pickTheme(),
   retry: () => {
     app.viewKey = null;

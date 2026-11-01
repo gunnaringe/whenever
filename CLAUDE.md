@@ -195,7 +195,10 @@ transforming (enums, namespaces, parameter properties) is off
   across languages (`weekdayHint` adds a plural ending to `{day}` in the
   Scandinavian ones; Icelandic says it differently). The header shows the
   language code; it opens a popover menu (`#lang-menu`), placed under the
-  button on `beforetoggle`, with `autofocus` on the current language. User
+  button on `beforetoggle`, with `autofocus` on the current language.
+  Browsers without popovers (Safari 16, Firefox 124) get the dialog
+  `menu()` instead (`canPopover`); never put `data-act` on the popover
+  button, as the click delegation's `preventDefault()` stops it opening. User
   text always goes through `esc()`. The privacy page is nb + en only.
 - **CSS names:** `.page` is the container and `.bar` the header; the result
   meter is `.meter`. Don't reuse `.bar`/`.wrap`-style generic names (both

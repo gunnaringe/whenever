@@ -496,6 +496,19 @@ const firstMonth = (await lg.locator('#f-cal .cal-month h4').first().textContent
 check(isMonths.includes(firstMonth), `the calendar's month titles are Icelandic (${firstMonth})`);
 await shot(lg, '18-icelandic-new-event', false);
 await lg.close();
+// A browser without popovers (before 2024) gets the dialog menu.
+const old = await page();
+await old.context().addInitScript(() => delete HTMLElement.prototype.popover);
+await old.goto(`${BASE}/`);
+await old.waitForSelector('.lang-btn');
+check((await old.locator('#lang-menu').count()) === 0, 'without popovers there is no dropdown in the page');
+await old.locator('.lang-btn').click();
+check((await old.locator('#dlg[open] .menu-item').count()) === 6, 'the button opens the dialog menu instead');
+await old.locator('#dlg button[value="sv"]').click();
+// The dialog's close event comes a moment after the click.
+await old.waitForFunction(() => document.documentElement.lang === 'sv', null, { timeout: 3000 }).catch(() => {});
+check((await old.evaluate(() => document.documentElement.lang)) === 'sv', 'and picking a language there works');
+await old.close();
 
 // --- F) Admin deletes an entry and the event --------------------------------------------
 await admin.reload();
