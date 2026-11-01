@@ -72,6 +72,8 @@ const app: {
   pushedSub: boolean;
   renders: number;
   busy: boolean;
+  // The best list shows every option tied for first, not just SHOW_BEST.
+  bestOpen: boolean;
   // An unsaved form left with the browser's back button, given back when
   // its page is opened again.
   kept: { where: string; draft: Draft | null; answer: AnswerDraft | null } | null;
@@ -93,6 +95,7 @@ const app: {
   pushedSub: false,
   renders: 0,
   busy: false,
+  bestOpen: false,
   kept: null,
 };
 
@@ -299,7 +302,11 @@ function paint(inner: string): void {
       }
     </header>
     <main class="page">${inner}</main>
-    <footer class="foot"><a href="/privacy">${esc(t('privacy'))}</a><span aria-hidden="true">·</span><a href="https://apphub.casa">apphub.casa</a></footer>`;
+    <footer class="foot">
+      <a href="/privacy">${icon('lock')}${esc(t('privacy'))}</a>
+      <a href="https://github.com/gunnaringe/whenever" rel="noopener">${icon('code')}${esc(t('sourceCode'))}</a>
+      <a href="https://apphub.casa">${icon('grid')}apphub.casa</a>
+    </footer>`;
 }
 
 const field = (name: string, label: string, control: string, hint = '') =>
@@ -337,6 +344,7 @@ async function render(): Promise<void> {
       app.kept = null;
     }
     app.pick = null;
+    app.bestOpen = false;
     window.scrollTo(0, 0);
   }
   app.formGrid = null;
@@ -1268,19 +1276,21 @@ function bestHtml(v: M.View): string {
   const all = ranked(ev, v.people);
   if (!all.length) return `<p class="muted">${esc(t('noneAvailable'))}</p>`;
   const rank = M.ranks(all, s);
-  // Never leave out one that is as good as the first.
+  // Never leave out one that is as good as the first: a button shows them all.
   const more = rank.slice(SHOW_BEST).filter((r) => r === 1).length;
+  const shown = app.bestOpen ? SHOW_BEST + more : SHOW_BEST;
+  // The hidden bits make it read (and copy) as "1. Friday 4 December – 1 of 1 can".
   return `<ol class="best">${all
-    .slice(0, SHOW_BEST)
+    .slice(0, shown)
     .map(
       (b, i) => `<li><button type="button" class="best-item${rank[i] === 1 ? ' first' : ''}${app.pick?.k === b.key ? ' sel' : ''}" data-act="pick" data-k="${b.key}" ${ev.mode === 'times' ? 'data-win="1"' : ''}>
-        <span class="rank">${rank[i]}</span>
-        <span class="bl">${esc(cap('date' in b ? windowLabel(b) : fmtDate(b.key, 'long')))}${ev.decided === b.key ? ` <span class="tag">${esc(t('decidedTag'))}</span>` : ''}</span>
+        <span class="rank">${rank[i]}</span><span class="vh">. </span>
+        <span class="bl">${esc(cap('date' in b ? windowLabel(b) : fmtDate(b.key, 'long')))}${ev.decided === b.key ? ` <span class="tag">${icon('check')}${esc(t('decidedTag'))}</span>` : ''}</span><span class="vh"> – </span>
         <span class="bn">${esc(countText(b, n, s))}</span>
       </button></li>`,
     )
     .join('')}</ol>
-    ${more ? `<p class="best-more muted small">${esc(t('moreTied', { n: more }))}</p>` : ''}
+    ${more ? `<p class="best-more"><button type="button" class="linkish small" data-act="best-more" aria-expanded="${app.bestOpen}">${esc(app.bestOpen ? t('showFewer') : t('moreTied', { n: more }))}<span class="chev" aria-hidden="true">${app.bestOpen ? '▴' : '▾'}</span></button></p>` : ''}
     ${s.maybe ? `<p class="best-how muted small">${esc(t(s.maybeCounts ? 'rankMaybeCounts' : 'rankYesFirst'))}</p>` : ''}`;
 }
 
@@ -1293,12 +1303,22 @@ function resultsHtml(v: M.View): string {
   return `<section class="card results">
     ${title}
     ${v.people.length ? '' : `<p class="muted">${esc(t('noAnswersYet'))}</p>`}
-    ${bestHtml(v)}
+    <div id="best">${bestHtml(v)}</div>
     <div class="seg" role="tablist">${tabs.map((x) => `<button type="button" role="tab" class="${x === app.tab ? 'on' : ''}" aria-selected="${x === app.tab}" data-act="tab" data-tab="${x}">${esc(t(`tab.${x}`))}</button>`).join('')}</div>
     <div id="res-body">${resultsBody(v)}</div>
-    ${app.tab === 'table' ? '' : `<div class="legend" aria-hidden="true"><span>${esc(t('legendFew'))}</span><span class="ramp"></span><span>${esc(t('legendMany'))}</span></div>`}
+    ${app.tab === 'table' ? '' : legendHtml(v)}
     <div id="detail" aria-live="polite">${detailHtml(v)}</div>
   </section>`;
+}
+
+// The heat ramp, plus what marks a day in the calendar or grid: a ring for
+// the ones most can make, a badge for the picked date.
+function legendHtml(v: M.View): string {
+  const ev = v.event;
+  const marks = app.tab === 'cal' || app.tab === 'grid';
+  const top = marks && v.people.length ? `<span class="lg"><i class="sw top ${ev.mode}"></i>${esc(t('legendTop'))}</span>` : '';
+  const dec = marks && ev.decided ? `<span class="lg"><i class="dk">${icon('check')}</i>${esc(t('decidedTag'))}</span>` : '';
+  return `<div class="legend" aria-hidden="true"><span class="lg"><span>${esc(t('legendFew'))}</span><span class="ramp"></span><span>${esc(t('legendMany'))}</span></span>${top}${dec}</div>`;
 }
 
 function resultsBody(v: M.View): string {
@@ -1309,8 +1329,8 @@ function resultsBody(v: M.View): string {
   const at = (k: string): M.Tally => T.get(k) ?? { key: k, yes: [], maybe: [], no: [] };
   const pct = (x: number) => (n ? (100 * x) / n : 0).toFixed(1);
   const row = (key: string, label: string, g: M.Tally, win: boolean) => `
-    <button type="button" class="res-row${app.pick?.k === key ? ' sel' : ''}" data-act="pick" data-k="${key}" ${win ? 'data-win="1"' : ''}>
-      <span class="rl">${esc(cap(label))}</span>
+    <button type="button" class="res-row${app.pick?.k === key ? ' sel' : ''}${ev.decided === key ? ' decided' : ''}" data-act="pick" data-k="${key}" ${win ? 'data-win="1"' : ''}>
+      <span class="rl">${esc(cap(label))}${ev.decided === key ? ` <span class="tag">${icon('check')}${esc(t('decidedTag'))}</span>` : ''}</span>
       <span class="meter"><i class="y" style="width:${pct(g.yes.length)}%"></i><i class="m" style="width:${pct(g.maybe.length)}%"></i></span>
       <span class="rn">${M.score(g, ev.settings)}/${n}</span>
     </button>`;
@@ -1330,7 +1350,7 @@ function resultsBody(v: M.View): string {
     const cell = (a: M.Answer | undefined) =>
       a === M.YES ? `<td class="y" title="${esc(t('yes'))}">✓</td>` : a === M.MAYBE ? `<td class="m" title="${esc(t('maybe'))}">(✓)</td>` : `<td class="n" title="${esc(t('no'))}"></td>`;
     return `<div class="table-scroll"><table class="ptable">
-      <thead><tr><th scope="col" class="name">${esc(t('name'))}</th>${ev.options.map((k) => `<th scope="col"><span>${wd[M.weekday(k)]}</span><b>${Number(k.slice(8))}</b><small>${esc(fmtDate(k, 'monthShort'))}</small></th>`).join('')}</tr></thead>
+      <thead><tr><th scope="col" class="name">${esc(t('name'))}</th>${ev.options.map((k) => `<th scope="col"${ev.decided === k ? ` class="decided" title="${esc(t('decidedTag'))}"` : ''}><span>${wd[M.weekday(k)]}</span><b>${Number(k.slice(8))}</b><small>${esc(fmtDate(k, 'monthShort'))}</small>${ev.decided === k ? `<i class="dk">${icon('check')}</i>` : ''}</th>`).join('')}</tr></thead>
       <tbody>${v.people.map((p) => `<tr><th scope="row" class="name">${esc(p.name)}</th>${ev.options.map((k) => cell(p.answers[k])).join('')}</tr>`).join('')}</tbody>
       <tfoot><tr><th scope="row" class="name">${esc(t('sum'))}</th>${ev.options.map((k) => `<td>${M.score(at(k), ev.settings)}</td>`).join('')}</tr></tfoot>
     </table></div>`;
@@ -1348,7 +1368,8 @@ function resultsBody(v: M.View): string {
       const g = at(x);
       const a = M.score(g, ev.settings);
       const h = heat(g, n, ev.settings);
-      return `<button type="button" class="cal-day res${hi(h)}${top.has(x) ? ' top' : ''}${app.pick?.k === x ? ' sel' : ''}" style="--h:${h}" data-act="pick" data-k="${x}" aria-label="${esc(fmtDate(x, 'long'))}: ${esc(countText(g, n, ev.settings))}"><span class="dn">${Number(x.slice(8))}</span><span class="dc">${a || ''}</span></button>`;
+      const dec = ev.decided === x;
+      return `<button type="button" class="cal-day res${hi(h)}${top.has(x) ? ' top' : ''}${app.pick?.k === x ? ' sel' : ''}${dec ? ' decided' : ''}" style="--h:${h}" data-act="pick" data-k="${x}" aria-label="${esc(fmtDate(x, 'long'))}: ${esc(countText(g, n, ev.settings))}${dec ? ` (${esc(t('decidedTag'))})` : ''}"><span class="dn">${Number(x.slice(8))}</span><span class="dc">${a || ''}</span>${dec ? `<i class="dk">${icon('check')}</i>` : ''}</button>`;
     },
   });
 }
@@ -1429,6 +1450,8 @@ function mountResults(v: M.View): void {
   const T = M.tally(ev, v.people);
   const opts = new Set(ev.options);
   const topKeys = new Set(firstPlace(M.bestWindows(ev, v.people, Infinity), ev.settings).flatMap((w) => w.keys));
+  const decidedKeys = M.windows(ev, v.people).find((w) => w.key === ev.decided)?.keys ?? [];
+  const decided = new Set(decidedKeys);
   const selKeys = (): Set<string> => {
     const p = app.pick;
     if (!p) return new Set();
@@ -1447,7 +1470,8 @@ function mountResults(v: M.View): void {
       const g = T.get(k) ?? { key: k, yes: [], maybe: [], no: [] };
       const a = M.score(g, ev.settings);
       const h = heat(g, n, ev.settings);
-      return { cls: `heat${hi(h)}${topKeys.has(k) ? ' top' : ''}${sel.has(k) ? ' sel' : ''}`, h, text: n && a ? String(a) : '' };
+      const dec = decided.has(k) ? ` decided${k === decidedKeys[0] ? ' dstart' : ''}${k === decidedKeys[decidedKeys.length - 1] ? ' dend' : ''}` : '';
+      return { cls: `heat${hi(h)}${topKeys.has(k) ? ' top' : ''}${sel.has(k) ? ' sel' : ''}${dec}`, h, text: n && a ? String(a) : '' };
     },
     onPick: (k) => {
       app.pick = { k };
@@ -1936,6 +1960,13 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   'lang-pick': async () => switchLang(await menu(t('language'), LANGS.map((l) => ({ id: l, label: LANG_NAMES[l], on: l === getLang() })))),
   theme: () => pickTheme(),
   'events-pick': () => pickEvent(),
+  'best-more': () => {
+    app.bestOpen = !app.bestOpen;
+    const el = $opt('#best');
+    if (!el || !app.view) return;
+    el.innerHTML = bestHtml(app.view);
+    $opt<HTMLElement>('#best [data-act="best-more"]')?.focus();
+  },
   'find-again': () => askCode(find.email, true),
   'find-other': () => {
     find.sent = false;

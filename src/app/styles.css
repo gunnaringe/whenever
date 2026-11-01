@@ -52,6 +52,8 @@
   --maybe-ink: #2b1d00;
   --maybe-soft: #fdf1cd;
   --heat0: #eef2f1;
+  --pick: #2155d6;
+  --pick-ink: #ffffff;
   --na: #e9eceb;
   --danger: #b42318;
   --ok-bg: #e9f9f1;
@@ -81,6 +83,8 @@
   --maybe-ink: #2b1d00;
   --maybe-soft: #3d300c;
   --heat0: #1d292e;
+  --pick: #6ea8fe;
+  --pick-ink: #0b1a33;
   --na: #131b1f;
   --danger: #ff7a6b;
   --ok-bg: #11302a;
@@ -110,6 +114,8 @@
   --maybe-ink: #000;
   --maybe-soft: #2e2000;
   --heat0: #04160a;
+  --pick: #00e5ff;
+  --pick-ink: #000000;
   --na: #010803;
   --danger: #ff4d4d;
   --ok-bg: #00230b;
@@ -157,8 +163,16 @@ a { color: var(--accent); }
 .brand { display: flex; align-items: center; gap: .55rem; min-width: 0; color: var(--ink); text-decoration: none; font: 600 1.2rem var(--head); }
 .brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .page { max-width: 780px; margin: 0 auto; padding: 1rem max(1rem, env(safe-area-inset-left)) 2rem; }
-.foot { display: flex; justify-content: center; gap: .5rem; padding: 1.5rem 1rem 2.5rem; color: var(--muted); font-size: .875rem; }
-.foot a { color: var(--muted); }
+.foot { display: flex; flex-wrap: wrap; justify-content: center; gap: .25rem .5rem; padding: 1.5rem 1rem 2.5rem; font-size: .875rem; }
+.foot a { display: inline-flex; align-items: center; gap: .4rem; padding: .4rem .75rem; border-radius: 999px; color: var(--muted); text-decoration: none; }
+.foot a:hover { color: var(--ink); background: var(--soft); }
+.foot .i { opacity: .8; }
+/* Visually hidden, but read and copied. */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* A button that looks like a link. */
+.linkish { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem 0; border: 0; background: none; color: var(--accent); font: 600 .875rem var(--body); cursor: pointer; }
+.linkish:hover { text-decoration: underline; }
+.linkish .chev { font-size: .7rem; }
 .loading { padding: 3rem 0; text-align: center; color: var(--muted); }
 .sub { margin-top: -.25rem; }
 
@@ -427,6 +441,12 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
 .cal-day.res .dc { font-size: .68rem; font-weight: 700; opacity: .85; }
 .cal-day.res.top { box-shadow: inset 0 0 0 2.5px var(--maybe); }
 .cal-day.res.sel, .cal-day.res:hover { box-shadow: inset 0 0 0 3px var(--ink); }
+/* The picked date has its own colour (--pick) and mark: a badge here, a
+   frame in the time grid, a bar in the list and table. Rings stay for most
+   can (amber) and the selected day (ink). */
+.dk { display: inline-grid; place-items: center; width: 1.1rem; height: 1.1rem; border-radius: 50%; background: var(--pick); color: var(--pick-ink); box-shadow: 0 0 0 2px var(--card); font-style: normal; }
+.dk .i { width: .72rem; height: .72rem; }
+.cal-day .dk { position: absolute; top: -5px; right: -5px; z-index: 1; }
 
 /* --- Time grid -------------------------------------------------------------------- */
 
@@ -493,6 +513,10 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
 }
 .tg-cell.heat.hi { color: var(--yes-ink); }
 .tg-cell.heat.top { box-shadow: inset 2px 0 0 var(--maybe), inset -2px 0 0 var(--maybe); }
+.tg-cell.heat.decided { --f: inset 3px 0 0 var(--pick), inset -3px 0 0 var(--pick); box-shadow: var(--f); }
+.tg-cell.heat.decided.dstart { box-shadow: var(--f), inset 0 3px 0 var(--pick); }
+.tg-cell.heat.decided.dend { box-shadow: var(--f), inset 0 -3px 0 var(--pick); }
+.tg-cell.heat.decided.dstart.dend { box-shadow: var(--f), inset 0 3px 0 var(--pick), inset 0 -3px 0 var(--pick); }
 .tg-cell.heat.sel { box-shadow: inset 0 0 0 2px var(--ink); }
 .tg-empty { padding: 1rem 0; }
 
@@ -500,6 +524,7 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
 
 .best { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: .4rem; }
 .best-item {
+  position: relative;
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: .25rem .75rem;
@@ -541,6 +566,9 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
   cursor: pointer;
 }
 .res-row:hover, .res-row.sel { background: var(--soft); }
+.res-row.decided { box-shadow: inset 3px 0 0 var(--pick); }
+.best .tag, .res-row .tag { background: var(--pick); color: var(--pick-ink); }
+.tag .i { width: .85em; height: .85em; margin-right: .2em; vertical-align: -.1em; }
 .res-row .rl { font-size: .9rem; }
 .res-row .rn { font-weight: 700; font-size: .875rem; }
 .meter { display: flex; height: .7rem; border-radius: 999px; background: var(--heat0); overflow: hidden; }
@@ -553,14 +581,20 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
 .ptable thead th { position: sticky; top: 0; z-index: 2; font-weight: 600; line-height: 1.1; }
 .ptable thead th span, .ptable thead th small { display: block; font-size: .7rem; color: var(--muted); font-weight: 500; }
 .ptable thead th b { display: block; font-size: 1rem; }
+.ptable thead th.decided { box-shadow: inset 0 -3px 0 var(--pick); }
+.ptable thead th .dk { margin-top: .2rem; }
 .ptable .name { position: sticky; left: 0; z-index: 1; text-align: left; max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ptable thead .name { z-index: 3; }
 .ptable td.y { background: var(--yes-soft); color: var(--yes); font-weight: 700; }
 .ptable td.m { background: var(--maybe-soft); color: color-mix(in srgb, var(--maybe) 70%, var(--ink)); font-weight: 700; }
 .ptable tfoot td, .ptable tfoot th { position: sticky; bottom: 0; font-weight: 700; background: var(--soft); }
 
-.legend { display: flex; align-items: center; gap: .5rem; margin: .75rem 0 0; color: var(--muted); font-size: .8rem; }
-.legend .ramp { flex: 0 1 8rem; height: .55rem; border-radius: 999px; background: linear-gradient(90deg, var(--heat0), var(--yes)); border: 1px solid var(--line); }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1.1rem; margin: .75rem 0 0; color: var(--muted); font-size: .8rem; }
+.legend .lg { display: inline-flex; align-items: center; gap: .45rem; white-space: nowrap; }
+.legend .sw { width: 1rem; height: 1rem; border-radius: 4px; background: var(--heat0); }
+.legend .sw.top.dates { box-shadow: inset 0 0 0 2px var(--maybe); }
+.legend .sw.top.times { box-shadow: inset 2px 0 0 var(--maybe), inset -2px 0 0 var(--maybe); }
+.legend .ramp { flex: 0 0 4.5rem; height: .55rem; border-radius: 999px; background: linear-gradient(90deg, var(--heat0), var(--yes)); border: 1px solid var(--line); }
 #detail { margin-top: .75rem; }
 .detail { padding: .85rem 1rem; border-radius: 12px; background: var(--soft); }
 .dg { display: grid; grid-template-columns: 8.5rem 1fr; gap: .5rem; padding: .3rem 0; }
