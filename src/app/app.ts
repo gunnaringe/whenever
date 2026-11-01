@@ -10,12 +10,14 @@ import type { Key, Lang } from './i18n.ts';
 import { api, ApiError } from './api.ts';
 import * as store from './store.ts';
 import type { Stored } from './store.ts';
-import { $, $opt, $$, esc, icon, toast, ask, menu, dialog, copyText, shareUrl, qrSvg } from './ui.ts';
+import { $, $opt, $$, esc, icon, toast, hideToast, ask, menu, dialog, copyText, shareUrl, qrSvg } from './ui.ts';
 import type { MenuItem } from './ui.ts';
 import { calendarHtml, bindPaint } from './calendar.ts';
 import { THEMES, isTheme, applyTheme } from './theme.ts';
 import { TimeGrid, weekPages } from './timegrid.ts';
 import { icsFor, icsName } from './ics.ts';
+import { History } from './history.ts';
+import type { Snap } from './history.ts';
 
 type Route = { page: 'home' } | { page: 'new' } | { page: 'find' } | { page: 'missing' } | { page: 'event'; id: string; token: string | null };
 type Sub = { kind: 'overview' } | { kind: 'edit' } | { kind: 'answer'; pid: string | null };
@@ -39,6 +41,7 @@ interface Draft extends M.DayWindow {
   until: string; // the calendar shows months up to this day
   decided: string | null; // kept when the event is edited, if it still fits
   dirty: boolean; // changed since it was opened or saved
+  hist: History; // undo and redo for the picked days and times
 }
 
 // The answer editor's state while it is open.
@@ -564,6 +567,7 @@ function newDraft(): Draft {
     until: M.monthEnd(M.addDays(M.localToday(), 42)),
     decided: null,
     dirty: false,
+    hist: new History({ dates: [], times: [], pattern: null }),
   };
 }
 
@@ -698,7 +702,10 @@ function tzOptions(sel: string): string {
 }
 
 function renderForm(v: M.View | null): void {
-  if (!app.draft) app.draft = v ? draftFromView(v) : newDraft();
+  if (!app.draft) {
+    app.draft = v ? draftFromView(v) : newDraft();
+    app.draft.hist.reset(snap(app.draft));
+  }
   const d = app.draft;
   const editing = Boolean(v);
   document.title = `${t(editing ? 'editEvent' : 'newEvent')} · ${t('appName')}`;
@@ -746,13 +753,13 @@ function renderForm(v: M.View | null): void {
         <div id="f-cal"></div>
         <p class="cal-tip muted small">${esc(t(touch() ? 'rangeHintTouch' : 'rangeHint'))}</p>
         <button type="button" class="btn small" id="more-months" data-act="more-months">${icon('plus')}${esc(t('moreMonths'))}</button>
-        <p id="f-count" class="count-line" aria-live="polite"></p>
+        <div class="count-row"><p id="f-count" class="count-line" aria-live="polite"></p>${undoButtons(d)}</div>
         <p class="err" id="range-err" hidden></p>
       </section>
       <section class="card" id="times-card" ${d.mode === 'times' ? '' : 'hidden'}>
         <h2>${esc(t('possibleTimes'))}</h2>
         <p class="muted">${esc(t(touch() ? 'possibleTimesHintTouch' : 'possibleTimesHint'))}</p>
-        <div class="chip-row">${(Object.keys(PRESETS) as Preset[]).map((p) => `<button type="button" class="btn small" data-act="preset" data-p="${p}">${esc(t(`preset.${p}`))}</button>`).join('')}</div>
+        <div class="chip-row">${(Object.keys(PRESETS) as Preset[]).map((p) => `<button type="button" class="btn small" data-act="preset" data-p="${p}">${esc(t(`preset.${p}`))}</button>`).join('')}${undoButtons(d)}</div>
         <div id="f-grid"></div>
         <p id="f-warn" class="note warn" hidden></p>
       </section>
@@ -790,8 +797,14 @@ function bindForm(): void {
     const el = e.target as HTMLInputElement;
     const n = el.name;
     d.dirty = true;
-    if (n === 'mode') setMode(el.value as M.Mode);
-    else if (n === 'dayStart' || n === 'dayEnd' || n === 'slot') changeWindow(n);
+    // Both change the times in ways the earlier steps can't be laid over.
+    if (n === 'mode') {
+      setMode(el.value as M.Mode);
+      resetHistory();
+    } else if (n === 'dayStart' || n === 'dayEnd' || n === 'slot') {
+      changeWindow(n);
+      resetHistory();
+    }
     else if (n === 'duration') d.duration = Number(el.value);
     else if (n === 'tz') d.tz = el.value;
     else if (n === 'holidays' && M.isHolidayCalendar(el.value)) {
@@ -828,6 +841,7 @@ function bindForm(): void {
       refreshChips();
       refreshCount();
       refreshTimes();
+      commit();
     },
   });
 }
@@ -987,6 +1001,7 @@ function refreshTimes(): void {
         else times.delete(k);
       }
       refreshCount();
+      commit();
     },
     onDay: (date) => dayMenu(date),
   });
@@ -1015,6 +1030,7 @@ async function dayMenu(date: string): Promise<void> {
   } else return;
   refreshCount();
   refreshTimes();
+  commit(r === 'clear' || r === 'remove');
 }
 
 function applyPreset(p: Preset): void {
@@ -1026,6 +1042,7 @@ function applyPreset(p: Preset): void {
   for (const x of d.dates) setDateTimes(d, x, mins);
   refreshCount();
   refreshTimes();
+  commit(p === 'clear');
 }
 
 // A quick button: if any of its days are picked it drops them, otherwise it
@@ -1036,6 +1053,79 @@ function selectGroup(list: string[]): void {
   selectDates(d, list, !list.some((x) => d.dates.has(x)));
   refreshDays();
   refreshTimes();
+  commit();
+}
+
+// --- Undo and redo in the picker (history.ts) ---------------------------------------------
+// Every change to the picked days or times ends with commit(). Switching
+// mode or the day's hours resets the history, as both rework the times. The
+// history lives on the draft, so it goes with it (save, cancel, leaving)
+// and survives a language switch.
+
+const snap = (d: Draft): Snap => ({
+  dates: [...d.dates].sort(),
+  times: [...d.times].sort(),
+  pattern: d.pattern ? [...d.pattern].sort((a, b) => a - b) : null,
+});
+
+const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+function undoButtons(d: Draft): string {
+  const b = (act: 'undo' | 'redo', keys: string, aria: string, on: boolean) =>
+    `<button type="button" class="btn small ghost" data-act="${act}" title="${esc(`${t(act)} (${keys})`)}" aria-keyshortcuts="${aria}"${on ? '' : ' disabled'}>${icon(act)}${esc(t(act))}</button>`;
+  return `<span class="undo-btns">${b('undo', MAC ? '⌘Z' : 'Ctrl+Z', 'Control+Z Meta+Z', d.hist.undo.length > 0)}${b('redo', MAC ? '⇧⌘Z' : 'Ctrl+Y', 'Control+Shift+Z Meta+Shift+Z Control+Y', d.hist.redo.length > 0)}</span>`;
+}
+
+function refreshUndo(): void {
+  const h = app.draft?.hist;
+  if (!h) return;
+  for (const b of $$<HTMLButtonElement>('#ev-form .undo-btns [data-act="undo"]')) b.disabled = !h.undo.length;
+  for (const b of $$<HTMLButtonElement>('#ev-form .undo-btns [data-act="redo"]')) b.disabled = !h.redo.length;
+}
+
+// After a change: one step, if anything changed. With `tell`, a toast says
+// what went (days, else times) and offers to undo it.
+function commit(tell = false): void {
+  const d = draft();
+  const before = d.hist.base;
+  if (!d.hist.commit(snap(d))) return;
+  d.dirty = true;
+  refreshUndo();
+  if (!tell) return;
+  const gone = before.dates.filter((x) => !d.dates.has(x)).length;
+  const undo = { label: t('undo'), act: 'undo' };
+  if (gone) toast(t('removedDays', { n: gone }), undo);
+  else if (d.times.size < before.times.length) toast(t('timesCleared'), undo);
+}
+
+function resetHistory(): void {
+  const d = draft();
+  d.hist.reset(snap(d));
+  refreshUndo();
+}
+
+function travel(back: boolean, from?: HTMLElement): void {
+  const d = app.draft;
+  if (!d || !$opt('#ev-form')) return;
+  const s = back ? d.hist.back(snap(d)) : d.hist.forward(snap(d));
+  if (!s) return;
+  // New Sets: the snapshot stays as it is in the history.
+  d.dates = new Set(s.dates);
+  d.times = new Set(s.times);
+  d.pattern = s.pattern ? new Set(s.pattern) : null;
+  const last = s.dates[s.dates.length - 1];
+  if (last && last > d.until) d.until = M.monthEnd(last);
+  d.dirty = true;
+  hideToast();
+  refreshDays();
+  refreshTimes();
+  refreshUndo();
+  // A button that just went disabled (or the toast's, now gone) would drop
+  // the focus: hand it to the other one in the same place.
+  if (from && (from.matches(':disabled') || !from.checkVisibility?.())) {
+    const group = from.closest('.undo-btns') ?? $opt('#ev-form .count-row .undo-btns');
+    group?.querySelector<HTMLButtonElement>(`[data-act="${back ? 'redo' : 'undo'}"]:not(:disabled)`)?.focus({ preventScroll: true });
+  }
 }
 
 async function submitForm(): Promise<void> {
@@ -2006,6 +2096,7 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
     if (last > d.until) d.until = M.monthEnd(last);
     refreshDays();
     refreshTimes();
+    commit(true);
   },
   'more-months': () => {
     const d = draft();
@@ -2018,6 +2109,7 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
     selectDates(d, [...d.dates], false);
     refreshDays();
     refreshTimes();
+    commit(true);
   },
   'sel-group': (b) => selectGroup(groupDays(data(b, 'g'))),
   'sel-wd': (b) => selectGroup(scopeDays().filter((x) => M.weekday(x) === Number(b.dataset.wd))),
@@ -2026,6 +2118,8 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
     selectGroup([0, 1, 2, 3, 4, 5, 6].map((i) => M.addDays(data(b, 'mon'), i)).filter((x) => scope.has(x)));
   },
   preset: (b) => applyPreset(data(b, 'p') as Preset),
+  undo: (b) => travel(true, b),
+  redo: (b) => travel(false, b),
 
   // Event page
   answer: () => openSub('answer'),
@@ -2131,6 +2225,19 @@ document.addEventListener('keydown', (e) => {
   const i = items.indexOf(e.target as HTMLElement);
   const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
   items[next].focus();
+});
+
+// Undo and redo in the event form: Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y.
+// Not in its fields (they have the browser's own undo), a dialog or a menu.
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || !app.draft || !$opt('#ev-form')) return;
+  const k = e.key.toLowerCase();
+  const redo = (k === 'z' && e.shiftKey) || (k === 'y' && e.ctrlKey && !e.shiftKey);
+  if (k !== 'z' && !redo) return;
+  if ((e.target as Element).closest?.('input, textarea, select, [contenteditable]')) return;
+  if ($<HTMLDialogElement>('#dlg').open || menuOpen()) return;
+  e.preventDefault();
+  travel(!redo);
 });
 
 // Closing or reloading the tab with unsaved changes: the browser asks.

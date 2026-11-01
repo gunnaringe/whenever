@@ -271,6 +271,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .note.warn { margin: .6rem 0 0; padding: .5rem .7rem; border-radius: 8px; background: var(--warn-bg); font-size: .875rem; }
 .err { color: var(--danger); font-weight: 600; }
 .count-line { margin: .75rem 0 0; color: var(--muted); font-weight: 600; font-size: .9rem; }
+.count-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .25rem .75rem; margin-top: .75rem; }
+.count-row .count-line { margin: 0; }
+.undo-btns { display: inline-flex; gap: .15rem; margin-left: auto; }
+.undo-btns .btn { padding-inline: .55rem; }
 
 .choice { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-bottom: 1rem; }
 .opt-card {
@@ -723,6 +727,17 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
   font-weight: 600;
   box-shadow: 0 8px 24px rgb(0 0 0 / .25);
 }
+.toast-act {
+  margin-left: .75rem;
+  padding: .15rem .75rem;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.toast-act:hover { background: rgb(127 127 127 / .25); }
 
 /* --- Privacy page ----------------------------------------------------------------- */
 

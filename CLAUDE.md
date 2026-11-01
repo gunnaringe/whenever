@@ -196,6 +196,18 @@ transforming (enums, namespaces, parameter properties) is off
   marked there). The day names are sticky; in paint mode they open the
   whole-day menu. The event form warns when participants would page
   through more than three weeks.
+- **Undo and redo in the picker** (`history.ts`, pure and tested): the
+  draft's `hist` keeps snapshots of `dates`, `times` and `pattern` (sorted
+  copies, never the live Sets). Every change to them ends with `commit()`:
+  a calendar stroke in `bindPaint`'s `done`, a time-grid stroke in
+  `onPaint`, the chips, periods, "Ingen", presets and the day menu. A
+  change that touches them without a `commit()` merges into the next step.
+  Switching mode or the day's hours resets the history (both rework the
+  times). Undo/Redo buttons sit by the count line and the presets;
+  Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl+Y work outside the form's fields.
+  "Ingen", a period, clearing times and removing a day show a toast with
+  an Undo button (`toast(msg, action)`). The history goes with the draft
+  (save, cancel, leaving) and survives a language switch.
 - **New-event defaults:** nothing picked. In times mode a picked day gets
   9 to 17 (`Draft.pattern`; the presets and "copy to all days" change it).
   Switching mode keeps the picked days.
@@ -262,13 +274,13 @@ transforming (enums, namespaces, parameter properties) is off
 
 - `npm run check`: `wrangler types`, then `tsc` for each directory. Must be
   clean; esbuild and wrangler don't type-check.
-- `npm test`: model, link tokens, i18n, the code limits and the SMTP client
+- `npm test`: model, link tokens, i18n, the picker's undo history, the code limits and the SMTP client
   against a scripted server (node:test, Node 22.18+ for type stripping; CI
   uses 26).
 - `npm run dev` (wrangler dev, which runs the build and rebuilds on
   changes), then `BASE=http://127.0.0.1:8787 npm run smoke`: a browser
   end-to-end check (dates and times events, chips, drag and touch painting,
-  several participants, permissions, link reset, picking the date and the
+  undo and redo in the picker, several participants, permissions, link reset, picking the date and the
   `.ics` download, ties and the ranking setting, holiday calendars, the
   events menu, finding events by an email code, the language menu and
   nn/is dates, themes against a dark and a light device). The email-code
