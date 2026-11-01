@@ -525,6 +525,82 @@ await hc.close();
   await un.close();
 }
 
+// --- V) The admin's own answer, and answers for others ----------------------------------------
+{
+  const ad = await page({ refused: true });
+  await ad.context().setExtraHTTPHeaders({ 'x-dev-ip': `10.9.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` });
+  await ad.goto(`${BASE}/`);
+  const days = [D(0), D(1), D(2)];
+  const made = await ad.evaluate(async (days) => {
+    const r = await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: { name: 'Teammøte', mode: 'dates', start: days[0], end: days[2], options: days }, email: '' }) });
+    return r.json();
+  }, days);
+  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.waitForSelector('.role');
+  check((await ad.locator('.role [data-act="answer"]').textContent()).includes('Legg til dine svar'), 'the admin has "Add your answers"');
+  check((await ad.locator('.role [data-act="mark-own"]').count()) === 0, 'and no "pick your answer" before anyone answered');
+  // For someone else: no email, a link afterwards.
+  await ad.click('.role [data-act="answer-other"]');
+  check((await ad.locator('h1').textContent()) === 'Legg til svar for en annen' && (await ad.locator('#answer-form [name=email]').count()) === 0, '"for someone else" has no email field');
+  check((await ad.locator('#answer-form [data-field="name"] .label').textContent()) === 'Navn *', 'and asks for "Navn", not "Navnet ditt"');
+  await ad.fill('#answer-form [name=name]', 'Kari');
+  await day(ad, D(0)).click();
+  await ad.click('[data-act="save-answer"]');
+  await ad.waitForSelector('#dlg[open]');
+  check((await ad.locator('#dlg h3').textContent()).includes('Lenken til Kari'), 'saving shows the link for that person');
+  await ad.click('#dlg button[value=""]');
+  check((await ad.locator('.plist li', { hasText: 'Kari' }).locator('.tag').count()) === 0, 'and Kari is not marked as you');
+  check((await ad.locator('.role [data-act="mark-own"]').count()) === 1, 'now "pick your answer" is offered');
+  // Their own: email field (prefilled from the event's admin email, empty here), no link dialog.
+  await ad.click('.role [data-act="answer"]');
+  check((await ad.locator('h1').textContent()) === 'Legg til dine svar', 'the own form says "your answers"');
+  const ownMail = `admin-${Date.now()}@example.com`;
+  await ad.fill('#answer-form [name=name]', 'Ola Admin');
+  await ad.click('#answer-form .fold summary');
+  await ad.fill('#answer-form [name=email]', ownMail);
+  await day(ad, D(1)).click();
+  await ad.click('[data-act="save-answer"]');
+  await ad.waitForSelector('.role');
+  check(!(await ad.locator('#dlg[open]').count()), 'saving your own answers shows no link');
+  check((await ad.locator('.plist li', { hasText: 'Ola Admin' }).locator('.tag').textContent()) === 'deg', 'your row is marked "deg"');
+  check((await ad.locator('.role [data-act="answer"]').textContent()).includes('Endre svarene dine'), 'the button becomes "Change your answers"');
+  await ad.locator('.people').screenshot({ path: `${SHOTS}/31-admin-own-people.png` });
+  const views = await ad.evaluate(async ([id, admin]) => {
+    const get = (tok) => fetch(`/api/events/${id}`, { headers: tok ? { authorization: `Bearer ${tok}` } : {} }).then((r) => r.json());
+    const a = await get(admin);
+    const kari = a.view.people.find((p) => p.name === 'Kari');
+    const { token } = await fetch(`/api/events/${id}/people/${kari.id}/link`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${admin}` }, body: '{}' }).then((r) => r.json());
+    return { a: a.view, visitor: (await get(null)).view, kari: (await get(token)).view };
+  }, [made.id, made.token]);
+  const olaIn = (v) => v.people.find((p) => p.name === 'Ola Admin');
+  check(olaIn(views.a).email === ownMail && views.a.me === olaIn(views.a).id, 'the admin view has their own email and them as "me"');
+  check(views.a.adminEmail === ownMail, 'with no admin email, theirs becomes it');
+  check(!('email' in olaIn(views.visitor)) && !('email' in olaIn(views.kari)), 'nobody else sees that email');
+  // An email code for that address brings back both links.
+  const asked = await ad.evaluate(async (email) => (await fetch('/api/lookup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, lang: 'nb' }) })).json(), ownMail);
+  const found = await ad.evaluate(async ([email, code]) => (await fetch('/api/lookup/code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, code }) })).json(), [ownMail, asked.echo]);
+  const hit = (found.events ?? []).find((e) => e.id === made.id);
+  check(Boolean(hit?.admin && hit?.me && hit.pid === olaIn(views.a).id), 'an email code for it gives both the admin link and the personal one');
+  // Unmark, then mark again from the role card.
+  await ad.click('[data-act="admin-more"]');
+  await ad.click('#dlg .menu-item[value="own"]');
+  await ad.click('#dlg .menu-item[value="none"]');
+  await ad.waitForSelector('.role [data-act="mark-own"]');
+  check((await ad.locator('.plist .tag').count()) === 0 && (await ad.locator('.role [data-act="answer"]').textContent()).includes('Legg til dine svar'), '"None of them" unmarks it');
+  await ad.locator('.role').screenshot({ path: `${SHOTS}/32-admin-mark-own.png` });
+  await ad.click('.role [data-act="mark-own"]');
+  await ad.locator('#dlg .menu-item', { hasText: 'Ola Admin' }).click();
+  await ad.waitForSelector('.role [data-act="mark-own"]', { state: 'detached' });
+  check((await ad.locator('.plist li', { hasText: 'Ola Admin' }).locator('.tag').count()) === 1, 'picking it marks it again');
+  // Deleting their own answers keeps the admin link.
+  const adminPath = new URL(ad.url()).pathname;
+  await ad.locator('.plist li', { hasText: 'Ola Admin' }).locator('[data-act="delete-entry"]').click();
+  await ad.click('#dlg button[value="yes"]');
+  await ad.waitForSelector('.role [data-act="answer"]:has-text("Legg til dine svar")');
+  check(new URL(ad.url()).pathname === adminPath, 'deleting your own answers keeps you on the admin link');
+  await ad.close();
+}
+
 // --- R) Ties beyond the first three, and the footer -----------------------------------------
 const tie = await page();
 await tie.goto(`${BASE}/`);

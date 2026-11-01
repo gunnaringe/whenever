@@ -195,6 +195,8 @@ function subView(): Sub {
   const h = location.hash.slice(1);
   if (h === 'edit') return { kind: 'edit' };
   if (h === 'answer') return { kind: 'answer', pid: null };
+  // The admin adds answers for someone else (not their own).
+  if (h === 'answer=new') return { kind: 'answer', pid: 'new' };
   const m = h.match(ANSWER_RE);
   if (m) return { kind: 'answer', pid: m[1] };
   return { kind: 'overview' };
@@ -1301,10 +1303,15 @@ function actionsHtml(v: M.View): string {
   const add = M.canAdd(who, ev.settings);
   const shareBtn = `<button type="button" class="btn" data-act="share" data-url="${esc(eventUrl(id))}" data-title="${esc(ev.name)}">${icon('share')}${esc(t('shareEvent'))}</button>`;
   if (v.role === 'admin') {
+    // The admin's own answer (v.me, see poll.ts) and answers for others.
+    const mine = v.people.some((p) => p.id === v.me);
+    const quiet = app.flash?.kind === 'created';
     return `<section class="card role">
-      <div class="role-text"><b>${esc(t('youAreAdmin'))}</b><p class="muted">${esc(t('adminHint'))}</p></div>
+      <div class="role-text"><b>${esc(t('youAreAdmin'))}</b><p class="muted">${esc(t('adminHint'))}</p>
+        ${!mine && v.people.length ? `<button type="button" class="linkish small" data-act="mark-own">${esc(t('markOwnQ'))}</button>` : ''}</div>
       <div class="row wrap">
-        ${add ? `<button type="button" class="btn${app.flash?.kind === 'created' ? '' : ' primary'}" data-act="answer">${icon('plus')}${esc(t('addAnswers'))}</button>` : ''}
+        ${mine ? `<button type="button" class="btn primary" data-act="answer">${icon('edit')}${esc(t('editYourAnswers'))}</button>` : `<button type="button" class="btn${quiet ? '' : ' primary'}" data-act="answer">${icon('plus')}${esc(t('addYourAnswers'))}</button>`}
+        <button type="button" class="btn" data-act="answer-other">${icon('plus')}${esc(t('addForOther'))}</button>
         <button type="button" class="btn" data-act="edit-event">${icon('edit')}${esc(t('editEvent'))}</button>
         <button type="button" class="btn" data-act="toggle-closed">${icon('lock')}${esc(t(ev.settings.closed ? 'reopen' : 'close'))}</button>
         <button type="button" class="btn" data-act="admin-more" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('dots')}</button>
@@ -1578,7 +1585,9 @@ function mountResults(v: M.View): void {
 function peopleHtml(v: M.View, stored: Stored | null): string {
   const ev = v.event;
   const who = { role: v.role, me: v.me };
-  const mine = (p: M.Person) => p.id === v.me || Boolean(stored?.pid && p.id === stored.pid);
+  // The admin's own entry comes from the server (v.me); others also go by the
+  // entry this device added.
+  const mine = (p: M.Person) => p.id === v.me || Boolean(v.role !== 'admin' && stored?.pid && p.id === stored.pid);
   const rows = v.people
     .map((p) => {
       const edit = M.canEdit(who, ev.settings, p.id);
@@ -1606,10 +1615,13 @@ function peopleHtml(v: M.View, stored: Stored | null): string {
 
 // --- Answer editor --------------------------------------------------------------------------
 
-function renderAnswer(v: M.View, pid: string | null): void {
+function renderAnswer(v: M.View, sub: string | null): void {
   const ev = v.event;
   const who = { role: v.role, me: v.me };
-  const target = pid ? v.people.find((p) => p.id === pid) : v.me ? v.people.find((p) => p.id === v.me) : null;
+  // 'new': the admin adds answers for someone else.
+  const other = sub === 'new' && v.role === 'admin';
+  const pid = sub === 'new' ? null : sub;
+  const target = pid ? v.people.find((p) => p.id === pid) : v.me && !other ? v.people.find((p) => p.id === v.me) : null;
   if (pid && !target) {
     toast(t('err.person'));
     return closeSub();
@@ -1618,14 +1630,15 @@ function renderAnswer(v: M.View, pid: string | null): void {
     toast(t(ev.settings.closed ? 'err.closed' : 'err.forbidden'));
     return closeSub();
   }
-  const own = !target || target.id === v.me;
+  const own = target ? target.id === v.me : !other;
   if (!app.answer) {
     app.answer = {
       pid: target?.id ?? null,
       own,
       name: target?.name ?? '',
       comment: target?.comment ?? '',
-      email: target?.email ?? '',
+      // The admin's own new entry starts with the admin email.
+      email: target?.email ?? (own && v.role === 'admin' ? (v.adminEmail ?? '') : ''),
       answers: { ...(target?.answers ?? {}) },
       brush: M.YES,
       view: 'cal',
@@ -1633,7 +1646,7 @@ function renderAnswer(v: M.View, pid: string | null): void {
     };
   }
   const a = answer();
-  const title = target ? (own ? t('editYourAnswers') : t('editAnswersOf', { name: target.name })) : t('addYourAnswers');
+  const title = target ? (own ? t('editYourAnswers') : t('editAnswersOf', { name: target.name })) : t(own ? 'addYourAnswers' : 'addForOther');
   document.title = `${title} · ${ev.name}`;
   const hint: Key =
     ev.mode === 'dates'
@@ -1660,7 +1673,7 @@ function renderAnswer(v: M.View, pid: string | null): void {
     </section>
     <section class="card">
       <form id="answer-form" novalidate>
-        ${field('name', `${t('yourName')} *`, `<input name="name" required maxlength="${M.LIMITS.person}" value="${esc(a.name)}" autocomplete="name">`)}
+        ${field('name', `${t(own ? 'yourName' : 'personName')} *`, `<input name="name" required maxlength="${M.LIMITS.person}" value="${esc(a.name)}"${own ? ' autocomplete="name"' : ' autocomplete="off"'}>`)}
         ${field('comment', t('commentOptional'), `<input name="comment" maxlength="${M.LIMITS.comment}" value="${esc(a.comment)}" placeholder="${esc(t('commentPh'))}">`)}
         ${
           own
@@ -1827,7 +1840,7 @@ async function saveAnswer(): Promise<void> {
     $opt('#answer-form [name="name"]')?.focus();
     return;
   }
-  const body: { name: string; comment: string; answers: M.Answers; email?: string } = { name, comment: a.comment, answers: a.answers };
+  const body: { name: string; comment: string; answers: M.Answers; email?: string; own?: boolean } = { name, comment: a.comment, answers: a.answers };
   if (a.own) {
     if (!M.cleanEmail(a.email).ok) {
       toast(t('err.email'));
@@ -1845,13 +1858,15 @@ async function saveAnswer(): Promise<void> {
       toast(t('saved'));
       closeSub();
     } else {
+      if (v.role === 'admin' && a.own) body.own = true;
       const r = await api<M.Added>('POST', `/events/${id}/people`, { token, body });
       app.answer = null;
       if (v.role === 'admin') {
         setView(r.view);
-        if (!store.get(id)?.pid) store.put(id, { me: r.token, pid: r.pid });
         closeSub();
-        linkDialog(t('personLinkTitle', { name }), t('addedByAdminText'), linkUrl(id, r.token));
+        // Their own answers need no link: the admin link is theirs.
+        if (a.own) toast(t('saved'));
+        else linkDialog(t('personLinkTitle', { name }), t('addedByAdminText'), linkUrl(id, r.token));
       } else {
         store.put(id, { name: v.event.name, me: r.token, pid: r.pid });
         app.flash = { kind: 'savedNew', name };
@@ -1887,7 +1902,7 @@ async function deleteEntry(pid: string): Promise<void> {
     const { view } = await api<{ view: M.View }>('DELETE', `/events/${id}/people/${pid}`, { token });
     if (store.get(id)?.pid === pid) store.forgetMe(id);
     toast(t('deleted'));
-    if (own) {
+    if (own && v.role !== 'admin') {
       setView(view, id, null);
       go(`/e/${id}`, true);
     } else {
@@ -1976,11 +1991,14 @@ async function swapLink(path: string, body: unknown, patch: (token: string) => P
 
 async function adminMore(): Promise<void> {
   const { id, token } = here();
+  const v = current();
   const r = await menu(t('adminMenu'), [
+    ...(v.people.length ? [{ id: 'own', label: t('whichIsYours'), hint: t('whichIsYoursHint') }] : []),
     { id: 'reset', label: t('newAdminLink'), hint: t('newAdminLinkHint') },
     { id: 'delete', label: t('deleteEvent'), hint: t('deleteEventHint'), danger: true },
   ]);
-  if (r === 'reset') {
+  if (r === 'own') await markOwn();
+  else if (r === 'reset') {
     if (!(await ask(t('newAdminLinkQ'), { ok: t('makeNewLink') }))) return;
     await swapLink(`/events/${id}/admin-link`, undefined, (tok) => ({ admin: tok }), t('newLinkDone'), t('newAdminLinkDoneText'));
   } else if (r === 'delete') {
@@ -1995,6 +2013,29 @@ async function adminMore(): Promise<void> {
     } catch (e) {
       toast(errText(e));
     }
+  }
+}
+
+// The admin says which answer is theirs. The entry this device added comes
+// first, as a suggestion only: before the server knew, the first entry an
+// admin added was taken for theirs, and it wasn't always.
+async function markOwn(): Promise<void> {
+  const v = current();
+  const { id, token } = here();
+  const hint = store.get(id)?.pid;
+  const people = [...v.people].sort((a, b) => Number(b.id === hint) - Number(a.id === hint));
+  const r = await menu(t('whichIsYours'), [
+    ...people.map((p) => ({ id: p.id, label: p.name, on: p.id === v.me, hint: p.id === hint ? t('fromThisDevice') : undefined })),
+    ...(v.me ? [{ id: 'none', label: t('noneOfThem') }] : []),
+  ]);
+  if (!r || r === v.me) return;
+  try {
+    const { view } = await api<{ view: M.View }>('PUT', `/events/${id}/own`, { token, body: { pid: r === 'none' ? null : r } });
+    setView(view);
+    render();
+    toast(t(r === 'none' ? 'ownUnmarked' : 'ownMarked'));
+  } catch (e) {
+    toast(errText(e));
   }
 }
 
@@ -2123,6 +2164,8 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
 
   // Event page
   answer: () => openSub('answer'),
+  'answer-other': () => openSub('answer=new'),
+  'mark-own': () => markOwn(),
   'edit-event': () => openSub('edit'),
   'edit-entry': (b) => openSub(`answer=${b.dataset.pid}`),
   'delete-entry': (b) => deleteEntry(data(b, 'pid')),

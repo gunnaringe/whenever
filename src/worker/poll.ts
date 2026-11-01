@@ -1,7 +1,13 @@
 // One event: its settings and every participant's answers, in SQLite.
 //
-//   meta(k, v)   'created', 'event' (JSON), 'adminId', 'adminSecret', 'adminEmail'
+//   meta(k, v)   'created', 'event' (JSON), 'adminId', 'adminSecret', 'adminEmail',
+//                'adminPid' (the admin's own entry, if they marked one), 'indexed'
 //   people(...)  one row per entry; secret is their link's (see link.ts)
+//
+// With the admin link the admin is also the participant 'adminPid': `me` in
+// their view, so they see and set that entry's email. An email they set there
+// becomes the admin email too while that is empty (only through the admin
+// link: the entry's own personal link must never lead to the admin link).
 //
 // The Worker passes the caller's link as `cred`: null (no link), { bad: true }
 // (not shaped like a link) or { sel, secret }. Everything about who may do
@@ -34,7 +40,6 @@ const NO_PERSON: Failure = { error: 'person', status: 404 };
 // An event whose dates are already past still lives a week.
 const MIN_LIFE = 7 * 24 * 60 * 60 * 1000;
 const deleteAt = (ev: PollEvent) => Math.max(expiresAt(ev), Date.now() + MIN_LIFE);
-const ADMIN: Who = { role: 'admin', me: null, link: 'ok' };
 const lookup = (env: Env) => env.LOOKUP.getByName('lookup');
 const visitor = (link: LinkState): Who => ({ role: 'visitor', me: null, link });
 
@@ -93,10 +98,14 @@ export class Poll extends DurableObject<Env> {
     if (!cred) return visitor('none');
     if ('bad' in cred) return visitor('invalid');
     if (cred.sel === this.getMeta('adminId')) {
-      return same(cred.secret, this.getMeta('adminSecret')) ? ADMIN : visitor('invalid');
+      return same(cred.secret, this.getMeta('adminSecret')) ? this.admin() : visitor('invalid');
     }
     const row = this.sql.exec<{ secret: string }>(`SELECT secret FROM people WHERE id = ?`, cred.sel).toArray()[0];
     return row && same(cred.secret, row.secret) ? { role: 'participant', me: cred.sel, link: 'ok' } : visitor('invalid');
+  }
+
+  admin(): Who {
+    return { role: 'admin', me: this.getMeta('adminPid'), link: 'ok' };
   }
 
   // What the caller gets to see. Emails are only ever returned to their owner
@@ -130,7 +139,7 @@ export class Poll extends DurableObject<Env> {
     this.setMeta('adminEmail', email || '');
     this.setMeta('created', Date.now());
     await this.ctx.storage.setAlarm(deleteAt(event));
-    const out = { token: token(adminId, secret), view: this.view(ADMIN) };
+    const out = { token: token(adminId, secret), view: this.view(this.admin()) };
     await this.reindex();
     return out;
   }
@@ -219,7 +228,10 @@ export class Poll extends DurableObject<Env> {
     const { n, seq } = this.sql.exec<{ n: number; seq: number }>(`SELECT COUNT(*) AS n, COALESCE(MAX(seq), 0) AS seq FROM people`).one();
     if (n >= LIMITS.people) return { error: 'full', status: 409 };
     const o = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
-    const r = sanitizeEntry({ ...o, email: o.email ?? '' }, ev);
+    // The admin adds their own entry (own: true) or one for someone else,
+    // which gets no email: only its person may set that.
+    const own = who.role !== 'admin' || o.own === true;
+    const r = sanitizeEntry({ ...o, email: own ? o.email ?? '' : '' }, ev);
     if (!r.ok) return { error: r.error, status: 400 };
     let pid = newPid();
     while (pid === this.getMeta('adminId') || this.sql.exec(`SELECT 1 FROM people WHERE id = ?`, pid).toArray().length) pid = newPid();
@@ -230,7 +242,14 @@ export class Poll extends DurableObject<Env> {
       pid, seq + 1, r.entry.name, r.entry.comment, r.entry.email ?? '', secret, JSON.stringify(r.entry.answers), now, now,
     );
     // An admin adding an entry stays admin; anyone else is now that participant.
-    const viewer: Who = who.role === 'admin' ? who : { role: 'participant', me: pid, link: 'ok' };
+    let viewer: Who = { role: 'participant', me: pid, link: 'ok' };
+    if (who.role === 'admin') {
+      if (own) {
+        this.setMeta('adminPid', pid);
+        this.adoptEmail(r.entry.email ?? '');
+      }
+      viewer = this.admin();
+    }
     const out = { pid, token: token(pid, secret), view: this.view(viewer) };
     if (r.entry.email) await this.reindex();
     return out;
@@ -240,7 +259,7 @@ export class Poll extends DurableObject<Env> {
     if (!this.exists()) return NOT_FOUND;
     const who = this.who(cred);
     const ev = this.event();
-    const row = this.sql.exec(`SELECT id FROM people WHERE id = ?`, pid).toArray()[0];
+    const row = this.sql.exec<{ email: string }>(`SELECT email FROM people WHERE id = ?`, pid).toArray()[0];
     if (!row) return NO_PERSON;
     if (!canEdit(who, ev.settings, pid)) return FORBIDDEN;
     // Only the person themself sees or changes their email.
@@ -250,6 +269,8 @@ export class Poll extends DurableObject<Env> {
     if (!r.ok) return { error: r.error, status: 400 };
     this.sql.exec(`UPDATE people SET name = ?, comment = ?, answers = ?, updated = ? WHERE id = ?`, r.entry.name, r.entry.comment, JSON.stringify(r.entry.answers), Date.now(), pid);
     if (own) this.sql.exec(`UPDATE people SET email = ? WHERE id = ?`, r.entry.email ?? '', pid);
+    // Only an address the admin typed in now, not one already on the entry.
+    if (own && who.role === 'admin' && r.entry.email !== row.email) this.adoptEmail(r.entry.email ?? '');
     const out = { view: this.view(who) };
     if (own) await this.reindex();
     return out;
@@ -263,7 +284,9 @@ export class Poll extends DurableObject<Env> {
     if (!row) return NO_PERSON;
     if (!canEdit(who, ev.settings, pid)) return FORBIDDEN;
     this.sql.exec(`DELETE FROM people WHERE id = ?`, pid);
-    const viewer = who.me === pid ? visitor('none') : who;
+    if (this.getMeta('adminPid') === pid) this.sql.exec(`DELETE FROM meta WHERE k = 'adminPid'`);
+    // A participant who deleted their own entry has no link left; the admin stays admin.
+    const viewer = who.role === 'admin' ? this.admin() : who.me === pid ? visitor('none') : who;
     const out = { view: this.view(viewer) };
     if (row.email) await this.reindex();
     return out;
@@ -282,6 +305,26 @@ export class Poll extends DurableObject<Env> {
       this.sql.exec(`UPDATE people SET secret = ? WHERE id = ?`, secret, pid);
     }
     return { token: token(pid, secret) };
+  }
+
+  // The admin says which entry is theirs (null: none of them).
+  setOwn(cred: Cred, pid: string | null): Failure | { view: View } {
+    if (!this.exists()) return NOT_FOUND;
+    if (this.who(cred).role !== 'admin') return FORBIDDEN;
+    if (pid === null) this.sql.exec(`DELETE FROM meta WHERE k = 'adminPid'`);
+    else {
+      // Its email stays its own: it may have been set with the entry's link.
+      if (!this.sql.exec(`SELECT 1 FROM people WHERE id = ?`, pid).toArray().length) return NO_PERSON;
+      this.setMeta('adminPid', pid);
+    }
+    return { view: this.view(this.admin()) };
+  }
+
+  // The admin typed an email on their own entry and the event has no admin
+  // email: the address gets the admin link back too (see the top). Only for
+  // an address entered with the admin link in this very write.
+  adoptEmail(email: string): void {
+    if (email && !this.getMeta('adminEmail')) this.setMeta('adminEmail', email);
   }
 
   resetAdmin(cred: Cred): Failure | { token: string } {
