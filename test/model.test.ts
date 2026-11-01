@@ -50,14 +50,61 @@ test('Norwegian holidays', () => {
   assert.equal(M.easter(2026), '2026-04-05');
   assert.equal(M.easter(2027), '2027-03-28');
   const h = M.holidays(2026);
-  assert.equal(h.get('2026-04-02'), 'maundyThursday');
-  assert.equal(h.get('2026-04-03'), 'goodFriday');
-  assert.equal(h.get('2026-05-14'), 'ascension');
-  assert.equal(h.get('2026-05-25'), 'whitMonday');
-  assert.equal(h.get('2026-05-17'), 'constitutionDay');
-  assert.equal(h.size, 12);
+  assert.deepEqual(h.get('2026-04-02'), ['maundyThursday']);
+  assert.deepEqual(h.get('2026-04-03'), ['goodFriday']);
+  assert.deepEqual(h.get('2026-05-14'), ['ascension']);
+  assert.deepEqual(h.get('2026-05-25'), ['whitMonday']);
+  assert.deepEqual(h.get('2026-05-17'), ['constitutionDay']);
+  assert.deepEqual(h.get('2026-12-24'), ['christmasEve']);
+  assert.deepEqual(h.get('2026-12-31'), ['newYearsEve']);
+  assert.equal(h.size, 14, '12 official holidays, Christmas Eve and New Year’s Eve');
+  assert.deepEqual([...h.keys()], [...h.keys()].sort(), 'in date order');
   const dec = M.holidaysIn('2026-12-20', '2027-01-05');
-  assert.deepEqual([...dec.keys()], ['2026-12-25', '2026-12-26', '2027-01-01']);
+  assert.deepEqual([...dec.keys()], ['2026-12-24', '2026-12-25', '2026-12-26', '2026-12-31', '2027-01-01']);
+  // Two holidays on one date keep both names, the fixed one first.
+  assert.deepEqual(M.holidays(2027).get('2027-05-17'), ['constitutionDay', 'whitMonday']);
+  assert.deepEqual(M.holidays(2043).get('2043-05-17'), ['constitutionDay', 'whitsun']);
+});
+
+test('Swedish and Danish holidays, and none', () => {
+  const se26 = M.holidays(2026, 'se');
+  assert.deepEqual(se26.get('2026-06-19'), ['midsummerEve']);
+  assert.deepEqual(se26.get('2026-06-20'), ['midsummerDay']);
+  assert.deepEqual(se26.get('2026-10-31'), ['allSaints']);
+  assert.deepEqual(se26.get('2026-01-06'), ['epiphany']);
+  assert.deepEqual(se26.get('2026-06-06'), ['nationalDaySe']);
+  assert.deepEqual(se26.get('2026-05-24'), ['whitsun']);
+  assert.equal(se26.get('2026-04-02'), undefined, 'no Maundy Thursday in Sweden');
+  assert.equal(se26.get('2026-05-25'), undefined, 'no Whit Monday in Sweden');
+  assert.equal(se26.get('2026-05-17'), undefined);
+  // The latest midsummer and All Saints' there can be.
+  const se27 = M.holidays(2027, 'se');
+  assert.deepEqual(se27.get('2027-06-25'), ['midsummerEve']);
+  assert.deepEqual(se27.get('2027-06-26'), ['midsummerDay']);
+  assert.deepEqual(se27.get('2027-11-06'), ['allSaints']);
+  for (const y of [2026, 2027, 2030, 2041]) {
+    const sat = [...M.holidays(y, 'se')].filter(([, k]) => k.includes('midsummerDay') || k.includes('allSaints')).map(([d]) => M.weekday(d));
+    assert.deepEqual(sat, [5, 5], `${y}: on Saturdays`);
+  }
+  assert.deepEqual(M.holidays(2023, 'dk').get('2023-05-05'), ['greatPrayerDay']);
+  assert.ok(![...M.holidays(2024, 'dk').values()].flat().includes('greatPrayerDay'), 'Store bededag was abolished from 2024');
+  const dk = M.holidays(2026, 'dk');
+  assert.deepEqual(dk.get('2026-04-02'), ['maundyThursday']);
+  assert.deepEqual(dk.get('2026-05-25'), ['whitMonday']);
+  assert.equal(dk.get('2026-05-01'), undefined);
+  assert.equal(dk.get('2026-06-05'), undefined, 'Grundlovsdag is not a public holiday');
+  assert.deepEqual(dk.get('2026-12-24'), ['christmasEve']);
+  assert.equal(M.holidays(2026, 'none').size, 0);
+  assert.equal(M.holidaysIn('2026-01-01', '2026-12-31', 'none').size, 0);
+});
+
+test('the holiday calendar is kept with the event, Norway when missing', () => {
+  assert.equal(event({ ...datesEvent, holidays: 'se' }).holidays, 'se');
+  assert.equal(event({ ...datesEvent, holidays: 'none' }).holidays, 'none');
+  assert.equal(event({ ...datesEvent, holidays: 'us' }).holidays, 'no');
+  assert.equal(event(datesEvent).holidays, 'no');
+  assert.equal(M.holidayCal({}), 'no', 'events stored before the setting');
+  assert.equal(M.holidayCal({ holidays: 'dk' }), 'dk');
 });
 
 test('weekday chips only change the selection', () => {

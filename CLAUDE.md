@@ -13,7 +13,7 @@ transforming (enums, namespaces, parameter properties) is off
 
 - `src/shared/model.ts`: pure and shared by the app and the Worker, and the
   home of the data types (`PollEvent`, `View`, `Person`, `Tally`, ...).
-  Dates (UTC `YYYY-MM-DD` strings, weekday 0 = Monday), Norwegian holidays,
+  Dates (UTC `YYYY-MM-DD` strings, weekday 0 = Monday), holidays,
   selection helpers, option keys, `sanitizeEvent`/`sanitizeEntry`,
   permissions (`canAdd`/`canEdit`), results (`tally`, `bestOptions`,
   `windows`, `bestWindows`), `LIMITS`, retention.
@@ -87,6 +87,21 @@ transforming (enums, namespaces, parameter properties) is off
   (`weekdayState`, `groupState`). The stored event is just the explicit
   set, so a single Saturday can always be picked by hand. Keep it that way:
   never store a "no weekends" rule.
+- **Holidays:** each event has a calendar, `holidays`: `no`, `se`, `dk` or
+  `none` (`HOLIDAY_CALENDARS`), picked under Innstillinger. Events stored
+  before it existed have none, so read it with `holidayCal()` (Norway);
+  `sanitizeEvent` fills it in. A new event guesses from the browser's time
+  zone, then its languages, else `none` (`guessHolidays`). `holidays(year,
+  cal)` gives date → keys: the days off by law plus julaften and
+  nyttårsaften everywhere (and midsommarafton in Sweden), since people
+  plan around them; no Danish grundlovsdag (not a day off by law) and no
+  store bededag after 2023 (abolished). Easter is the Gregorian computus;
+  Sweden's midsummer and All Saints are the Saturday from 20 June / 31
+  October. Two holidays can share a date (17 May is sometimes Whitsun or
+  Whit Monday), so it's a list, and `holidayNames` joins the names. Every
+  key needs a `holiday.<key>` string in both languages (tested). They only
+  mark the form's calendar and drive the Helligdager chip, which is left out
+  with `none`.
 - **Ranking:** by default most yes first; on a tie more maybes come
   first, then the earliest. With the `maybeCounts` setting (only offered with
   `maybe`): most yes + maybe first, then most yes. `score` is the number
@@ -188,9 +203,9 @@ transforming (enums, namespaces, parameter properties) is off
   changes), then `BASE=http://127.0.0.1:8787 npm run smoke`: a browser
   end-to-end check (dates and times events, chips, drag and touch painting,
   several participants, permissions, link reset, picking the date and the
-  `.ics` download, ties and the ranking setting, themes against a dark and
-  a light device). It uses `playwright-core`,
-  which has no browser: set `PWCHROME` to a Chromium or
+  `.ics` download, ties and the ranking setting, holiday calendars, themes
+  against a dark and a light device). It uses `playwright-core`, which has
+  no browser: set `PWCHROME` to a Chromium or
   `chrome-headless-shell` binary, e.g. under `~/.cache/ms-playwright/`.
   Screenshots go to `$SHOTS` (default `/tmp/whenever-shots`).
 - CI (`.github/workflows/ci.yml`) runs check, test, build and a
