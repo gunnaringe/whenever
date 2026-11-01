@@ -1,13 +1,14 @@
 // This device's memory, in localStorage (key whenever-v1): links to events you
-// made or answered, so you find them again, plus the language choice. Only a
+// made or answered, so you find them again, plus the language and theme
+// choices (theme.ts reads the theme from here too, before the app loads). Only a
 // convenience: every link works on any device without it. All keys used by
 // the app start with whenever-.
 
 import { TOKEN_RE, PID_RE } from '../shared/model.ts';
 import { isLang } from './i18n.ts';
 import type { Lang } from './i18n.ts';
-
-const KEY = 'whenever-v1';
+import { STORE_KEY as KEY, isTheme } from './theme.ts';
+import type { ThemeChoice } from './theme.ts';
 
 // One remembered event: its name, and the admin and/or personal link token.
 export interface Stored {
@@ -21,6 +22,7 @@ type Raw = Record<string, unknown>;
 interface State {
   events?: Record<string, Raw>;
   lang?: unknown;
+  theme?: unknown;
 }
 
 function read(): State {
@@ -107,5 +109,16 @@ export function getLang(): Lang | null {
 export function setLang(lang: Lang): void {
   const s = read();
   s.lang = lang;
+  write(s);
+}
+
+export function getTheme(): ThemeChoice {
+  const theme = read().theme;
+  return isTheme(theme) ? theme : 'auto';
+}
+
+export function setTheme(theme: ThemeChoice): void {
+  const s = read();
+  s.theme = theme;
   write(s);
 }

@@ -23,6 +23,8 @@ transforming (enums, namespaces, parameter properties) is off
     `store.ts`: localStorage. `ui.ts`: `$`, `esc`, dialogs, toast, QR.
   - `calendar.ts`: month grids (`calendarHtml`) and drag/tap painting
     (`bindPaint`). `timegrid.ts`: the drag-to-paint time grid (`TimeGrid`).
+  - `theme.ts`: the colour theme; `theme-head.ts` is its entry for the
+    small classic script in `<head>` (see Themes below).
   - `styles.css`: the one stylesheet.
   - `vendor/qrcodegen.js`: Nayuki's MIT QR library, copied from scorepad,
     with types in `qrcodegen.d.ts`. Don't edit by hand.
@@ -33,9 +35,10 @@ transforming (enums, namespaces, parameter properties) is off
 - `public/`: static files copied as they are: `index.html`, `privacy.html`,
   `_headers`, fonts, icons.
 - `scripts/build.mjs` writes `dist/` (what the Worker serves): `public/`
-  plus `app-<hash>.js` and `styles-<hash>.css`, minified with sourcemaps.
-  The pages refer to `/app.js` and `/styles.css`, which the build rewrites
-  to the hashed names; `_headers` makes those immutable. The hashes are
+  plus `app-<hash>.js`, `styles-<hash>.css` and `theme-<hash>.js` (an
+  iife, built separately), minified with sourcemaps. The pages refer to
+  `/app.js`, `/styles.css` and `/theme.js`, which the build rewrites to the
+  hashed names; `_headers` makes those immutable. The hashes are
   why a deploy never mixes new HTML with cached old code (the apphub.casa
   zone caches CSS/JS for 4 hours). wrangler bundles the Worker itself.
 - One `tsconfig.json` per directory (DOM types only in `src/app`, Worker
@@ -149,6 +152,17 @@ transforming (enums, namespaces, parameter properties) is off
   `beforeunload`, and the browser's back button keeps the form in memory
   (`app.kept`) until its page is opened again. Clear `dirty` before
   navigating after a successful save.
+- **Themes:** Automatisk (default), Lys, Mørk, Hacker, from the header
+  button. The choice is `theme` in the `whenever-v1` store; `theme.ts`
+  puts light, dark or hacker on `<html data-theme>` and the CSS reads only
+  that (one variable block per theme, never `prefers-color-scheme`; auto
+  resolves through `matchMedia` and follows changes). It runs from
+  `theme-<hash>.js` in `<head>` of every page, before anything paints: the
+  CSP allows no inline script, and a module would run after first paint.
+  Switching only changes the attribute (no render), so a form keeps its
+  contents. Hacker uses VT323 (self-hosted, OFL; only fetched there),
+  square corners and scan lines; yes stays green and maybe amber, so they
+  never blur. New colours go in every theme block.
 - **i18n:** `STRINGS.nb` / `STRINGS.en`, same keys, plurals as
   `{ one, other }` (tests check parity, that literal `t('…')` keys exist and
   that every API error code has an `err.*` string). User text always goes
@@ -174,7 +188,8 @@ transforming (enums, namespaces, parameter properties) is off
   changes), then `BASE=http://127.0.0.1:8787 npm run smoke`: a browser
   end-to-end check (dates and times events, chips, drag and touch painting,
   several participants, permissions, link reset, picking the date and the
-  `.ics` download, ties and the ranking setting). It uses `playwright-core`,
+  `.ics` download, ties and the ranking setting, themes against a dark and
+  a light device). It uses `playwright-core`,
   which has no browser: set `PWCHROME` to a Chromium or
   `chrome-headless-shell` binary, e.g. under `~/.cache/ms-playwright/`.
   Screenshots go to `$SHOTS` (default `/tmp/whenever-shots`).

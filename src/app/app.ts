@@ -13,6 +13,7 @@ import type { Stored } from './store.ts';
 import { $, $opt, $$, esc, icon, toast, ask, menu, dialog, copyText, shareUrl, qrSvg } from './ui.ts';
 import type { MenuItem } from './ui.ts';
 import { calendarHtml, bindPaint } from './calendar.ts';
+import { THEMES, isTheme, applyTheme } from './theme.ts';
 import { TimeGrid, weekPages } from './timegrid.ts';
 import { icsFor, icsName } from './ics.ts';
 
@@ -207,6 +208,7 @@ function paint(inner: string): void {
     <header class="bar">
       <a class="brand" href="/" data-link><img src="/icons/icon.svg" alt="" width="28" height="28"><span>${esc(t('appName'))}</span></a>
       <span class="grow"></span>
+      <button type="button" class="btn ghost small" data-act="theme" aria-label="${esc(t('theme'))}" title="${esc(t('theme'))}">${icon('theme')}</button>
       <button type="button" class="btn ghost small" data-act="lang" lang="${other}">${esc(LANG_NAMES[other])}</button>
     </header>
     <main class="page">${inner}</main>
@@ -1707,6 +1709,19 @@ async function meMore(): Promise<void> {
   } else if (r === 'delete') deleteEntry(me);
 }
 
+// Only the attribute on <html> changes: no render, so a half-filled form
+// stays as it is.
+async function pickTheme(): Promise<void> {
+  const cur = store.getTheme();
+  const r = await menu(
+    t('theme'),
+    THEMES.map((x) => ({ id: x, label: t(`theme.${x}`), hint: x === 'auto' ? t('theme.autoHint') : undefined, on: x === cur })),
+  );
+  if (!isTheme(r)) return;
+  store.setTheme(r);
+  applyTheme(r);
+}
+
 // data-act="<name>" -> what a click on it does.
 const actions: Record<string, (b: HTMLElement) => unknown> = {
   lang: () => {
@@ -1715,6 +1730,7 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
     store.setLang(next);
     render();
   },
+  theme: () => pickTheme(),
   retry: () => {
     app.viewKey = null;
     render();
