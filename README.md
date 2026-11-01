@@ -60,5 +60,5 @@ secrets `SMTP_USER` and `SMTP_PASS` (Forward Email SMTP).
 
 ## Licence
 
-QR codes by [Project Nayuki's QR Code generator](https://www.nayuki.io/page/qr-code-generator-library)
+[Apache 2.0](LICENSE), except: QR codes by [Project Nayuki's QR Code generator](https://www.nayuki.io/page/qr-code-generator-library)
 (MIT), in `src/app/vendor/qrcodegen.js`. Fonts: Fredoka and VT323 (both SIL OFL), in `public/fonts/`.
