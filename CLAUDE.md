@@ -169,8 +169,8 @@ transforming (enums, namespaces, parameter properties) is off
   `beforeunload`, and the browser's back button keeps the form in memory
   (`app.kept`) until its page is opened again. Clear `dirty` before
   navigating after a successful save.
-- **Themes:** Automatisk (default), Lys, Mørk, Hacker, from the header
-  button. The choice is `theme` in the `whenever-v1` store; `theme.ts`
+- **Themes:** Automatisk (default), Lys, Mørk, Hacker, from the theme
+  menu in the header (see Header menus). The choice is `theme` in the `whenever-v1` store; `theme.ts`
   puts light, dark or hacker on `<html data-theme>` and the CSS reads only
   that (one variable block per theme, never `prefers-color-scheme`; auto
   resolves through `matchMedia` and follows changes). It runs from
@@ -193,13 +193,20 @@ transforming (enums, namespaces, parameter properties) is off
   Node's ICU. `WEEKDAYS`, `UNITS`, `AND` and `shortDate` are per language
   too: a new language needs an entry in each. Templates mustn't build words
   across languages (`weekdayHint` adds a plural ending to `{day}` in the
-  Scandinavian ones; Icelandic says it differently). The header shows the
-  language code; it opens a popover menu (`#lang-menu`), placed under the
-  button on `beforetoggle`, with `autofocus` on the current language.
-  Browsers without popovers (Safari 16, Firefox 124) get the dialog
-  `menu()` instead (`canPopover`); never put `data-act` on the popover
-  button, as the click delegation's `preventDefault()` stops it opening. User
-  text always goes through `esc()`. The privacy page is nb + en only.
+  Scandinavian ones; Icelandic says it differently). The header's language
+  button shows the language code. User text always goes through `esc()`.
+  The privacy page is nb + en only.
+- **Header menus:** the theme and language buttons (`menuButton`) open
+  popover menus (`.dropdown`, `#theme-menu` / `#lang-menu`, items from
+  `dropItems`). The browser closes them on Esc or a click outside and
+  focuses the current choice (`autofocus`); a `beforetoggle` handler puts
+  each under its button, and the arrow keys move between the choices.
+  Picking a language renders again; picking a theme only redraws the theme
+  menu's items (`setTheme`), so a form keeps its contents. Browsers without
+  popovers (Safari 16, Firefox 124) get the dialog `menu()` instead
+  (`canPopover`). Never put `data-act` on a popover's button: the click
+  delegation's `preventDefault()` stops it opening. The 30 s refresh waits
+  while a menu is open.
 - **CSS names:** `.page` is the container and `.bar` the header; the result
   meter is `.meter`. Don't reuse `.bar`/`.wrap`-style generic names (both
   collided once).
