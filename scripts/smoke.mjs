@@ -938,6 +938,59 @@ await th.emulateMedia({ colorScheme: 'dark' });
 await th.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
 check(true, 'auto follows the device switching to dark');
 
+// --- P) Link previews: the tags Messenger, Signal and the like read ----------------------------
+// They fetch the HTML without running the app; the Worker fills the tags in.
+// The tags are read back with the browser's HTML parser. wrangler dev makes
+// every host the first route's (nb), so en is left to the unit tests.
+{
+  const name = 'Quiz & «julebord» <2026> "&amp;"';
+  const res = await fetch(`${BASE}/api/events`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ event: { name, description: 'Middag og quiz.\n\nSvar innen fredag!', mode: 'dates', start: D(2), end: D(3), options: [D(2), D(3)] }, email: '' }),
+  });
+  const ev = await res.json();
+  const p = await page();
+  const read = async (path, ua = 'facebookexternalhit/1.1') => {
+    const r = await fetch(`${BASE}${path}`, { headers: { 'user-agent': ua } });
+    const html = await r.text();
+    const tags = await p.evaluate((h) => {
+      const d = new DOMParser().parseFromString(h, 'text/html');
+      const get = (s) => d.querySelector(s)?.getAttribute('content') ?? null;
+      return {
+        lang: d.documentElement.lang,
+        title: d.title,
+        ogTitle: get('meta[property="og:title"]'),
+        desc: get('meta[property="og:description"]'),
+        image: get('meta[property="og:image"]'),
+        width: get('meta[property="og:image:width"]'),
+        url: get('meta[property="og:url"]'),
+      };
+    }, html);
+    return { r, html, ...tags };
+  };
+  const pub = await read(`/e/${ev.id}`);
+  check(pub.ogTitle === name, `an event link previews with the event's name (${pub.ogTitle})`);
+  check(pub.title === `${name} · Finn tid`, 'and has it as the page title');
+  check(pub.desc === 'Kryss av for dagene som passer for deg. Middag og quiz. Svar innen fredag!', `then what to do, and the description (${pub.desc})`);
+  check(pub.image === 'https://finn-tid.apphub.casa/og-nb.png' && pub.width === '1200', 'and the card image, absolute and https');
+  check(pub.url === null, 'with no og:url');
+  const adm = await read(`/e/${ev.id}/${ev.token}`, 'WhatsApp/2');
+  check(adm.ogTitle === name && !adm.html.includes(ev.token), 'an admin link previews the same, and the token is nowhere in the page');
+  check(adm.r.headers.get('referrer-policy') === 'no-referrer' && (adm.r.headers.get('content-security-policy') ?? '').includes("script-src 'self'"), 'the pages keep their security headers');
+  check(adm.r.headers.get('etag') === null && adm.r.headers.get('cache-control') === 'no-cache', 'and are never answered from an old copy');
+  const gone = await read('/e/AAAAAAAAAAAA', 'Mozilla/5.0');
+  check(gone.r.status === 200 && gone.ogTitle === 'Finn tid' && gone.desc.startsWith('Finn dagen eller tiden'), "an unknown event gives the app's own preview");
+  const home = await read('/');
+  check(home.ogTitle === 'Finn tid' && home.lang === 'nb' && home.image === pub.image, 'so does the home page');
+  const img = await fetch(`${BASE}/og-nb.png`);
+  check(img.ok && img.headers.get('content-type') === 'image/png' && (await img.arrayBuffer()).byteLength < 300_000, 'the card image is a small PNG');
+  await p.goto(`${BASE}/e/${ev.id}`);
+  await p.waitForSelector('.role');
+  check((await p.title()) === `${name} · Finn tid`, 'and the app still starts on the page');
+  await p.close();
+}
+
 check(errors.length === 0, `no console errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 await browser.close();
 console.log(failed ? `${failed} check(s) failed` : 'all checks passed');
