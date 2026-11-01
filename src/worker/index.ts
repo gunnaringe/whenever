@@ -7,7 +7,9 @@
 //   PUT    /api/events/:id                   { event, email? } (admin) -> { view }
 //   DELETE /api/events/:id                   (admin) -> { ok }
 //   POST   /api/events/:id/admin-link        (admin) new admin link -> { token }
-//   POST   /api/events/:id/people            { name, email?, comment?, answers } -> { pid, token, view }
+//   PUT    /api/events/:id/own               { pid | null } (admin) which entry is the admin's -> { view }
+//   POST   /api/events/:id/people            { name, email?, comment?, answers, own? } -> { pid, token, view }
+//                                             (own: the admin's own entry; the admin's others get no email)
 //   PUT    /api/events/:id/people/:pid       entry -> { view }
 //   DELETE /api/events/:id/people/:pid       -> { view }
 //   POST   /api/events/:id/people/:pid/link  { reset? } (self or admin) -> { token }
@@ -211,7 +213,7 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
     throw new HttpError(503, 'busy');
   }
 
-  const m = pathname.match(/^\/api\/events\/([^/]+)(?:\/(admin-link|people)(?:\/([^/]+)(\/link)?)?)?$/);
+  const m = pathname.match(/^\/api\/events\/([^/]+)(?:\/(admin-link|own|people)(?:\/([^/]+)(\/link)?)?)?$/);
   if (!m || !ID_RE.test(m[1])) throw new HttpError(404, 'notFound');
   const [, id, sub, pid, linkPath] = m;
   if (pid !== undefined && !PID_RE.test(pid)) throw new HttpError(404, 'person');
@@ -231,6 +233,13 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
   if (sub === 'admin-link') {
     if (method !== 'POST' || pid) throw new HttpError(405, 'method');
     return send(await poll.resetAdmin(cred));
+  }
+
+  if (sub === 'own') {
+    if (method !== 'PUT' || pid) throw new HttpError(405, 'method');
+    const own = field(await readJson(req), 'pid');
+    if (own !== null && !(typeof own === 'string' && PID_RE.test(own))) throw new HttpError(400, 'person');
+    return send(await poll.setOwn(cred, own));
   }
 
   // people

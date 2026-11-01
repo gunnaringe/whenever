@@ -138,6 +138,19 @@ transforming (enums, namespaces, parameter properties) is off
   else; people edit their own entry; `openEdit` lets anyone edit/delete any
   entry (not with `hidden`, where only the admin sees others' answers).
   Emails are only returned to their owner (and `adminEmail` to the admin).
+- **The admin's own answer:** meta `adminPid` is the admin's own entry, so
+  with the admin link they are also that participant (`me` in their view):
+  they see and set its email, and it's marked "deg". They add it with
+  "Legg til dine svar" (`own: true` on the POST); "Legg til svar for en
+  annen" (`#answer=new`) makes an entry with no email and shows its link.
+  Events from before (or a wrong pick) are fixed with
+  `PUT /api/events/:id/own` (`markOwn`, from the role card or the admin
+  menu); the entry this device added is only offered as a suggestion,
+  never taken for theirs. Deleting it clears `adminPid`. An email the admin
+  types on their own entry becomes `adminEmail` while that is empty, so a
+  code for it brings both links back; never take it from an email already
+  on the entry (`setOwn`), since the entry's personal link can set that,
+  and a personal link must never lead to the admin link.
 - **Email codes (`/find`):** an address entered on events gets a 6-digit
   code by email, and the code adds those events' links to the device.
   - The `Lookup` object (one for the app, `getByName('lookup')`) stores HMACs of
