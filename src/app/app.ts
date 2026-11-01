@@ -5,7 +5,7 @@
 // Sub-views of an event (hash): #answer, #answer=<pid>, #edit
 
 import * as M from '../shared/model.ts';
-import { t, tx, holidayNames, getLang, setLang, LANG_NAMES, fmtDate, fmtRange, monthName, slotLabel, windowLabel, weekdayShort, weekdayLong, durationLabel, cap } from './i18n.ts';
+import { t, tx, holidayNames, getLang, setLang, isLang, LANGS, LANG_NAMES, fmtDate, fmtRange, monthName, slotLabel, windowLabel, weekdayShort, weekdayLong, durationLabel, cap } from './i18n.ts';
 import type { Key, Lang } from './i18n.ts';
 import { api, ApiError } from './api.ts';
 import * as store from './store.ts';
@@ -218,13 +218,16 @@ function closeSub(): void {
 // --- Shell ----------------------------------------------------------------------------
 
 function paint(inner: string): void {
-  const other: Lang = getLang() === 'nb' ? 'en' : 'nb';
+  const cur = getLang();
   $('#app').innerHTML = `
     <header class="bar">
       <a class="brand" href="/" data-link><img src="/icons/icon.svg" alt="" width="28" height="28"><span>${esc(t('appName'))}</span></a>
       <span class="grow"></span>
       <button type="button" class="btn ghost small" data-act="theme" aria-label="${esc(t('theme'))}" title="${esc(t('theme'))}">${icon('theme')}</button>
-      <button type="button" class="btn ghost small" data-act="lang" lang="${other}">${esc(LANG_NAMES[other])}</button>
+      <button type="button" class="btn ghost small lang-btn" popovertarget="lang-menu" aria-label="${esc(`${t('language')}: ${LANG_NAMES[cur]}`)}" title="${esc(t('language'))}">${cur.toUpperCase()}<span class="chev" aria-hidden="true">▾</span></button>
+      <div id="lang-menu" class="dropdown" popover>
+        ${LANGS.map((l) => `<button type="button" class="menu-item${l === cur ? ' on' : ''}" data-act="lang" data-lang="${l}" lang="${l}"${l === cur ? ' aria-current="true" autofocus' : ''}><span>${l === cur ? icon('check') : ''}${esc(LANG_NAMES[l])}</span></button>`).join('')}
+      </div>
     </header>
     <main class="page">${inner}</main>
     <footer class="foot"><a href="/privacy">${esc(t('privacy'))}</a><span aria-hidden="true">·</span><a href="https://apphub.casa">apphub.casa</a></footer>`;
@@ -1747,10 +1750,12 @@ async function pickTheme(): Promise<void> {
 
 // data-act="<name>" -> what a click on it does.
 const actions: Record<string, (b: HTMLElement) => unknown> = {
-  lang: () => {
-    const next: Lang = getLang() === 'nb' ? 'en' : 'nb';
-    setLang(next);
-    store.setLang(next);
+  lang: (b) => {
+    const l = data(b, 'lang');
+    $opt('#lang-menu')?.hidePopover();
+    if (!isLang(l) || l === getLang()) return;
+    setLang(l);
+    store.setLang(l);
     render();
   },
   theme: () => pickTheme(),
@@ -1877,6 +1882,38 @@ document.addEventListener('click', (e) => {
   fn(b);
 });
 
+// The language menu is a popover: the browser closes it on Esc or a click
+// outside, and focuses the current language (autofocus) when it opens. It
+// opens under its button, right-aligned with it; the arrow keys move
+// between the languages.
+const langMenuOpen = () => {
+  try {
+    return Boolean($opt('#lang-menu')?.matches(':popover-open'));
+  } catch {
+    return false;
+  }
+};
+document.addEventListener(
+  'beforetoggle',
+  (e) => {
+    const menu = e.target as HTMLElement;
+    if (menu.id !== 'lang-menu' || (e as ToggleEvent).newState !== 'open') return;
+    const r = $('.lang-btn').getBoundingClientRect();
+    menu.style.top = `${r.bottom + window.scrollY + 4}px`;
+    menu.style.right = `${document.documentElement.clientWidth - r.right - window.scrollX}px`;
+  },
+  true,
+);
+document.addEventListener('keydown', (e) => {
+  const menu = (e.target as Element).closest?.('#lang-menu');
+  if (!menu || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End')) return;
+  e.preventDefault();
+  const items = [...menu.querySelectorAll<HTMLElement>('button')];
+  const i = items.indexOf(e.target as HTMLElement);
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+  items[next].focus();
+});
+
 // Closing or reloading the tab with unsaved changes: the browser asks.
 window.addEventListener('beforeunload', (e) => {
   if (unsaved()) e.preventDefault();
@@ -1896,7 +1933,7 @@ window.addEventListener('popstate', () => {
 async function refreshIfIdle(): Promise<void> {
   const r = app.route;
   if (r?.page !== 'event' || subView().kind !== 'overview' || !app.view || document.visibilityState !== 'visible') return;
-  if ($opt('dialog[open]')) return;
+  if ($opt('dialog[open]') || langMenuOpen()) return;
   try {
     const { view } = await api<{ view: M.View }>('GET', `/events/${r.id}`, { token: r.token });
     if (app.route !== r || subView().kind !== 'overview') return;
@@ -1911,12 +1948,18 @@ async function refreshIfIdle(): Promise<void> {
 setInterval(refreshIfIdle, 30000);
 document.addEventListener('visibilitychange', refreshIfIdle);
 
+// The host decides; elsewhere the browser's first Nordic language, even
+// after English (many Nordic browsers list English first), else English.
 function detectLang(): Lang {
   const host = location.hostname;
   if (host.startsWith('whenever.')) return 'en';
   if (host.startsWith('finn-tid.')) return 'nb';
-  const langs = navigator.languages ?? [navigator.language];
-  return langs.some((l) => /^(nb|nn|no)\b/i.test(l ?? '')) ? 'nb' : 'en';
+  const nordic: [RegExp, Lang][] = [[/^(nb|no)\b/i, 'nb'], [/^nn\b/i, 'nn'], [/^sv\b/i, 'sv'], [/^da\b/i, 'da'], [/^is\b/i, 'is']];
+  for (const l of navigator.languages ?? [navigator.language]) {
+    const hit = nordic.find(([re]) => re.test(l ?? ''));
+    if (hit) return hit[1];
+  }
+  return 'en';
 }
 
 setLang(store.getLang() ?? detectLang());

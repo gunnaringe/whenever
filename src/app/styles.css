@@ -640,6 +640,24 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
 .menu-item.danger { color: var(--danger); }
 .menu-item.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .menu-item.on > span { display: flex; align-items: center; gap: .4rem; }
+/* The language menu: a popover under its button (placed by app.ts). */
+.lang-btn { gap: .3rem; padding-inline: .7rem; letter-spacing: .03em; }
+.lang-btn .chev { color: var(--muted); font-size: .7rem; }
+.dropdown {
+  position: absolute;
+  inset: auto;
+  min-width: 12rem;
+  margin: 0;
+  padding: .35rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgb(0 0 0 / .2);
+}
+.dropdown:popover-open { display: grid; gap: .2rem; }
+.dropdown .menu-item { padding: .55rem .8rem; border-color: transparent; }
+.dropdown .menu-item.on { border-color: var(--accent); }
 .qr { display: block; width: min(16rem, 70vw); margin: .5rem auto 1rem; border-radius: 8px; }
 .toast {
   position: fixed;

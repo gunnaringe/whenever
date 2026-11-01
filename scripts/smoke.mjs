@@ -459,6 +459,44 @@ await hc.click('[data-act="edit-event"]');
 check((await holSel.inputValue()) === 'dk', 'changing it to Danmark is saved');
 await hc.close();
 
+// --- L) Languages: a menu under the language code ----------------------------------------
+const lg = await page();
+await lg.goto(`${BASE}/`);
+const langBtn = lg.locator('.lang-btn');
+const langMenu = lg.locator('#lang-menu');
+const langNow = () => lg.evaluate(() => document.documentElement.lang);
+check((await langBtn.textContent()).trim().startsWith('NB') && (await langNow()) === 'nb', 'a Norwegian browser gets bokmål, and the button says NB');
+await langBtn.click();
+check(await langMenu.isVisible(), 'the button opens the language menu');
+check((await langMenu.locator('[data-lang]').count()) === 6, 'six languages');
+const focusedLang = () => lg.evaluate(() => document.activeElement?.dataset.lang ?? document.activeElement?.outerHTML.slice(0, 60));
+check((await focusedLang()) === 'nb', `the current language has the focus (${await focusedLang()})`);
+await lg.screenshot({ path: `${SHOTS}/17-language-menu.png`, clip: { x: 0, y: 0, width: 390, height: 400 } });
+await lg.keyboard.press('ArrowDown');
+check((await focusedLang()) === 'nn', `the arrow keys move through the menu (${await focusedLang()})`);
+await lg.keyboard.press('Escape');
+check(!(await langMenu.isVisible()), 'Esc closes the menu');
+await langBtn.click();
+await lg.mouse.click(20, 600);
+check(!(await langMenu.isVisible()), 'a click outside closes it');
+await langBtn.click();
+await langMenu.locator('[data-lang="nn"]').click();
+check((await langNow()) === 'nn' && (await langBtn.textContent()).trim().startsWith('NN'), 'picking nynorsk switches the page (NN)');
+await lg.click('a[href="/new"]');
+await lg.waitForSelector('#f-cal');
+check((await day(lg, D(0)).getAttribute('aria-label')).startsWith('måndag'), `nynorsk dates without Intl data in Chromium (${await day(lg, D(0)).getAttribute('aria-label')})`);
+await lg.locator('.lang-btn').click();
+await lg.locator('#lang-menu [data-lang="is"]').click();
+check((await day(lg, D(0)).getAttribute('aria-label')).startsWith('mánudagur'), `Icelandic dates too (${await day(lg, D(0)).getAttribute('aria-label')})`);
+const isMonths = ['Janúar', 'Febrúar', 'Mars', 'Apríl', 'Maí', 'Júní', 'Júlí', 'Ágúst', 'September', 'Október', 'Nóvember', 'Desember'];
+await lg.reload();
+await lg.waitForSelector('#f-cal');
+check((await langNow()) === 'is' && (await lg.locator('.lang-btn').textContent()).trim().startsWith('IS'), 'the choice is remembered after a reload');
+const firstMonth = (await lg.locator('#f-cal .cal-month h4').first().textContent()).split(' ')[0];
+check(isMonths.includes(firstMonth), `the calendar's month titles are Icelandic (${firstMonth})`);
+await shot(lg, '18-icelandic-new-event', false);
+await lg.close();
+
 // --- F) Admin deletes an entry and the event --------------------------------------------
 await admin.reload();
 await admin.waitForSelector('.plist');
