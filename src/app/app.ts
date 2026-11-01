@@ -1350,7 +1350,7 @@ function actionsHtml(v: M.View): string {
     const mine = v.people.some((p) => p.id === v.me);
     const quiet = app.flash?.kind === 'created';
     return `<section class="card role">
-      <div class="role-text"><b>${esc(t('youAreAdmin'))}</b><p class="muted">${esc(t('adminHint'))}</p>
+      <div class="role-text"><div class="role-head"><b>${esc(t('youAreAdmin'))}</b><button type="button" class="linkish small leave" data-act="leave">${icon('logout')}${esc(t('leave'))}</button></div><p class="muted">${esc(t('adminHint'))}</p>
         ${!mine && v.people.length ? `<button type="button" class="linkish small" data-act="mark-own">${esc(t('markOwnQ'))}</button>` : ''}</div>
       <div class="row wrap">
         ${mine ? `<button type="button" class="btn primary" data-act="answer">${icon('edit')}${esc(t('editYourAnswers'))}</button>` : `<button type="button" class="btn${quiet ? '' : ' primary'}" data-act="answer">${icon('plus')}${esc(t('addYourAnswers'))}</button>`}
@@ -1364,7 +1364,7 @@ function actionsHtml(v: M.View): string {
   if (v.role === 'participant') {
     const me = v.people.find((p) => p.id === v.me);
     return `<section class="card role">
-      <div class="role-text"><b>${esc(t('hiName', { name: me?.name ?? '' }))}</b>${app.flash?.kind === 'savedNew' ? '' : `<p class="muted">${esc(t('personalHint'))}</p>`}</div>
+      <div class="role-text"><div class="role-head"><b>${esc(t('hiName', { name: me?.name ?? '' }))}</b><button type="button" class="linkish small leave" data-act="leave">${icon('logout')}${esc(t('leave'))}</button></div>${app.flash?.kind === 'savedNew' ? '' : `<p class="muted">${esc(t('personalHint'))}</p>`}</div>
       <div class="row wrap">
         ${M.canEdit(who, ev.settings, v.me) ? `<button type="button" class="btn primary" data-act="answer">${icon('edit')}${esc(t('editYourAnswers'))}</button>` : ''}
         <button type="button" class="btn" data-act="copy" data-url="${esc(linkUrl(id, token))}">${icon('copy')}${esc(t('copyMyLink'))}</button>
@@ -2082,6 +2082,32 @@ async function markOwn(): Promise<void> {
   }
 }
 
+// No accounts: being "signed in" is having the link on this device. Signing
+// out forgets the event here (both links) after showing the link once more,
+// and leaves for the home page, replacing the token URL in the history.
+async function leave(): Promise<void> {
+  const v = current();
+  const { id, token } = here();
+  if (!token) return;
+  const admin = v.role === 'admin';
+  const email = admin ? v.adminEmail : v.people.find((p) => p.id === v.me)?.email;
+  const r = await dialog(`
+    <h3>${esc(t('leaveQ'))}</h3>
+    <p>${esc(t(admin ? 'leaveTextAdmin' : 'leaveTextMine'))}</p>
+    ${linkBox(linkUrl(id, token), { label: t(admin ? 'adminLinkTitle' : 'yourLink') })}
+    ${email ? `<p class="muted small">${esc(t('leaveEmail'))}</p>` : ''}
+    <div class="row end">
+      <button value="" class="btn">${esc(t('cancel'))}</button>
+      <button value="yes" class="btn primary">${icon('logout')}${esc(t('leave'))}</button>
+    </div>`);
+  if (r !== 'yes') return;
+  store.forget(id);
+  app.view = null;
+  app.viewKey = null;
+  go('/', true);
+  toast(t('leftToast'));
+}
+
 async function meMore(): Promise<void> {
   const me = current().me;
   const { id } = here();
@@ -2214,6 +2240,7 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   answer: () => openSub('answer'),
   'answer-other': () => openSub('answer=new'),
   'mark-own': () => markOwn(),
+  leave: () => leave(),
   'edit-event': () => openSub('edit'),
   'edit-entry': (b) => openSub(`answer=${b.dataset.pid}`),
   'delete-entry': (b) => deleteEntry(data(b, 'pid')),

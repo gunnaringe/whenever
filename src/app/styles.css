@@ -271,6 +271,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .note.warn { margin: .6rem 0 0; padding: .5rem .7rem; border-radius: 8px; background: var(--warn-bg); font-size: .875rem; }
 .err { color: var(--danger); font-weight: 600; }
 .count-line { margin: .75rem 0 0; color: var(--muted); font-weight: 600; font-size: .9rem; }
+.role-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .25rem .75rem; }
+.role-head .leave { display: inline-flex; align-items: center; gap: .3rem; color: var(--muted); }
+.role-head .leave .i { width: 1em; height: 1em; }
 .count-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .25rem .75rem; margin-top: .75rem; }
 .count-row .count-line { margin: 0; }
 .undo-btns { display: inline-flex; gap: .15rem; margin-left: auto; }

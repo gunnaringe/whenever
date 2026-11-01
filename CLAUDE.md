@@ -268,6 +268,11 @@ transforming (enums, namespaces, parameter properties) is off
   Scandinavian ones; Icelandic says it differently). The header's language
   button shows the language code. User text always goes through `esc()`.
   The privacy page is nb + en only.
+- **Signing out:** no accounts, so being signed in is having the link on
+  this device. «Logg ut» in the role card (admin and participant) shows the
+  link once more (and says an email code can bring it back, if there is an
+  email), then forgets the event on this device and goes home with
+  `replace`, so the token URL leaves the history entry.
 - **Header menus:** the events, theme and language buttons (`menuButton`)
   open popover menus (`.dropdown`, `#events-menu` / `#theme-menu` /
   `#lang-menu`, items from `dropItems`). The browser closes them on Esc or a
