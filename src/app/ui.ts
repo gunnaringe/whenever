@@ -63,6 +63,8 @@ export interface MenuItem {
   label: string;
   danger?: boolean;
   hint?: string;
+  // The current choice, when the menu picks one of several.
+  on?: boolean;
 }
 
 // Resolves with the picked item's id ('' for none).
@@ -70,7 +72,7 @@ export function menu(title: string, items: MenuItem[]): Promise<string> {
   return dialog(`
     <h3>${esc(title)}</h3>
     <div class="menu-list">
-      ${items.map((i) => `<button value="${esc(i.id)}" class="menu-item${i.danger ? ' danger' : ''}"><span>${esc(i.label)}</span>${i.hint ? `<small>${esc(i.hint)}</small>` : ''}</button>`).join('')}
+      ${items.map((i) => `<button value="${esc(i.id)}" class="menu-item${i.danger ? ' danger' : ''}${i.on ? ' on' : ''}"${i.on ? ' aria-current="true"' : ''}><span>${i.on ? icon('check') : ''}${esc(i.label)}</span>${i.hint ? `<small>${esc(i.hint)}</small>` : ''}</button>`).join('')}
     </div>
     <div class="row end"><button value="" class="btn">${esc(t('cancel'))}</button></div>`);
 }

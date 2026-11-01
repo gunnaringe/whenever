@@ -25,6 +25,7 @@ and everyone marks when they can. At
 - **Settings:** allow "maybe" (and whether it counts as able to come), let
   everyone edit or delete entries, hide answers from other participants,
   close the event.
+- **Themes:** automatic (follows the device), light, dark and hacker.
 - Everything is deleted 30 days after the event's last date.
 
 ## Running locally
@@ -51,4 +52,4 @@ are off). The Build command is `npm run build`. There are no secrets to set.
 ## Licence
 
 QR codes by [Project Nayuki's QR Code generator](https://www.nayuki.io/page/qr-code-generator-library)
-(MIT), in `src/app/vendor/qrcodegen.js`. Font: Fredoka (SIL OFL), in `public/fonts/`.
+(MIT), in `src/app/vendor/qrcodegen.js`. Fonts: Fredoka and VT323 (both SIL OFL), in `public/fonts/`.

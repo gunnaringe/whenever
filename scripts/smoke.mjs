@@ -429,6 +429,40 @@ await admin.goto(`${BASE}/`);
 check((await admin.locator('.mine li').count()) >= 1, 'home lists your events on this device');
 await shot(admin, '12-home-with-events');
 
+// --- T) Themes: auto follows the device, a choice overrides it -------------------------------
+const th = await page();
+const themeNow = () => th.evaluate(() => [document.documentElement.dataset.theme, getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()].join(' '));
+// The dialog's close event comes a moment after the click: wait for the choice.
+const chosen = (x) => th.waitForFunction((x) => JSON.parse(localStorage.getItem('whenever-v1') ?? '{}').theme === x, x);
+const pickTheme = async (x) => {
+  await th.click('[data-act="theme"]');
+  await th.click(`#dlg button[value="${x}"]`);
+  await chosen(x);
+};
+await th.emulateMedia({ colorScheme: 'dark' });
+await th.goto(`${BASE}/new`);
+check((await themeNow()) === 'dark #0e1417', `auto follows a dark device (${await themeNow()})`);
+await th.fill('form [name=name]', 'Halvferdig');
+await pickTheme('light');
+check((await themeNow()) === 'light #f3f6f5', `light on a dark device (${await themeNow()})`);
+check((await th.inputValue('form [name=name]')) === 'Halvferdig', 'changing the theme keeps a half-filled form');
+await th.click('[data-act="theme"]');
+check((await th.locator('#dlg .menu-item.on').getAttribute('value')) === 'light', 'the menu marks the current theme');
+await th.click('#dlg button[value="hacker"]');
+await chosen('hacker');
+check((await themeNow()) === 'hacker #000', `hacker (${await themeNow()})`);
+await th.goto(`${BASE}/privacy`);
+check((await themeNow()) === 'hacker #000', 'the choice survives a reload and applies on the privacy page');
+await th.goto(`${BASE}/`);
+await th.emulateMedia({ colorScheme: 'light' });
+await pickTheme('dark');
+check((await themeNow()) === 'dark #0e1417', `dark on a light device (${await themeNow()})`);
+await pickTheme('auto');
+check((await themeNow()) === 'light #f3f6f5', 'auto on a light device');
+await th.emulateMedia({ colorScheme: 'dark' });
+await th.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+check(true, 'auto follows the device switching to dark');
+
 check(errors.length === 0, `no console errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 await browser.close();
 console.log(failed ? `${failed} check(s) failed` : 'all checks passed');
