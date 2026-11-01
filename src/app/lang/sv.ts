@@ -10,6 +10,7 @@ export const sv: Record<Key, Text> = {
   newEvent: 'Ny träff',
   yourEvents: 'Dina träffar',
   yourEventsHint: 'Sparas bara på den här enheten. Länkarna fungerar på alla enheter.',
+  showAllEvents: 'Visa alla ({n})',
   openAdmin: 'Admin',
   openMine: 'Mina svar',
   open: 'Öppna',

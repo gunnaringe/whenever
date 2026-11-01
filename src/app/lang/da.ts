@@ -10,6 +10,7 @@ export const da: Record<Key, Text> = {
   newEvent: 'Ny aftale',
   yourEvents: 'Dine aftaler',
   yourEventsHint: 'Huskes kun på denne enhed. Linkene virker på alle enheder.',
+  showAllEvents: 'Vis alle ({n})',
   openAdmin: 'Admin',
   openMine: 'Mine svar',
   open: 'Åbn',

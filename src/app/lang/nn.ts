@@ -10,6 +10,7 @@ export const nn: Record<Key, Text> = {
   newEvent: 'Ny avtale',
   yourEvents: 'Avtalane dine',
   yourEventsHint: 'Blir berre hugsa på denne eininga. Lenkjene verkar på alle einingar.',
+  showAllEvents: 'Vis alle ({n})',
   openAdmin: 'Admin',
   openMine: 'Svara mine',
   open: 'Opna',

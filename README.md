@@ -28,6 +28,8 @@ and everyone marks when they can. At
 - **Settings:** allow "maybe" (and whether it counts as able to come), let
   everyone edit or delete entries, hide answers from other participants,
   close the event.
+- **Your events:** the events you made or answered on this device are on
+  the home page and in a menu in the header, to switch between them.
 - **Themes:** automatic (follows the device), light, dark and hacker.
 - **Languages:** Norwegian (bokmål and nynorsk), Swedish, Danish, Icelandic
   and English, from the language menu in the header.

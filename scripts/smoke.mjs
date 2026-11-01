@@ -459,6 +459,78 @@ await hc.click('[data-act="edit-event"]');
 check((await holSel.inputValue()) === 'dk', 'changing it to Danmark is saved');
 await hc.close();
 
+// --- S) Switching between your events from the header ---------------------------------------
+const sw = await page();
+await sw.goto(`${BASE}/`);
+check((await sw.locator('.events-btn').count()) === 0, 'no events button before you have any events');
+const makeEvent = (p, name) =>
+  p.evaluate(
+    async ([name, d]) => {
+      // The rate limit (per minute) can be reached by now: wait it out.
+      for (let i = 0; i < 30; i++) {
+        const res = await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: { name, mode: 'dates', start: d, end: d, options: [d] }, email: '' }) });
+        if (res.status !== 429) {
+          const r = await res.json();
+          return `/e/${r.id}/${r.token}`;
+        }
+        await new Promise((ok) => setTimeout(ok, 3000));
+      }
+      return 'rate-limited';
+    },
+    [name, D(0)],
+  );
+const evA = await makeEvent(sw, 'Sommerfest');
+const evB = await makeEvent(sw, 'Styremøte');
+check(evA.startsWith('/e/') && evB.startsWith('/e/'), `made two events (${evA.slice(0, 15)}, ${evB.slice(0, 15)})`);
+// (The button is already there while an event loads: wait for the event itself.)
+await sw.goto(BASE + evA);
+await sw.waitForSelector('h1:has-text("Sommerfest")');
+await sw.goto(BASE + evB);
+await sw.waitForSelector('h1:has-text("Styremøte")');
+await sw.click('.events-btn');
+const evMenu = sw.locator('#events-menu');
+check(await evMenu.isVisible(), 'the events button opens a menu of your events');
+check((await evMenu.locator('.menu-item').allTextContents()).map((x) => x.split('Admin')[0]).join() === 'Styremøte,Sommerfest', `the latest first (${(await evMenu.locator('.menu-item').allTextContents()).join(' | ')})`);
+check((await evMenu.locator('.menu-item.on').textContent()).startsWith('Styremøte'), 'the event you are on is ticked');
+check((await sw.evaluate(() => document.activeElement?.textContent ?? '')).startsWith('Styremøte'), 'and has the focus');
+await sw.screenshot({ path: `${SHOTS}/22-events-menu.png`, clip: { x: 0, y: 0, width: 390, height: 300 } });
+await sw.keyboard.press('Escape');
+check(!(await evMenu.isVisible()), 'Esc closes it');
+await sw.click('.events-btn');
+await evMenu.locator('.menu-item', { hasText: 'Sommerfest' }).click();
+await sw.waitForURL(BASE + evA);
+check((await sw.locator('h1').first().textContent()).includes('Sommerfest'), 'picking another event opens it with your admin link');
+// Leaving a half-edited form asks first.
+await sw.click('[data-act="edit-event"]');
+await sw.fill('form [name=name]', 'Sommerfest 2027');
+await sw.click('.events-btn');
+await sw.locator('#events-menu .menu-item', { hasText: 'Styremøte' }).click();
+check(await sw.locator('#dlg[open]').isVisible(), 'with unsaved changes, it asks before leaving');
+await sw.click('#dlg button[value="no"]');
+check((await sw.inputValue('form [name=name]')) === 'Sommerfest 2027' && !(await evMenu.isVisible()), 'staying keeps the form, and the menu is closed');
+await sw.close();
+// Nine remembered events on a narrow phone in English: eight, then "Show all".
+const many = await page({ lang: 'en-US' });
+await many.setViewportSize({ width: 320, height: 640 });
+await many.context().addInitScript(() => {
+  const events = {};
+  for (let i = 1; i <= 9; i++) events[`abcdefghijk${i}`] = { name: `Event ${i}`, admin: 'a'.repeat(38), seen: i };
+  localStorage.setItem('whenever-v1', JSON.stringify({ events }));
+});
+await many.goto(`${BASE}/`);
+await many.click('.events-btn');
+const manyItems = await many.locator('#events-menu .menu-item').allTextContents();
+check(manyItems.length === 9 && manyItems[0].startsWith('Event 9') && manyItems[8] === 'Show all (9)', `the latest eight, then "Show all" (${manyItems.join(' | ')})`);
+check((await many.locator('#events-menu .menu-item').last().getAttribute('href')) === '/', 'which goes to the home page');
+const headerFits = await many.evaluate(() => {
+  const r = document.querySelector('.lang-btn').getBoundingClientRect();
+  const b = document.querySelector('.brand').getBoundingClientRect();
+  return document.documentElement.scrollWidth <= innerWidth && r.right <= innerWidth && Math.abs(r.top - b.top) < 20;
+});
+check(headerFits, 'three header buttons fit on one line at 320 px in English');
+await many.screenshot({ path: `${SHOTS}/23-events-menu-many.png` });
+await many.close();
+
 // --- L) Languages: a menu under the language code ----------------------------------------
 const lg = await page();
 await lg.goto(`${BASE}/`);
@@ -513,6 +585,11 @@ await old.locator('#dlg button[value="sv"]').click();
 // The dialog's close event comes a moment after the click.
 await old.waitForFunction(() => document.documentElement.lang === 'sv', null, { timeout: 3000 }).catch(() => {});
 check((await old.evaluate(() => document.documentElement.lang)) === 'sv', 'and picking a language there works');
+const evC = await makeEvent(old, 'Juleball');
+await old.goto(BASE + evC);
+await old.waitForSelector('h1:has-text("Juleball")');
+await old.locator('.events-btn').click();
+check((await old.locator('#dlg[open] .menu-item').allTextContents()).join().startsWith('Juleball'), 'the events button opens the dialog menu instead');
 await old.close();
 
 // --- F) Admin deletes an entry and the event --------------------------------------------

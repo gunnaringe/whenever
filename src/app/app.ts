@@ -217,26 +217,32 @@ function closeSub(): void {
 
 // --- Shell ----------------------------------------------------------------------------
 
-// The header's theme and language menus are popovers (see the handlers
-// near the end). Browsers from before 2024 (Safari 16, Firefox 124) have
+// The header's menus (your events, theme, language) are popovers (see the
+// handlers near the end). Browsers from before 2024 (Safari 16, Firefox 124) have
 // none: there the buttons open the dialog menu instead. Never put data-act
 // on a popover's button: the click delegation's preventDefault() would
 // stop it opening.
 const canPopover = 'popover' in HTMLElement.prototype;
 
+// An item is a button (attrs: data-act and its data) or an in-app link
+// (href). The current one is ticked and gets the focus, else the first.
 interface DropItem {
-  attrs: string; // data-act and its data
+  attrs?: string;
+  href?: string;
   label: string;
   hint?: string;
   on: boolean;
 }
-const dropItems = (items: DropItem[]) =>
-  items
-    .map(
-      (i) =>
-        `<button type="button" class="menu-item${i.on ? ' on' : ''}" ${i.attrs}${i.on ? ' aria-current="true" autofocus' : ''}><span>${i.on ? icon('check') : ''}${esc(i.label)}</span>${i.hint ? `<small>${esc(i.hint)}</small>` : ''}</button>`,
-    )
+const dropItems = (items: DropItem[]) => {
+  const focus = Math.max(0, items.findIndex((i) => i.on));
+  return items
+    .map((i, n) => {
+      const inner = `<span>${i.on ? icon('check') : ''}${esc(i.label)}</span>${i.hint ? `<small>${esc(i.hint)}</small>` : ''}`;
+      const attrs = `class="menu-item${i.on ? ' on' : ''}"${i.on ? ' aria-current="true"' : ''}${n === focus ? ' autofocus' : ''}`;
+      return i.href ? `<a ${attrs} href="${esc(i.href)}" data-link>${inner}</a>` : `<button type="button" ${attrs} ${i.attrs ?? ''}>${inner}</button>`;
+    })
     .join('');
+};
 
 // The button that opens a header menu: a popover, or the dialog without.
 const menuButton = (cls: string, menuId: string, fallbackAct: string, label: string, title: string, face: string) =>
@@ -248,17 +254,45 @@ const themeItems = () => {
 };
 const themeLabel = () => `${t('theme')}: ${t(`theme.${store.getTheme()}`)}`;
 
+// Your events on this device, to jump between them: the most recently
+// opened first, each by its admin link, else your personal link.
+const EVENTS_SHOWN = 8;
+function eventItems(): DropItem[] {
+  const cur = app.route?.page === 'event' ? app.route.id : null;
+  const all = store.events();
+  const items: DropItem[] = all.slice(0, EVENTS_SHOWN).map((e) => ({
+    href: `/e/${e.id}${e.admin ? `/${e.admin}` : e.me ? `/${e.me}` : ''}`,
+    label: e.name || '–',
+    hint: [e.admin ? t('tagAdmin') : '', e.me ? t('tagAnswered') : ''].filter(Boolean).join(' · ') || undefined,
+    on: e.id === cur,
+  }));
+  if (all.length > EVENTS_SHOWN) items.push({ href: '/', label: t('showAllEvents', { n: all.length }), on: false });
+  return items;
+}
+
+async function pickEvent(): Promise<void> {
+  const items = eventItems();
+  const href = await menu(
+    t('yourEvents'),
+    items.map((i) => ({ id: i.href ?? '', label: i.label, hint: i.hint, on: i.on })),
+  );
+  if (href && (await leaveOk())) go(href);
+}
+
 function paint(inner: string): void {
   const cur = getLang();
+  const events = eventItems();
   $('#app').innerHTML = `
     <header class="bar">
       <a class="brand" href="/" data-link><img src="/icons/icon.svg" alt="" width="28" height="28"><span>${esc(t('appName'))}</span></a>
       <span class="grow"></span>
+      ${events.length ? menuButton('events-btn', 'events-menu', 'events-pick', t('yourEvents'), t('yourEvents'), icon('cal')) : ''}
       ${menuButton('theme-btn', 'theme-menu', 'theme', themeLabel(), t('theme'), icon('theme'))}
       ${menuButton('lang-btn', 'lang-menu', 'lang-pick', `${t('language')}: ${LANG_NAMES[cur]}`, t('language'), cur.toUpperCase())}
       ${
         canPopover
-          ? `<div id="theme-menu" class="dropdown" popover>${themeItems()}</div>
+          ? `${events.length ? `<div id="events-menu" class="dropdown" popover>${dropItems(events)}</div>` : ''}
+      <div id="theme-menu" class="dropdown" popover>${themeItems()}</div>
       <div id="lang-menu" class="dropdown" popover>${dropItems(LANGS.map((l) => ({ attrs: `data-act="lang" data-lang="${l}" lang="${l}"`, label: LANG_NAMES[l], on: l === cur })))}</div>`
           : ''
       }
@@ -1806,6 +1840,7 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   },
   'lang-pick': async () => switchLang(await menu(t('language'), LANGS.map((l) => ({ id: l, label: LANG_NAMES[l], on: l === getLang() })))),
   theme: () => pickTheme(),
+  'events-pick': () => pickEvent(),
   'theme-set': (b) => {
     $opt('#theme-menu')?.hidePopover();
     setTheme(data(b, 'theme'));
@@ -1961,7 +1996,7 @@ document.addEventListener('keydown', (e) => {
   const menu = (e.target as Element).closest?.('.dropdown');
   if (!menu || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End')) return;
   e.preventDefault();
-  const items = [...menu.querySelectorAll<HTMLElement>('button')];
+  const items = [...menu.querySelectorAll<HTMLElement>('.menu-item')];
   const i = items.indexOf(e.target as HTMLElement);
   const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
   items[next].focus();
