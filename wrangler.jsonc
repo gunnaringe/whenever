@@ -22,24 +22,43 @@
   },
   // One SQLite-backed Durable Object per event (the free plan only allows
   // SQLite-backed classes).
+  // Plus one Lookup object for the whole app: the email index and its codes.
   "durable_objects": {
-    "bindings": [{ "name": "POLLS", "class_name": "Poll" }]
+    "bindings": [
+      { "name": "POLLS", "class_name": "Poll" },
+      { "name": "LOOKUP", "class_name": "Lookup" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Poll"] }],
-  // Per-IP throttle on the API. Namespace ids are account-wide: 1001 is
-  // scoreboard, 2001/2002 are scorepad.
-  "ratelimits": [
-    { "name": "LIMIT", "namespace_id": "3001", "simple": { "limit": 120, "period": 60 } }
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Poll"] },
+    { "tag": "v2", "new_sqlite_classes": ["Lookup"] }
   ],
+  // Per-IP throttles: LIMIT on the whole API, MAIL_LIMIT on asking for and
+  // trying email codes. Namespace ids are account-wide: 1001 is scoreboard,
+  // 2001/2002 are scorepad.
+  "ratelimits": [
+    { "name": "LIMIT", "namespace_id": "3001", "simple": { "limit": 120, "period": 60 } },
+    { "name": "MAIL_LIMIT", "namespace_id": "3003", "simple": { "limit": 5, "period": 60 } }
+  ],
+  // Code mails a day for the whole app (kept below the Forward Email plan's
+  // sending limit). SMTP_USER and SMTP_PASS are secrets, set in the dashboard.
+  "vars": { "MAIL_DAILY_MAX": "200" },
+  // Workers Logs for console output only (failed code mails say why there);
+  // no per-request logs.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   // Branch builds run `wrangler preview`, which needs this block. Each Preview
   // gets its own Durable Object namespace automatically; the binding just has
-  // to be declared again. Previews use their own rate-limit namespace (3002).
+  // to be declared again. Previews use their own rate-limit namespaces (3002, 3004).
   "previews": {
     "durable_objects": {
-      "bindings": [{ "name": "POLLS", "class_name": "Poll" }]
+      "bindings": [
+        { "name": "POLLS", "class_name": "Poll" },
+        { "name": "LOOKUP", "class_name": "Lookup" }
+      ]
     },
     "ratelimits": [
-      { "name": "LIMIT", "namespace_id": "3002", "simple": { "limit": 120, "period": 60 } }
+      { "name": "LIMIT", "namespace_id": "3002", "simple": { "limit": 120, "period": 60 } },
+      { "name": "MAIL_LIMIT", "namespace_id": "3004", "simple": { "limit": 5, "period": 60 } }
     ]
   },
   "workers_dev": false,

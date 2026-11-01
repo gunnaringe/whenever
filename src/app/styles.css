@@ -351,6 +351,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .hero { padding: 2rem 0 1.5rem; text-align: center; }
 .hero h1 { font-size: clamp(1.8rem, 6vw, 2.6rem); }
 .hero .lead { max-width: 34rem; margin: 0 auto 1.5rem; color: var(--muted); font-size: 1.08rem; }
+.hero .find-link { margin: 1rem 0 0; }
+/* Find your events by email. */
+.find { max-width: 34rem; margin-inline: auto; }
+.find .sent { margin: 0 0 .9rem; padding: .7rem .9rem; border-radius: 10px; background: var(--info-bg); }
+.find input[name="code"] { max-width: 10rem; font-size: 1.3rem; letter-spacing: .2em; font-variant-numeric: tabular-nums; }
 .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .75rem; }
 .step { display: flex; gap: .75rem; padding: 1rem; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); }
 .step p { margin: .2rem 0 0; color: var(--muted); font-size: .9rem; }
