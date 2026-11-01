@@ -357,6 +357,10 @@ await boss.click('.detail [data-act="decide"]');
 await boss.click('#dlg button[value="yes"]');
 await boss.waitForSelector('.decided');
 check((await boss.locator('.decided .when').textContent()).includes('10:00–11:00'), 'picked time shows as the whole window');
+const framed = await boss.locator('#res-grid .tg-cell.decided').count();
+check(framed >= 1 && (await boss.locator('#res-grid .tg-cell.dstart').count()) === 1 && (await boss.locator('#res-grid .tg-cell.dend').count()) === 1, `the time grid frames the picked window (${framed} cells)`);
+check((await boss.locator('.legend').textContent()).includes('Valgt'), 'and the legend explains the frame');
+await boss.locator('.results').screenshot({ path: `${SHOTS}/27-decided-grid.png` });
 
 // --- G) The organiser picks the date ---------------------------------------------------------
 await admin.reload();
@@ -366,6 +370,14 @@ await admin.click('.detail [data-act="decide"]');
 await admin.click('#dlg button[value="yes"]');
 await admin.waitForSelector('.decided');
 check(await admin.locator('.best-item .tag').first().isVisible(), 'the best list marks the pick');
+check((await admin.locator('.cal-day.decided .dk').count()) === 1, 'the calendar marks the picked date with a badge');
+check((await admin.locator('.legend').textContent()).includes('Valgt'), 'and the legend says what the badge means');
+await admin.locator('.results').screenshot({ path: `${SHOTS}/26-decided-calendar.png` });
+await admin.click('[data-act="tab"][data-tab="list"]');
+check((await admin.locator('.res-row.decided .tag').count()) === 1, 'the list marks it too');
+await admin.click('[data-act="tab"][data-tab="table"]');
+check((await admin.locator('.ptable th.decided .dk').count()) === 1, 'and the table');
+await admin.click('[data-act="tab"][data-tab="cal"]');
 await guest.reload();
 await guest.waitForSelector('.decided');
 check((await guest.locator('.decided [data-act="undecide"]').count()) === 0, 'everyone sees the pick; only the admin can undo it');
@@ -460,6 +472,32 @@ await hc.waitForSelector('.role');
 await hc.click('[data-act="edit-event"]');
 check((await holSel.inputValue()) === 'dk', 'changing it to Danmark is saved');
 await hc.close();
+
+// --- R) Ties beyond the first three, and the footer -----------------------------------------
+const tie = await page();
+await tie.goto(`${BASE}/`);
+const tieLink = await tie.evaluate(async (days) => {
+  const j = (method, url, body, token) => fetch(url, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) }).then((r) => r.json());
+  const ev = await j('POST', '/api/events', { event: { name: 'Seks like dager', mode: 'dates', start: days[0], end: days[5], options: days }, email: '' });
+  await j('POST', `/api/events/${ev.id}/people`, { name: 'Ola', answers: Object.fromEntries(days.map((d) => [d, 1])) });
+  return `/e/${ev.id}/${ev.token}`;
+}, [D(0), D(1), D(2), D(3), D(4), D(7)]);
+await tie.goto(BASE + tieLink);
+await tie.waitForSelector('.best-item');
+check((await tie.locator('.best-item').count()) === 3, 'three of six equally good days show at first');
+const moreBtn = tie.locator('[data-act="best-more"]');
+check((await moreBtn.textContent()).includes('Vis 3 til') && (await moreBtn.getAttribute('aria-expanded')) === 'false', 'with a button for the other three');
+check((await tie.locator('.best-item').first().textContent()).replace(/\s+/g, ' ').includes('1. '), 'the rank reads as "1." (hidden separator)');
+await moreBtn.click();
+check((await tie.locator('.best-item').count()) === 6 && (await tie.locator('[data-act="best-more"]').getAttribute('aria-expanded')) === 'true', 'the button shows all six');
+await tie.locator('.results').screenshot({ path: `${SHOTS}/28-best-all.png` });
+check((await tie.evaluate(() => document.activeElement?.dataset.act)) === 'best-more', 'and keeps the focus');
+await tie.click('[data-act="best-more"]');
+check((await tie.locator('.best-item').count()) === 3, '"Show fewer" folds them again');
+const foot = await tie.locator('.foot a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
+check(foot.join() === '/privacy,https://github.com/gunnaringe/whenever,https://apphub.casa', `the footer links to privacy, the source and apphub.casa (${foot.join()})`);
+await tie.locator('.foot').screenshot({ path: `${SHOTS}/29-footer.png` });
+await tie.close();
 
 // --- S) Switching between your events from the header ---------------------------------------
 const sw = await page();

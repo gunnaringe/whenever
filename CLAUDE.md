@@ -115,7 +115,8 @@ transforming (enums, namespaces, parameter properties) is off
   score is a draw and shares a rank (1, 1, 3): the tiebreak only orders
   inside a draw, since "2 av 3 kan" twice must not look like a win. Every
   option tied for first is green and ringed, and the best list (3 items)
-  adds "+ N til" for any first-place ties it leaves out. `heat` shades by the score, nudged by the tiebreak by
+  gets a "Vis N til" button (`bestOpen`) for any first-place ties it leaves
+  out, never a bare "+ N". `heat` shades by the score, nudged by the tiebreak by
   less than one person, so on the dates calendar a darker day never ranks
   lower (in the times grid the shading is per slot and the ranking per
   window). Times mode ranks windows of `duration` built from consecutive
@@ -125,7 +126,11 @@ transforming (enums, namespaces, parameter properties) is off
   `decided`. `sanitizeEvent` drops it unless it is in `decisionKeys`, so
   editing the options away clears it. Picking also closes the event;
   undoing the pick leaves it closed. `decision()` gives the picked tally or
-  window for the "Avtalt" card. "Legg i kalender" builds the `.ics` in the
+  window for the "Avtalt" card. The picked option is marked everywhere in
+  its own colour (`--pick`, one per theme), apart from the "most can" ring
+  and the selection: a check badge (`.dk`) on the calendar day and table
+  column, a "Valgt" tag in the best list and list rows, a frame around the
+  window in the time grid, and a legend entry. "Legg i kalender" builds the `.ics` in the
   browser (`src/app/ics.ts`). Times are wall-clock in the event's `tz`, and
   `zonedUtc` converts them to UTC with `Intl`. The file may only carry the
   public event URL, never a link token.
