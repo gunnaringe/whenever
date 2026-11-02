@@ -341,7 +341,11 @@ transforming (enums, namespaces, parameter properties) is off
   add `--var MAIL_ECHO:1`). It uses `playwright-core`, which has
   no browser: set `PWCHROME` to a Chromium or
   `chrome-headless-shell` binary, e.g. under `~/.cache/ms-playwright/`.
-  Screenshots go to `$SHOTS` (default `/tmp/whenever-shots`).
+  With `PWFIREFOX` (a Playwright Firefox build, such as
+  `~/.cache/ms-playwright/firefox-*/firefox/firefox`) it also checks the
+  layout in Firefox, which has drawn things differently (a flex-basis on an
+  empty element counts for nothing in Firefox's width of its parent: give
+  it a width). Screenshots go to `$SHOTS` (default `/tmp/whenever-shots`).
 - CI (`.github/workflows/ci.yml`) runs check, test, build and a
   `wrangler deploy --dry-run` on pushes and PRs.
 - Changes go in PRs; visible ones with screenshots:
