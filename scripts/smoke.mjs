@@ -3,8 +3,10 @@
 //   BASE=http://127.0.0.1:8787 npm run smoke
 // Uses playwright-core, which brings no browser: set PWCHROME to a Chromium
 // or chrome-headless-shell binary (e.g. under ~/.cache/ms-playwright/).
+// With PWFIREFOX (a Playwright Firefox build, e.g. ~/.cache/ms-playwright/
+// firefox-*/firefox/firefox) a few layout checks also run in Firefox.
 import { mkdirSync } from 'node:fs';
-import { chromium } from 'playwright-core';
+import { chromium, firefox } from 'playwright-core';
 import { holidaysIn } from '../src/shared/model.ts';
 
 const BASE = process.env.BASE ?? 'http://127.0.0.1:8787';
@@ -48,6 +50,20 @@ const firstSaturday = iso(today + ((5 - dow(today) + 7) % 7) * DAY);
 
 const shot = (p, name, full = true) => p.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: full });
 const day = (p, d) => p.locator(`.cal-day[data-d="${d}"]`);
+// Parts of the results legend that overlap each other ("a / b"), as Firefox
+// once drew the colour bar's label over the next one.
+const legendOverlaps = (p) =>
+  p.evaluate(() => {
+    const parts = [...document.querySelectorAll('.legend .lg > *')];
+    const hit = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+    const out = [];
+    for (const [i, a] of parts.entries()) {
+      for (const b of parts.slice(i + 1)) {
+        if (hit(a.getBoundingClientRect(), b.getBoundingClientRect())) out.push(`${a.textContent || a.className} / ${b.textContent || b.className}`);
+      }
+    }
+    return out;
+  });
 
 // Drag across time-grid cells with the mouse, from one key to another.
 async function dragCells(p, from, to) {
@@ -372,6 +388,8 @@ await admin.waitForSelector('.decided');
 check(await admin.locator('.best-item .tag').first().isVisible(), 'the best list marks the pick');
 check((await admin.locator('.cal-day.decided .dk').count()) === 1, 'the calendar marks the picked date with a badge');
 check((await admin.locator('.legend').textContent()).includes('Valgt'), 'and the legend says what the badge means');
+check((await legendOverlaps(admin)).length === 0, `and nothing in the legend overlaps (${await legendOverlaps(admin)})`);
+const legendUrl = admin.url();
 await admin.locator('.results').screenshot({ path: `${SHOTS}/26-decided-calendar.png` });
 await admin.click('[data-act="tab"][data-tab="list"]');
 check((await admin.locator('.res-row.decided .tag').count()) === 1, 'the list marks it too');
@@ -989,6 +1007,20 @@ check(true, 'auto follows the device switching to dark');
   await p.waitForSelector('.role');
   check((await p.title()) === `${name} · Finn tid`, 'and the app still starts on the page');
   await p.close();
+}
+
+// --- F) Firefox, where it differs: only with PWFIREFOX (a Playwright Firefox build) ---------
+if (process.env.PWFIREFOX) {
+  const ff = await firefox.launch({ executablePath: process.env.PWFIREFOX });
+  const p = await (await ff.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'nb-NO' })).newPage();
+  await p.goto(legendUrl);
+  await p.waitForSelector('.legend .sw.top');
+  check((await legendOverlaps(p)).length === 0, `Firefox: nothing in the legend overlaps (${await legendOverlaps(p)})`);
+  await p.locator('.legend').scrollIntoViewIfNeeded();
+  await p.locator('.results').screenshot({ path: `${SHOTS}/40-firefox-legend.png` });
+  await ff.close();
+} else {
+  console.log('skip Firefox checks (set PWFIREFOX)');
 }
 
 check(errors.length === 0, `no console errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
