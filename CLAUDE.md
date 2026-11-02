@@ -33,13 +33,15 @@ transforming (enums, namespaces, parameter properties) is off
 - `src/worker/index.ts`: `/api/*` (`run_worker_first`): routing, JSON
   parsing, rate limit, turning the Bearer token into a credential; and the
   app's pages (`page()`, see Link previews). `preview.ts`: the pages'
-  preview tags (pure).
+  preview tags and their text for AI assistants and for people without
+  JavaScript (pure).
   `poll.ts`: the `Poll` Durable Object, which decides everything about who
   may do what. `link.ts`: making and parsing link tokens. `lookup.ts`: the
   `Lookup` Durable Object (the email index and its codes), `codes.ts` the
   limits on codes (pure), `mail.ts` the code mail and a small SMTP client.
 - `public/`: static files copied as they are: `index.html`, `privacy.html`,
-  `_headers`, fonts, icons, and the link-preview cards `og-nb.png` /
+  `_headers`, `llms.txt` (the API guide for AI assistants, see below),
+  fonts, icons, and the link-preview cards `og-nb.png` /
   `og-en.png` (drawn by `scripts/og-image.mjs`; run it again after changing
   the name, tagline or icon, and commit the PNGs).
 - `scripts/build.mjs` writes `dist/` (what the Worker serves): `public/`
@@ -296,6 +298,21 @@ transforming (enums, namespaces, parameter properties) is off
   shows at once. `_headers` still applies to them (CSP, `no-referrer`).
   Messenger/Facebook cache a URL's preview, so a link shared before a change
   keeps its old one for a while.
+- **AI assistants:** they read a link's page as text and never run the
+  app. `index.html` has `#for-agents` inside `#app` (the app replaces it
+  when it starts): what this is and where `/llms.txt` is; on an event link
+  `page()` (`pageText()`) adds the event's name and its JSON URL
+  (`https://<host>/api/events/<id>`, absolute: claude.ai fetches only URLs
+  it has seen). English on both hosts; never the token, and of the event's
+  texts only its name (no description next to the API). It is hidden by a
+  class rule in `styles.css`: tools that read the page as text drop
+  `<noscript>`, `hidden` and inline `display: none`, but don't apply the
+  stylesheet. People without JavaScript see `<noscript>` instead, which
+  `page()` also fills in (the event's name and one line, host language).
+  `public/llms.txt` describes the API for them: keep it in step with any
+  API change (the smoke test follows its answer-and-change flow). Notably,
+  PUT on a person replaces the whole entry and, on your own entry, a
+  missing `email` clears it.
 - **Header menus:** the events, theme and language buttons (`menuButton`)
   open popover menus (`.dropdown`, `#events-menu` / `#theme-menu` /
   `#lang-menu`, items from `dropItems`). The browser closes them on Esc or a
@@ -327,7 +344,7 @@ transforming (enums, namespaces, parameter properties) is off
 
 - `npm run check`: `wrangler types`, then `tsc` for each directory. Must be
   clean; esbuild and wrangler don't type-check.
-- `npm test`: model, link tokens, i18n, the picker's undo history, the code limits, link-preview tags and the SMTP client
+- `npm test`: model, link tokens, i18n, the picker's undo history, the code limits, link-preview tags and page text, and the SMTP client
   against a scripted server (node:test, Node 22.18+ for type stripping; CI
   uses 26).
 - `npm run dev` (wrangler dev, which runs the build and rebuilds on
@@ -336,7 +353,8 @@ transforming (enums, namespaces, parameter properties) is off
   undo and redo in the picker, several participants, permissions, link reset, picking the date and the
   `.ics` download, ties and the ranking setting, holiday calendars, the
   events menu, finding events by an email code, the language menu and
-  nn/is dates, themes against a dark and a light device, link-preview tags). The email-code
+  nn/is dates, themes against a dark and a light device, link-preview tags,
+  the text for AI assistants and without JavaScript, the `llms.txt` flow). The email-code
   part needs `MAIL_ECHO` (as `npm run dev` sets; with plain `wrangler dev`
   add `--var MAIL_ECHO:1`). It uses `playwright-core`, which has
   no browser: set `PWCHROME` to a Chromium or

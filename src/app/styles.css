@@ -148,6 +148,10 @@ a { color: var(--accent); }
 .center { text-align: center; }
 .grow { flex: 1; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+/* The page's text for AI assistants (index.html): hidden here, in the
+   stylesheet, and not with `hidden` or an inline style, which tools that
+   read the page as text drop. */
+#for-agents { display: none; }
 [hidden] { display: none !important; }
 .i { width: 1.15em; height: 1.15em; flex: none; vertical-align: -.2em; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }

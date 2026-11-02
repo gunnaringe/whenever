@@ -2,7 +2,8 @@
 // link's HTML and show its Open Graph tags (they never run the app). The
 // Worker serves the app's pages (/, /new, /find, /e/...) and fills these
 // tags into index.html: the host's language and, on an event link, the
-// event's name and description. Pure, so it is tested in Node.
+// event's name and description. Pure, so it is tested in Node. pageText()
+// is the page's text for AI assistants and for people without JavaScript.
 //
 // Never put the requested URL (an event link may carry a token) into a
 // tag: there is no og:url, and the image URL is built from the origin.
@@ -60,6 +61,49 @@ export function clip(s: string, max: number): string {
   const cut = one.slice(0, max - 1);
   const space = cut.lastIndexOf(' ');
   return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s.,;:!?–-]+$/, '')}…`;
+}
+
+const escapeHtml = (s: string): string => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+// The page's text for those who don't run the app, as HTML:
+//   agents:   for programs and AI assistants, which read a page as text and
+//             never run it (#for-agents in index.html, inside #app, hidden by
+//             the stylesheet: the app replaces it when it starts). Facts and
+//             where the API is (public/llms.txt), in English on both hosts.
+//             Only the event's name from its texts: the description sits in
+//             the preview tags, not next to the API.
+//   noscript: what a person without JavaScript sees.
+// The id is the event's (checked against ID_RE); a link's token never gets
+// here.
+export interface PageText {
+  agents: string;
+  noscript: string;
+}
+
+export function pageText(host: string, origin: string, id: string, ev: EventPreview | null): PageText {
+  const lang = previewLang(host);
+  const llms = `${origin}/llms.txt`;
+  const a = (url: string) => `<a href="${url}">${url}</a>`;
+  if (!ev) {
+    return {
+      agents:
+        `<h1>Finn tid (Whenever)</h1>` +
+        `<p>A web app for finding the day or time that suits most people: someone makes a poll, shares one link, and everyone marks when they can. This page is the app and needs JavaScript.</p>` +
+        `<p>Programs and AI assistants can use its JSON API instead, described at ${a(llms)}</p>`,
+      noscript: `<p class="page">${lang === 'en' ? 'Whenever needs JavaScript.' : 'Finn tid trenger JavaScript.'}</p>`,
+    };
+  }
+  const name = escapeHtml(clip(ev.name, 120));
+  const json = `${origin}/api/events/${id}`;
+  const closed = ev.closed ? ' It is closed: only its organiser can change answers now.' : '';
+  return {
+    agents:
+      `<h1>${name}</h1>` +
+      `<p>A poll on Finn tid (Whenever) for finding the ${ev.mode === 'times' ? 'time' : 'day'} that suits most people.${closed} This page is the app and needs JavaScript.</p>` +
+      `<p>The same poll as JSON: ${a(json)}</p>` +
+      `<p>A link of the form /e/${id}/&lt;token&gt; carries a personal or admin token in its last part. Send it as the header "Authorization: Bearer &lt;token&gt;" to see and change what that link may. How to read, answer and organise polls with the API: ${a(llms)}</p>`,
+    noscript: `<p class="page"><strong>${name}</strong><br>${lang === 'en' ? 'Whenever needs JavaScript to show the poll.' : 'Finn tid trenger JavaScript for å vise avstemningen.'}</p>`,
+  };
 }
 
 export function pageMeta(host: string, origin: string, ev: EventPreview | null): PageMeta {
