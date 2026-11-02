@@ -151,7 +151,8 @@ transforming (enums, namespaces, parameter properties) is off
   without touching its email. Only an entry's personal link sets its email.
   `adminEmails` (meta, JSON; at most 10, `cleanEmails`) are the organisers'
   addresses: each gets the admin link back with an email code. The event
-  form has them comma-separated (`type=email multiple`). `PUT` takes only
+  form has one field each (`emailsField`; "add another", an × on each but
+  a lone one; empty fields are dropped). `PUT` takes only
   `emails`, never the old `email`: apps from before send that back as ''
   and would wipe the list. Events from before have one `adminEmail` (read as
   the list) and maybe `adminPid` (ignored). Never let an address entered

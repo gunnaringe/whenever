@@ -150,7 +150,9 @@ export const nn: Record<Key, Text> = {
   manyWeeks: 'Deltakarane må gå gjennom {n} veker med tider, éi veke om gongen på mobil. Færre dagar gjer det raskare å svare.',
   emailOptional: 'E-post (valfritt)',
   addEmail: 'Legg til e-post',
-  adminEmailHint: 'Blir lagra med avrøystinga, så du kan finne avrøystinga att på ei anna eining (vi sender deg ein kode). Er de fleire arrangørar, skriv adressene med komma mellom. Berre dei med admin-lenkja ser dei.',
+  adminEmailHint: 'Blir lagra med avrøystinga, så du kan finne avrøystinga att på ei anna eining (vi sender deg ein kode). Er de fleire arrangørar, kan de leggje inn ein e-post kvar. Berre dei med admin-lenkja ser dei.',
+  addEmailRow: 'Legg til ein e-post til',
+  removeEmail: 'Fjern e-posten',
   createEvent: 'Lag avrøysting',
   saveChanges: 'Lagre endringar',
   lostAnswers: {

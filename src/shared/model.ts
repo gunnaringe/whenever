@@ -405,8 +405,8 @@ export function cleanEmail(v: unknown): { ok: true; email: string } | { ok: fals
 }
 
 // The organisers' addresses: a list (or a string of addresses separated by
-// commas, semicolons or spaces, as the event form has them), cleaned, without
-// repeats. Too many is an error of its own.
+// commas, semicolons or spaces), cleaned, without empty ones or repeats. Too
+// many is an error of its own.
 export function cleanEmails(v: unknown): { ok: true; emails: string[] } | { ok: false; error: 'email' | 'emails' } {
   if (v === undefined || v === null) return { ok: true, emails: [] };
   const list = typeof v === 'string' ? v.split(/[\s,;]+/) : Array.isArray(v) ? v : null;

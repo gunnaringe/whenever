@@ -34,7 +34,7 @@ interface Draft extends M.DayWindow {
   tz: string;
   settings: M.Settings;
   holidays: M.HolidayCalendar; // which holidays the calendar marks
-  email: string; // the organisers' addresses, as typed (comma-separated)
+  emails: string[]; // the organisers' addresses, one per field (at least one, maybe empty)
   dates: Set<string>;
   times: Set<string>;
   pattern: Set<number> | null; // times a newly added day gets (null = all)
@@ -603,7 +603,7 @@ function newDraft(): Draft {
     tz: browserTz(),
     settings: { ...M.DEFAULT_SETTINGS },
     holidays: guessHolidays(),
-    email: '',
+    emails: [''],
     dates: new Set(),
     times: new Set(),
     // In times mode a picked day starts with working hours.
@@ -626,7 +626,7 @@ function draftFromView(v: M.View): Draft {
     mode: ev.mode,
     settings: { ...ev.settings },
     holidays: M.holidayCal(ev),
-    email: (v.adminEmails ?? []).join(', '),
+    emails: v.adminEmails?.length ? [...v.adminEmails] : [''],
     decided: ev.decided ?? null,
   });
   if (ev.mode === 'times') {
@@ -648,6 +648,50 @@ function offeredDays(d: Draft): string[] {
 
 // What the form would send (sanitizeEvent checks it like the server does).
 // The event's period is its first to its last offered day.
+// The organisers' addresses in the event form: one field each, up to
+// LIMITS.adminEmails, with a link that adds one and an × on each (when
+// there is more than one). The fields are the truth; syncEmails() copies
+// them into the draft.
+const emailRow = (v: string) =>
+  `<div class="email-row"><input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(v)}" autocomplete="email" inputmode="email" aria-labelledby="f-email-label"><button type="button" class="icon-btn" data-act="email-remove" aria-label="${esc(t('removeEmail'))}" title="${esc(t('removeEmail'))}">${icon('x')}</button></div>`;
+
+function emailsField(d: Draft, editing: boolean): string {
+  const n = d.emails.length;
+  return `<div class="field emails" data-field="email" role="group" aria-labelledby="f-email-label"${n === 1 ? ' data-one' : ''}>
+    <span class="label" id="f-email-label">${esc(t(editing ? 'adminEmailsOptional' : 'yourEmailOptional'))}</span>
+    <div class="email-rows">${d.emails.map(emailRow).join('')}</div>
+    <button type="button" class="linkish small" data-act="email-add"${n >= M.LIMITS.adminEmails ? ' hidden' : ''}>${icon('plus')}${esc(t('addEmailRow'))}</button>
+    <small class="hint">${esc(t('adminEmailHint'))}</small>
+  </div>`;
+}
+
+const emailInputs = () => [...document.querySelectorAll<HTMLInputElement>('#ev-form input[name=email]')];
+
+function syncEmails(): void {
+  const inputs = emailInputs();
+  draft().emails = inputs.map((i) => i.value);
+  const box = $('#ev-form [data-field=email]');
+  box.toggleAttribute('data-one', inputs.length === 1);
+  $('#ev-form [data-act=email-add]').hidden = inputs.length >= M.LIMITS.adminEmails;
+}
+
+function addEmail(): void {
+  $('#ev-form .email-rows').insertAdjacentHTML('beforeend', emailRow(''));
+  draft().dirty = true;
+  syncEmails();
+  emailInputs().at(-1)?.focus();
+}
+
+function removeEmail(b: HTMLElement): void {
+  const row = b.closest('.email-row');
+  if (!row) return;
+  const near = (row.nextElementSibling ?? row.previousElementSibling)?.querySelector('input');
+  row.remove();
+  draft().dirty = true;
+  syncEmails();
+  near?.focus();
+}
+
 function draftToEvent(d: Draft): Record<string, unknown> & { options: string[] } {
   const days = offeredDays(d);
   const start = days[0] ?? M.localToday();
@@ -812,7 +856,7 @@ function renderForm(v: M.View | null): void {
         <h2>${esc(t('settings'))}</h2>
         ${check('maybe')}${check('maybeCounts')}${check('openEdit')}${check('hidden')}${editing ? check('closed') : ''}
         ${field('holidays', t('holidayCal'), `<select name="holidays">${M.HOLIDAY_CALENDARS.map((c) => `<option value="${c}"${d.holidays === c ? ' selected' : ''}>${esc(t(`holidayCal.${c}`))}</option>`).join('')}</select>`, t('holidayCalHint'))}
-        ${field('email', t(editing ? 'adminEmailsOptional' : 'yourEmailOptional'), `<input type="email" name="email" multiple maxlength="${M.LIMITS.adminEmails * (M.LIMITS.email + 2)}" value="${esc(d.email)}" autocomplete="email" inputmode="email">`, t('adminEmailHint'))}
+        ${emailsField(d, editing)}
       </section>
       <p class="err" id="form-err" hidden></p>
       <div class="savebar">
@@ -831,7 +875,8 @@ function bindForm(): void {
   form.addEventListener('input', (e) => {
     const el = e.target as HTMLInputElement;
     const n = el.name;
-    if (n === 'name' || n === 'description' || n === 'location' || n === 'email') d[n] = el.value;
+    if (n === 'name' || n === 'description' || n === 'location') d[n] = el.value;
+    else if (n === 'email') syncEmails();
     d.dirty = true;
   });
   // Enter in a text field shouldn't create the event by accident.
@@ -1191,8 +1236,8 @@ async function submitForm(): Promise<void> {
   if (re) return fail(tx(`err.${re}`));
   const r = M.sanitizeEvent(draftToEvent(d));
   if (!r.ok) return fail(tx(`err.${r.error}`));
-  const em = M.cleanEmails(d.email);
-  if (!em.ok) return fail(t(`err.${em.error}`), control(form, 'email'));
+  const em = M.cleanEmails(d.emails);
+  if (!em.ok) return fail(t(`err.${em.error}`), emailInputs().find((i) => !M.cleanEmail(i.value).ok));
   if (v) {
     const keep = new Set(r.event.options);
     let lost = 0;
@@ -2209,6 +2254,8 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   answer: () => openSub('answer'),
   leave: () => leave(),
   'edit-event': () => openSub('edit'),
+  'email-add': () => addEmail(),
+  'email-remove': (b) => removeEmail(b),
   'edit-entry': (b) => openSub(`answer=${b.dataset.pid}`),
   'delete-entry': (b) => deleteEntry(data(b, 'pid')),
   'person-link': (b) => personLink(data(b, 'pid')),

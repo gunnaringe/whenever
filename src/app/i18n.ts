@@ -162,7 +162,9 @@ const nb = {
   manyWeeks: 'Deltakerne må gå gjennom {n} uker med tider, én uke om gangen på mobil. Færre dager gjør det raskere å svare.',
   emailOptional: 'E-post (valgfritt)',
   addEmail: 'Legg til e-post',
-  adminEmailHint: 'Lagres med avstemningen, så du kan finne avstemningen igjen på en annen enhet (vi sender deg en kode). Er dere flere arrangører, skriv adressene med komma mellom. Bare de med admin-lenken ser dem.',
+  adminEmailHint: 'Lagres med avstemningen, så du kan finne avstemningen igjen på en annen enhet (vi sender deg en kode). Er dere flere arrangører, kan dere legge inn en e-post hver. Bare de med admin-lenken ser dem.',
+  addEmailRow: 'Legg til en e-post til',
+  removeEmail: 'Fjern e-posten',
   createEvent: 'Lag avstemning',
   saveChanges: 'Lagre endringer',
   lostAnswers: {
@@ -516,7 +518,9 @@ const en: Record<Key, Text> = {
   manyWeeks: 'Participants have to go through {n} weeks of times, one week at a time on a phone. Fewer days make it quicker to answer.',
   emailOptional: 'Email (optional)',
   addEmail: 'Add your email',
-  adminEmailHint: 'Stored with the event, so you can find the event again on another device (we’ll email you a code). More than one organiser? Separate the addresses with commas. Only those with the admin link see them.',
+  adminEmailHint: 'Stored with the event, so you can find the event again on another device (we’ll email you a code). More than one organiser? Add an email each. Only those with the admin link see them.',
+  addEmailRow: 'Add another email',
+  removeEmail: 'Remove this email',
   createEvent: 'Create event',
   saveChanges: 'Save changes',
   lostAnswers: {

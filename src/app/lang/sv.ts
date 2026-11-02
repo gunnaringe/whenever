@@ -150,7 +150,9 @@ export const sv: Record<Key, Text> = {
   manyWeeks: 'Deltagarna måste gå igenom {n} veckor med tider, en vecka i taget på mobilen. Färre dagar gör det snabbare att svara.',
   emailOptional: 'E-post (valfritt)',
   addEmail: 'Lägg till e-post',
-  adminEmailHint: 'Sparas med träffen, så att du kan hitta träffen igen på en annan enhet (vi mejlar dig en kod). Är ni flera arrangörer? Skriv adresserna med komma emellan. Bara de med admin-länken ser dem.',
+  adminEmailHint: 'Sparas med träffen, så att du kan hitta träffen igen på en annan enhet (vi mejlar dig en kod). Är ni flera arrangörer kan ni lägga in en e-post var. Bara de med admin-länken ser dem.',
+  addEmailRow: 'Lägg till en e-post till',
+  removeEmail: 'Ta bort e-postadressen',
   createEvent: 'Skapa träff',
   saveChanges: 'Spara ändringar',
   lostAnswers: {

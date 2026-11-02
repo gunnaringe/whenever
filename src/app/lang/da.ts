@@ -150,7 +150,9 @@ export const da: Record<Key, Text> = {
   manyWeeks: 'Deltagerne skal igennem {n} uger med tider, én uge ad gangen på mobilen. Færre dage gør det hurtigere at svare.',
   emailOptional: 'E-mail (valgfrit)',
   addEmail: 'Tilføj e-mail',
-  adminEmailHint: 'Gemmes med aftalen, så du kan finde aftalen igen på en anden enhed (vi sender dig en kode). Er I flere arrangører? Skriv adresserne med komma imellem. Kun dem med admin-linket kan se dem.',
+  adminEmailHint: 'Gemmes med aftalen, så du kan finde aftalen igen på en anden enhed (vi sender dig en kode). Er I flere arrangører, kan I tilføje en e-mail hver. Kun dem med admin-linket kan se dem.',
+  addEmailRow: 'Tilføj en e-mail mere',
+  removeEmail: 'Fjern e-mailen',
   createEvent: 'Opret aftale',
   saveChanges: 'Gem ændringer',
   lostAnswers: {

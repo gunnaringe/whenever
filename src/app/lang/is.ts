@@ -152,7 +152,9 @@ export const is: Record<Key, Text> = {
   manyWeeks: 'Þátttakendur þurfa að fara í gegnum {n} vikur af tímum, eina viku í einu í síma. Færri dagar gera það fljótlegra að svara.',
   emailOptional: 'Netfang (valfrjálst)',
   addEmail: 'Bæta við netfangi',
-  adminEmailHint: 'Vistað með viðburðinum svo að þú getir fundið viðburðinn aftur á öðru tæki (við sendum þér kóða). Eru skipuleggjendur fleiri? Skrifaðu netföngin með kommu á milli. Aðeins þau sem eru með stjórnandahlekkinn sjá þau.',
+  adminEmailHint: 'Vistað með viðburðinum svo að þú getir fundið viðburðinn aftur á öðru tæki (við sendum þér kóða). Ef skipuleggjendur eru fleiri getur hver bætt við sínu netfangi. Aðeins þau sem eru með stjórnandahlekkinn sjá þau.',
+  addEmailRow: 'Bæta við öðru netfangi',
+  removeEmail: 'Fjarlægja netfangið',
   createEvent: 'Búa til viðburð',
   saveChanges: 'Vista breytingar',
   lostAnswers: {
