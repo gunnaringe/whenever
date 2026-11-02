@@ -1,5 +1,7 @@
 // API, plus the app's pages (/, /new, /find, /e/...), which get their link
-// preview tags filled in (page(), preview.ts). Other static files never reach
+// preview tags and their text for AI assistants and for people without
+// JavaScript filled in (page(), preview.ts; the API is described for them
+// in public/llms.txt). Other static files never reach
 // this Worker (see run_worker_first in wrangler.jsonc). Admin and personal links travel as
 // `Authorization: Bearer <token>`; the Poll object checks them (src/link.js).
 //
@@ -36,8 +38,8 @@ import { parse, PID_RE } from './link.ts';
 import { cleanCode, cleanLinkToken, dailyMax } from './codes.ts';
 import { SMTP_HOST, SMTP_PORT, MAILABLE_RE, isMailLang, codeMail, linkHost, sendMail, SmtpError } from './mail.ts';
 import type { Mail } from './mail.ts';
-import { pageMeta } from './preview.ts';
-import type { EventPreview, PageMeta } from './preview.ts';
+import { pageMeta, pageText } from './preview.ts';
+import type { EventPreview, PageMeta, PageText } from './preview.ts';
 import { sanitizeEvent, cleanEmail } from '../shared/model.ts';
 
 export { Poll, Lookup };
@@ -281,7 +283,8 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
 }
 
 // The app's pages: index.html (the assets' single-page fallback) with the
-// link preview tags filled in. An event link gets the event's name, unless
+// link preview tags and the page's text filled in. An event link gets the
+// event's name (and in the text where its JSON is), unless
 // this IP is over the rate limit. Never fails because of the preview: a
 // failed lookup just gives the plain tags. Nothing here logs the URL, which
 // can carry a token.
@@ -295,26 +298,30 @@ async function page(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
   let ev: EventPreview | null = null;
   const m = url.pathname.match(/^\/e\/([^/]+)(?:\/[^/]*)?$/);
-  if (m && ID_RE.test(m[1])) {
+  const id = m && ID_RE.test(m[1]) ? m[1] : '';
+  if (id) {
     try {
-      if (!(await limited(req, env))) ev = await stub(env, m[1]).preview();
+      if (!(await limited(req, env))) ev = await stub(env, id).preview();
     } catch (e) {
       console.error('preview', e instanceof Error ? e.message : 'failed');
     }
   }
   // https always: Signal drops an http image, and a plain-http request
   // shouldn't make one.
-  return withMeta(res, pageMeta(url.host, `https://${url.host}`, ev));
+  const origin = `https://${url.host}`;
+  return withMeta(res, pageMeta(url.host, origin, ev), pageText(url.host, origin, id, ev));
 }
 
 // HTMLRewriter escapes the text it writes, but in an attribute only `"`, so
-// `&` is escaped here (else a name with "&amp;" would show as "&"). User
-// text can't add markup either way; the smoke test reads the tags back with
-// an HTML parser.
-function withMeta(res: Response, meta: PageMeta): Response {
+// `&` is escaped here (else a name with "&amp;" would show as "&"). The
+// page's text is HTML that pageText() escaped. User text can't add markup
+// either way; the smoke test reads it all back with an HTML parser.
+function withMeta(res: Response, meta: PageMeta, text: PageText): Response {
   let rw = new HTMLRewriter()
     .on('html', { element: (el) => void el.setAttribute('lang', meta.lang) })
-    .on('title', { element: (el) => void el.setInnerContent(meta.title) });
+    .on('title', { element: (el) => void el.setInnerContent(meta.title) })
+    .on('#for-agents', { element: (el) => void el.setInnerContent(text.agents, { html: true }) })
+    .on('noscript', { element: (el) => void el.setInnerContent(text.noscript, { html: true }) });
   for (const [key, content] of Object.entries(meta.tags)) {
     const sel = key.startsWith('og:') ? `meta[property="${key}"]` : `meta[name="${key}"]`;
     rw = rw.on(sel, { element: (el) => void el.setAttribute('content', content.replaceAll('&', '&amp;')) });

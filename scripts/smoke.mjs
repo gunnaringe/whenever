@@ -983,6 +983,9 @@ check(true, 'auto follows the device switching to dark');
         image: get('meta[property="og:image"]'),
         width: get('meta[property="og:image:width"]'),
         url: get('meta[property="og:url"]'),
+        agentsTitle: d.querySelector('#for-agents h1')?.textContent ?? null,
+        agents: d.querySelector('#for-agents')?.textContent ?? '',
+        noscript: d.querySelector('noscript')?.textContent ?? '',
       };
     }, html);
     return { r, html, ...tags };
@@ -1001,11 +1004,41 @@ check(true, 'auto follows the device switching to dark');
   check(gone.r.status === 200 && gone.ogTitle === 'Finn tid' && gone.desc.startsWith('Finn dagen eller tiden'), "an unknown event gives the app's own preview");
   const home = await read('/');
   check(home.ogTitle === 'Finn tid' && home.lang === 'nb' && home.image === pub.image, 'so does the home page');
+  // What AI assistants and people without JavaScript get instead of the app.
+  check(pub.agentsTitle === name && pub.agents.includes(`https://finn-tid.apphub.casa/api/events/${ev.id}`) && pub.agents.includes('https://finn-tid.apphub.casa/llms.txt'), 'the page tells AI assistants where the poll is as JSON, and the guide');
+  check(adm.agents.includes(`/api/events/${ev.id}`), 'so does an admin link (without its token, as above)');
+  check(pub.noscript === `${name}Finn tid trenger JavaScript for å vise avstemningen.`, `people without JavaScript get its name (${pub.noscript})`);
+  check(home.agents.includes('/llms.txt') && !home.agents.includes('/api/events/') && home.noscript === 'Finn tid trenger JavaScript.', 'the home page points to the guide');
+  const guide = await fetch(`${BASE}/llms.txt`);
+  const guideText = await guide.text();
+  check(guide.ok && guide.headers.get('content-type') === 'text/plain; charset=utf-8' && guideText.includes('Authorization: Bearer <token>'), 'the API guide is served as text');
+  // What llms.txt tells an assistant to do: answer, give the person the
+  // token, and change the entry by sending it back whole, email included.
+  const api = (path, method, body, token) =>
+    fetch(`${BASE}/api/events/${ev.id}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: body && JSON.stringify(body),
+    }).then((r) => r.json());
+  const added = await api('/people', 'POST', { name: 'Kari', comment: '', email: 'kari@example.com', answers: { [D(2)]: 1 } });
+  const mine = (await api('', 'GET', undefined, added.token)).view;
+  const entry = mine.people.find((x) => x.id === mine.me);
+  check(mine.role === 'participant' && mine.me === added.pid && entry?.email === 'kari@example.com', 'as llms.txt says: the new token is a personal link, and its view has the email');
+  const changed = (await api(`/people/${mine.me}`, 'PUT', { name: entry.name, comment: entry.comment, email: entry.email, answers: { [D(2)]: 1, [D(3)]: 2 } }, added.token)).view;
+  const after = changed.people.find((x) => x.id === mine.me);
+  check(after.email === 'kari@example.com' && after.answers[D(3)] === 2, 'and sending the entry back whole changes the answers and keeps the email');
+  const nojs = await (await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
+  await nojs.goto(`${BASE}/e/${ev.id}`);
+  const line = nojs.locator('noscript p.page');
+  check((await line.isVisible()) && (await line.textContent()).endsWith('trenger JavaScript for å vise avstemningen.') && (await nojs.locator('#for-agents').count()) === 1 && !(await nojs.locator('#for-agents').isVisible()), 'without JavaScript: the name and one line, and the text for AI assistants stays hidden');
+  await shot(nojs, '41-no-javascript', false);
+  await nojs.close();
   const img = await fetch(`${BASE}/og-nb.png`);
   check(img.ok && img.headers.get('content-type') === 'image/png' && (await img.arrayBuffer()).byteLength < 300_000, 'the card image is a small PNG');
   await p.goto(`${BASE}/e/${ev.id}`);
   await p.waitForSelector('.role');
   check((await p.title()) === `${name} · Finn tid`, 'and the app still starts on the page');
+  check((await p.locator('#for-agents').count()) === 0, 'and replaces the text for AI assistants');
   await p.close();
 }
 
