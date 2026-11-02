@@ -8,7 +8,7 @@
 - `/e/<id>/<token>` is a personal link (one participant's) or the admin link (the organiser's). The last part is a secret token. Send it as the header `Authorization: Bearer <token>`, never in a query string. The view's `role` says which kind it is.
 - The id is 12 letters and digits; a token is 38 characters (A-Z, a-z, 0-9, `_`, `-`).
 
-Tokens are secrets: the admin link can change or delete the whole poll, so never give it to participants. A personal link only changes its own answers. The admin link is no person: several organisers may share it, and an organiser who answers gets their own entry and personal link like everyone else.
+Tokens are secrets: the admin link can change or delete the whole poll, so never give it to participants. A personal link only changes its own answers. The admin link is no person: several organisers may share it. It adds and changes anyone's answers (an organiser's own too), but never sees or sets an entry's email.
 
 ## Ground rules
 
@@ -80,11 +80,11 @@ POST /api/events/<id>/people
 -> { "pid", "token", "view" }
 ```
 
-With the admin link, add `"own": true` when it is the organiser's own entry: only then may it have an email. Without it, the entry is for someone else and gets none.
+With the admin link the entry gets no email; only its person can add one, with the entry's personal link.
 
 The returned token is this person's own link, `https://finn-tid.apphub.casa/e/<id>/<token>`. Give it to them: it is the only way to change these answers later (or to find them again without the app). `email` is optional (max 254 characters): with it, the app's /find can mail them a code that brings their polls back. Name: 1 to 60 characters; comment: up to 300 (longer text is cut).
 
-To change an entry (with a personal link: your own, `view.me`; an organiser changes their own with its personal link, since the admin link can't see or set its email):
+To change an entry (with a personal link: your own, `view.me`):
 
 ```
 PUT /api/events/<id>/people/<pid>
@@ -125,7 +125,7 @@ With the admin token:
 
 - `PUT /api/events/<id>` `{ "event": {...}, "emails"?: [...] }` -> `{ view }`: send the whole event back (from `view.event`) with your changes; leave `emails` out to keep the organisers' addresses, or send the whole new list. Answers to options you remove are dropped. Set `event.decided` to an option (times mode: the first slot of a window) to pick the final date or time; leave it out to unpick.
 - `DELETE /api/events/<id>` -> `{ "ok": true }`: deletes the poll for everyone.
-- `POST /api/events/<id>/people` with `"own": true` adds the organiser's own entry (keep its token: that is their personal link); without it, one for someone else (it gets no email).
+- `POST /api/events/<id>/people` adds an entry for anyone, an organiser too (no email); give the person its link.
 - `POST /api/events/<id>/people/<pid>/link` `{ "reset": false }` -> `{ token }`: a participant's personal link, to send to them; `"reset": true` makes a new one and the old stops working. (A participant may do this for their own entry.)
 - `POST /api/events/<id>/admin-link` -> `{ token }`: a new admin link; the old one stops working.
 

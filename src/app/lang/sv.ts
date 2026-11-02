@@ -178,7 +178,7 @@ export const sv: Record<Key, Text> = {
   metaOpenEdit: 'Alla kan ändra svaren',
   youAreAdmin: 'Du är admin',
   adminHint: 'Du kan ändra träffen och alla svar.',
-  addForOther: 'Lägg till svar för någon annan',
+  addAnswers: 'Lägg till svar',
   personName: 'Namn',
   close: 'Stäng',
   reopen: 'Öppna igen',

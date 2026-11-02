@@ -145,13 +145,10 @@ transforming (enums, namespaces, parameter properties) is off
   entry (not with `hidden`, where only the admin sees others' answers).
   Emails are only returned to their owner (and `adminEmails` to the admin).
 - **Organisers:** the admin link is no person: `me` is null in its view,
-  and several organisers may share it. An organiser who answers ("Legg til
-  dine svar", `own: true` on the POST, so it may have an email) gets an
-  ordinary entry; the app keeps its personal link on that device, which
-  marks the entry "deg" there (`ownPid`). With the admin link the app
-  changes that entry without its email field (the admin view has no email);
-  the personal link sets the email. "Legg til svar for en annen"
-  (`#answer=new`) makes an entry with no email and shows its link.
+  and several organisers may share it (a small office can share it with
+  everyone). Its "Legg til svar" adds an entry for anyone, an organiser's
+  own too, with no email, and shows that entry's link; it edits any entry
+  without touching its email. Only an entry's personal link sets its email.
   `adminEmails` (meta, JSON; at most 10, `cleanEmails`) are the organisers'
   addresses: each gets the admin link back with an email code. The event
   form has them comma-separated (`type=email multiple`). `PUT` takes only

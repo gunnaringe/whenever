@@ -48,7 +48,6 @@ interface Draft extends M.DayWindow {
 interface AnswerDraft {
   pid: string | null;
   own: boolean;
-  mail: boolean; // with the email field (your own entry, see renderAnswer)
   name: string;
   comment: string;
   email: string;
@@ -113,14 +112,6 @@ function here(): { id: string; token: string | null } {
 function current(): M.View {
   if (!app.view) throw new Error('no event loaded');
   return app.view;
-}
-// Your own entry: the one your personal link is for (v.me). The admin link
-// is no person (poll.ts): with it, the entry this device added or has the
-// personal link to, while that is still there.
-function ownPid(v: M.View): string | null {
-  if (v.role !== 'admin') return v.me;
-  const pid = store.get(here().id)?.pid;
-  return pid && v.people.some((p) => p.id === pid) ? pid : null;
 }
 function draft(): Draft {
   if (!app.draft) throw new Error('no event form');
@@ -204,7 +195,7 @@ function subView(): Sub {
   const h = location.hash.slice(1);
   if (h === 'edit') return { kind: 'edit' };
   if (h === 'answer') return { kind: 'answer', pid: null };
-  // The admin adds answers for someone else (not their own).
+  // From before: the admin's "for someone else", now the same as #answer.
   if (h === 'answer=new') return { kind: 'answer', pid: 'new' };
   const m = h.match(ANSWER_RE);
   if (m) return { kind: 'answer', pid: m[1] };
@@ -1355,17 +1346,13 @@ function actionsHtml(v: M.View): string {
   const add = M.canAdd(who, ev.settings);
   const shareBtn = `<button type="button" class="btn" data-act="share" data-url="${esc(eventUrl(id))}" data-title="${esc(ev.name)}">${icon('share')}${esc(t('shareEvent'))}</button>`;
   if (v.role === 'admin') {
-    // Your own answers (ownPid) and answers for others. Your personal link
-    // opens them as a participant, where you can also change their email.
-    const mine = ownPid(v) !== null;
-    const mineTok = mine ? store.get(id)?.me : undefined;
+    // The admin link is no person (poll.ts): it adds and changes anyone's
+    // answers, an organiser's own too.
     const quiet = app.flash?.kind === 'created';
     return `<section class="card role">
-      <div class="role-text"><div class="role-head"><b>${esc(t('youAreAdmin'))}</b><button type="button" class="linkish small leave" data-act="leave">${icon('logout')}${esc(t('leave'))}</button></div><p class="muted">${esc(t('adminHint'))}</p>
-        ${mineTok ? `<a class="linkish small" href="/e/${id}/${mineTok}" data-link data-mine>${esc(t('openMine'))}</a>` : ''}</div>
+      <div class="role-text"><div class="role-head"><b>${esc(t('youAreAdmin'))}</b><button type="button" class="linkish small leave" data-act="leave">${icon('logout')}${esc(t('leave'))}</button></div><p class="muted">${esc(t('adminHint'))}</p></div>
       <div class="row wrap">
-        ${mine ? `<button type="button" class="btn primary" data-act="answer">${icon('edit')}${esc(t('editYourAnswers'))}</button>` : `<button type="button" class="btn${quiet ? '' : ' primary'}" data-act="answer">${icon('plus')}${esc(t('addYourAnswers'))}</button>`}
-        <button type="button" class="btn" data-act="answer-other">${icon('plus')}${esc(t('addForOther'))}</button>
+        <button type="button" class="btn${quiet ? '' : ' primary'}" data-act="answer">${icon('plus')}${esc(t('addAnswers'))}</button>
         <button type="button" class="btn" data-act="edit-event">${icon('edit')}${esc(t('editEvent'))}</button>
         <button type="button" class="btn" data-act="toggle-closed">${icon('lock')}${esc(t(ev.settings.closed ? 'reopen' : 'close'))}</button>
         <button type="button" class="btn" data-act="admin-more" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('dots')}</button>
@@ -1640,7 +1627,7 @@ function peopleHtml(v: M.View, stored: Stored | null): string {
   const ev = v.event;
   const who = { role: v.role, me: v.me };
   // Your own entry: your personal link's (v.me), or the one this device has
-  // the personal link to (also with the admin link, see ownPid).
+  // the personal link to.
   const mine = (p: M.Person) => p.id === v.me || Boolean(stored?.pid && p.id === stored.pid);
   const rows = v.people
     .map((p) => {
@@ -1673,10 +1660,9 @@ function renderAnswer(v: M.View, sub: string | null): void {
   const ev = v.event;
   const who = { role: v.role, me: v.me };
   // 'new': the admin adds answers for someone else.
-  const other = sub === 'new' && v.role === 'admin';
+  // ('new' is from before: the admin's "for someone else".)
   const pid = sub === 'new' ? null : sub;
-  const mePid = ownPid(v);
-  const target = pid ? v.people.find((p) => p.id === pid) : mePid && !other ? v.people.find((p) => p.id === mePid) : null;
+  const target = pid ? v.people.find((p) => p.id === pid) : v.me ? v.people.find((p) => p.id === v.me) : null;
   if (pid && !target) {
     toast(t('err.person'));
     return closeSub();
@@ -1685,14 +1671,12 @@ function renderAnswer(v: M.View, sub: string | null): void {
     toast(t(ev.settings.closed ? 'err.closed' : 'err.forbidden'));
     return closeSub();
   }
-  const own = target ? target.id === mePid : !other;
+  // The admin link's entries are never its own: they get no email.
+  const own = v.role !== 'admin' && (target ? target.id === v.me : true);
   if (!app.answer) {
     app.answer = {
       pid: target?.id ?? null,
       own,
-      // Not when the admin link changes your entry: its view doesn't have the
-      // email (only your personal link's does), and leaves it as it is.
-      mail: own && !(v.role === 'admin' && target),
       name: target?.name ?? '',
       comment: target?.comment ?? '',
       email: target?.email ?? '',
@@ -1703,7 +1687,7 @@ function renderAnswer(v: M.View, sub: string | null): void {
     };
   }
   const a = answer();
-  const title = target ? (own ? t('editYourAnswers') : t('editAnswersOf', { name: target.name })) : t(own ? 'addYourAnswers' : 'addForOther');
+  const title = target ? (own ? t('editYourAnswers') : t('editAnswersOf', { name: target.name })) : t(own ? 'addYourAnswers' : 'addAnswers');
   document.title = `${title} · ${ev.name}`;
   const hint: Key =
     ev.mode === 'dates'
@@ -1733,7 +1717,7 @@ function renderAnswer(v: M.View, sub: string | null): void {
         ${field('name', `${t(own ? 'yourName' : 'personName')} *`, `<input name="name" required maxlength="${M.LIMITS.person}" value="${esc(a.name)}"${own ? ' autocomplete="name"' : ' autocomplete="off"'}>`)}
         ${field('comment', t('commentOptional'), `<input name="comment" maxlength="${M.LIMITS.comment}" value="${esc(a.comment)}" placeholder="${esc(t('commentPh'))}">`)}
         ${
-          a.mail
+          a.own
             ? `<details class="fold" ${a.email ? 'open' : ''}>
                 <summary>${esc(t('addEmail'))}</summary>
                 ${field('email', t('emailOptional'), `<input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(a.email)}" autocomplete="email" inputmode="email">`, t('emailHint'))}
@@ -1897,8 +1881,8 @@ async function saveAnswer(): Promise<void> {
     $opt('#answer-form [name="name"]')?.focus();
     return;
   }
-  const body: { name: string; comment: string; answers: M.Answers; email?: string; own?: boolean } = { name, comment: a.comment, answers: a.answers };
-  if (a.mail) {
+  const body: { name: string; comment: string; answers: M.Answers; email?: string } = { name, comment: a.comment, answers: a.answers };
+  if (a.own) {
     if (!M.cleanEmail(a.email).ok) {
       toast(t('err.email'));
       $opt('#answer-form [name="email"]')?.focus();
@@ -1915,17 +1899,12 @@ async function saveAnswer(): Promise<void> {
       toast(t('saved'));
       closeSub();
     } else {
-      if (v.role === 'admin' && a.own) body.own = true;
       const r = await api<M.Added>('POST', `/events/${id}/people`, { token, body });
       app.answer = null;
       if (v.role === 'admin') {
-        // Your own entry's link stays on this device, which marks it as yours
-        // (ownPid) and lets you change its email with it.
-        if (a.own) store.put(id, { me: r.token, pid: r.pid });
         setView(r.view);
         closeSub();
-        if (a.own) toast(t('saved'));
-        else linkDialog(t('personLinkTitle', { name }), t('addedByAdminText'), linkUrl(id, r.token));
+        linkDialog(t('personLinkTitle', { name }), t('addedByAdminText'), linkUrl(id, r.token));
       } else {
         store.put(id, { name: v.event.name, me: r.token, pid: r.pid });
         app.flash = { kind: 'savedNew', name };
@@ -1955,7 +1934,7 @@ async function deleteEntry(pid: string): Promise<void> {
   const { id, token } = here();
   const p = v.people.find((x) => x.id === pid);
   if (!p) return;
-  const own = pid === ownPid(v);
+  const own = pid === v.me;
   if (!(await ask(own ? t('deleteMineQ') : t('deleteEntryQ', { name: p.name }), { ok: t('delete'), danger: true }))) return;
   try {
     const { view } = await api<{ view: M.View }>('DELETE', `/events/${id}/people/${pid}`, { token });
@@ -2228,7 +2207,6 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
 
   // Event page
   answer: () => openSub('answer'),
-  'answer-other': () => openSub('answer=new'),
   leave: () => leave(),
   'edit-event': () => openSub('edit'),
   'edit-entry': (b) => openSub(`answer=${b.dataset.pid}`),

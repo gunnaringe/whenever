@@ -10,9 +10,8 @@
 //   PUT    /api/events/:id                   { event, emails? } (admin) -> { view }
 //   DELETE /api/events/:id                   (admin) -> { ok }
 //   POST   /api/events/:id/admin-link        (admin) new admin link -> { token }
-//   POST   /api/events/:id/people            { name, email?, comment?, answers, own? } -> { pid, token, view }
-//                                             (with the admin link, own: an organiser's own entry,
-//                                             which may have an email; others get none)
+//   POST   /api/events/:id/people            { name, email?, comment?, answers } -> { pid, token, view }
+//                                             (with the admin link: no email)
 //   PUT    /api/events/:id/people/:pid       entry -> { view }
 //   DELETE /api/events/:id/people/:pid       -> { view }
 //   POST   /api/events/:id/people/:pid/link  { reset? } (self or admin) -> { token }

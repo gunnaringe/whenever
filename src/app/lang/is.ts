@@ -180,7 +180,7 @@ export const is: Record<Key, Text> = {
   metaOpenEdit: 'Allir geta breytt svörunum',
   youAreAdmin: 'Þú ert stjórnandi',
   adminHint: 'Þú getur breytt viðburðinum og öllum svörunum.',
-  addForOther: 'Bæta við svörum fyrir einhvern annan',
+  addAnswers: 'Bæta við svörum',
   personName: 'Nafn',
   close: 'Loka',
   reopen: 'Opna aftur',

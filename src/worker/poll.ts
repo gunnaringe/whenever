@@ -6,9 +6,10 @@
 //   people(...)  one row per entry; secret is their link's (see link.ts)
 //
 // The admin link is no person: whoever has it can do everything, and several
-// organisers may share it. An organiser who answers gets an entry and a
-// personal link like everyone else (the app keeps that link on their device).
-// Every one of the organisers' addresses gets the admin link back by email.
+// organisers may share it. It adds and changes anyone's entry, an
+// organiser's own too, but never with an email: only its person may set that
+// (with the entry's personal link). Every one of the organisers' addresses
+// gets the admin link back by email.
 // (Events from before kept the organiser's own entry in 'adminPid'; it is
 // ignored now.)
 //
@@ -251,9 +252,8 @@ export class Poll extends DurableObject<Env> {
     const { n, seq } = this.sql.exec<{ n: number; seq: number }>(`SELECT COUNT(*) AS n, COALESCE(MAX(seq), 0) AS seq FROM people`).one();
     if (n >= LIMITS.people) return { error: 'full', status: 409 };
     const o = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
-    // With the admin link, an organiser adds their own entry (own: true) or
-    // one for someone else, which gets no email: only its person may set that.
-    const own = who.role !== 'admin' || o.own === true;
+    // An entry added with the admin link gets no email (see the top).
+    const own = who.role !== 'admin';
     const r = sanitizeEntry({ ...o, email: own ? o.email ?? '' : '' }, ev);
     if (!r.ok) return { error: r.error, status: 400 };
     let pid = newPid();
