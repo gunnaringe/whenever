@@ -8,7 +8,7 @@
 - `/e/<id>/<token>` is a personal link (one participant's) or the admin link (the organiser's). The last part is a secret token. Send it as the header `Authorization: Bearer <token>`, never in a query string. The view's `role` says which kind it is.
 - The id is 12 letters and digits; a token is 38 characters (A-Z, a-z, 0-9, `_`, `-`).
 
-Tokens are secrets: the admin link can change or delete the whole poll, so never give it to participants. A personal link only changes its own answers.
+Tokens are secrets: the admin link can change or delete the whole poll, so never give it to participants. A personal link only changes its own answers. The admin link is no person: several organisers may share it. It adds and changes anyone's answers (an organiser's own too), but never sees or sets an entry's email.
 
 ## Ground rules
 
@@ -45,12 +45,12 @@ View {
     tz: string                      IANA time zone of the times, e.g. "Europe/Oslo"
   }
   role: "admin" | "participant" | "visitor"
-  me: string | null                 your own entry's id, if you have one
+  me: string | null                 your own entry's id (personal link only; null with the admin link)
   link: "none" | "invalid" | "ok"   whether the token you sent worked
   people: [{ id, name, comment, answers, updated, email? }]
   count: number                     how many have answered (also when hidden)
   hidden: boolean                   true: people holds only your own entry
-  adminEmail?: string               admin only
+  adminEmails?: string[]            admin only: the organisers' addresses
 }
 ```
 
@@ -79,6 +79,8 @@ POST /api/events/<id>/people
 { "name": "Kari", "comment": "", "email": "", "answers": { "2026-12-04": 1, "2026-12-05": 2 } }
 -> { "pid", "token", "view" }
 ```
+
+With the admin link the entry gets no email; only its person can add one, with the entry's personal link.
 
 The returned token is this person's own link, `https://finn-tid.apphub.casa/e/<id>/<token>`. Give it to them: it is the only way to change these answers later (or to find them again without the app). `email` is optional (max 254 characters): with it, the app's /find can mail them a code that brings their polls back. Name: 1 to 60 characters; comment: up to 300 (longer text is cut).
 
@@ -109,22 +111,21 @@ POST /api/events
     "options": ["2026-12-04", "2026-12-05", "2026-12-11"],
     "settings": { "maybe": true }
   },
-  "email": ""
+  "emails": []
 }
 -> { "id", "token", "view" }
 ```
 
 - Admin link: `https://finn-tid.apphub.casa/e/<id>/<token>`; share the public link `https://finn-tid.apphub.casa/e/<id>`. Use `https://whenever.apphub.casa/...` for English.
-- `email` (optional): the organiser's, so the app's /find can mail them the admin link again.
+- `emails` (optional, at most 10): the organisers' addresses. The app's /find can mail each of them the admin link again. Every organiser with the admin link sees them.
 - name: 1 to 100 characters, description up to 2000, location up to 200 (longer text is cut). `end` >= `start`, at most 366 days (times mode: 62). 1 to 2000 options; ones outside the range are dropped. Unset settings are `maybe: true`, the others `false`.
 - times mode also takes `slot` (15, 30 or 60; default 30), `dayStart` and `dayEnd` (minutes after midnight, multiples of `slot`), `duration` (minutes, rounded up to a multiple of `slot`) and `tz` (default "Europe/Oslo"). Options are slot starts from `dayStart` to before `dayEnd`, e.g. `"2026-12-04T18:00"`.
 
 With the admin token:
 
-- `PUT /api/events/<id>` `{ "event": {...}, "email"?: "..." }` -> `{ view }`: send the whole event back (from `view.event`) with your changes; leave `email` out to keep the organiser's. Answers to options you remove are dropped. Set `event.decided` to an option (times mode: the first slot of a window) to pick the final date or time; leave it out to unpick.
+- `PUT /api/events/<id>` `{ "event": {...}, "emails"?: [...] }` -> `{ view }`: send the whole event back (from `view.event`) with your changes; leave `emails` out to keep the organisers' addresses, or send the whole new list. Answers to options you remove are dropped. Set `event.decided` to an option (times mode: the first slot of a window) to pick the final date or time; leave it out to unpick.
 - `DELETE /api/events/<id>` -> `{ "ok": true }`: deletes the poll for everyone.
-- `POST /api/events/<id>/people` with `"own": true` adds the organiser's own entry; without it, one for someone else (it gets no email).
-- `PUT /api/events/<id>/own` `{ "pid": "<pid>" | null }`: which entry is the organiser's.
+- `POST /api/events/<id>/people` adds an entry for anyone, an organiser too (no email); give the person its link.
 - `POST /api/events/<id>/people/<pid>/link` `{ "reset": false }` -> `{ token }`: a participant's personal link, to send to them; `"reset": true` makes a new one and the old stops working. (A participant may do this for their own entry.)
 - `POST /api/events/<id>/admin-link` -> `{ token }`: a new admin link; the old one stops working.
 
@@ -132,7 +133,7 @@ With the admin token:
 
 Errors are `{ "error": "<code>" }` with the HTTP status:
 
-- 400: `json`, `name`, `range`, `rangeLong`, `hours`, `options`, `tooMany`, `personName`, `email`, `person` (what the code names is wrong)
+- 400: `json`, `name`, `range`, `rangeLong`, `hours`, `options`, `tooMany`, `personName`, `email`, `emails` (more than 10), `person` (what the code names is wrong)
 - 403: `forbidden` (your link may not do this), `closed`
 - 404: `notFound` (no such poll, or it is deleted), `person`
 - 405 `method`, 409 `full` (200 people), 413 `size`, 415 `type`, 429 `rate`, 503 `busy`, 500 `server`

@@ -34,7 +34,7 @@ interface Draft extends M.DayWindow {
   tz: string;
   settings: M.Settings;
   holidays: M.HolidayCalendar; // which holidays the calendar marks
-  email: string;
+  emails: string[]; // the organisers' addresses, one per field (at least one, maybe empty)
   dates: Set<string>;
   times: Set<string>;
   pattern: Set<number> | null; // times a newly added day gets (null = all)
@@ -195,7 +195,7 @@ function subView(): Sub {
   const h = location.hash.slice(1);
   if (h === 'edit') return { kind: 'edit' };
   if (h === 'answer') return { kind: 'answer', pid: null };
-  // The admin adds answers for someone else (not their own).
+  // From before: the admin's "for someone else", now the same as #answer.
   if (h === 'answer=new') return { kind: 'answer', pid: 'new' };
   const m = h.match(ANSWER_RE);
   if (m) return { kind: 'answer', pid: m[1] };
@@ -603,7 +603,7 @@ function newDraft(): Draft {
     tz: browserTz(),
     settings: { ...M.DEFAULT_SETTINGS },
     holidays: guessHolidays(),
-    email: '',
+    emails: [''],
     dates: new Set(),
     times: new Set(),
     // In times mode a picked day starts with working hours.
@@ -626,7 +626,7 @@ function draftFromView(v: M.View): Draft {
     mode: ev.mode,
     settings: { ...ev.settings },
     holidays: M.holidayCal(ev),
-    email: v.adminEmail ?? '',
+    emails: v.adminEmails?.length ? [...v.adminEmails] : [''],
     decided: ev.decided ?? null,
   });
   if (ev.mode === 'times') {
@@ -648,6 +648,50 @@ function offeredDays(d: Draft): string[] {
 
 // What the form would send (sanitizeEvent checks it like the server does).
 // The event's period is its first to its last offered day.
+// The organisers' addresses in the event form: one field each, up to
+// LIMITS.adminEmails, with a link that adds one and an × on each (when
+// there is more than one). The fields are the truth; syncEmails() copies
+// them into the draft.
+const emailRow = (v: string) =>
+  `<div class="email-row"><input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(v)}" autocomplete="email" inputmode="email" aria-labelledby="f-email-label"><button type="button" class="icon-btn" data-act="email-remove" aria-label="${esc(t('removeEmail'))}" title="${esc(t('removeEmail'))}">${icon('x')}</button></div>`;
+
+function emailsField(d: Draft, editing: boolean): string {
+  const n = d.emails.length;
+  return `<div class="field emails" data-field="email" role="group" aria-labelledby="f-email-label"${n === 1 ? ' data-one' : ''}>
+    <span class="label" id="f-email-label">${esc(t(editing ? 'adminEmailsOptional' : 'yourEmailOptional'))}</span>
+    <div class="email-rows">${d.emails.map(emailRow).join('')}</div>
+    <button type="button" class="linkish small" data-act="email-add"${n >= M.LIMITS.adminEmails ? ' hidden' : ''}>${icon('plus')}${esc(t('addEmailRow'))}</button>
+    <small class="hint">${esc(t('adminEmailHint'))}</small>
+  </div>`;
+}
+
+const emailInputs = () => [...document.querySelectorAll<HTMLInputElement>('#ev-form input[name=email]')];
+
+function syncEmails(): void {
+  const inputs = emailInputs();
+  draft().emails = inputs.map((i) => i.value);
+  const box = $('#ev-form [data-field=email]');
+  box.toggleAttribute('data-one', inputs.length === 1);
+  $('#ev-form [data-act=email-add]').hidden = inputs.length >= M.LIMITS.adminEmails;
+}
+
+function addEmail(): void {
+  $('#ev-form .email-rows').insertAdjacentHTML('beforeend', emailRow(''));
+  draft().dirty = true;
+  syncEmails();
+  emailInputs().at(-1)?.focus();
+}
+
+function removeEmail(b: HTMLElement): void {
+  const row = b.closest('.email-row');
+  if (!row) return;
+  const near = (row.nextElementSibling ?? row.previousElementSibling)?.querySelector('input');
+  row.remove();
+  draft().dirty = true;
+  syncEmails();
+  near?.focus();
+}
+
 function draftToEvent(d: Draft): Record<string, unknown> & { options: string[] } {
   const days = offeredDays(d);
   const start = days[0] ?? M.localToday();
@@ -812,7 +856,7 @@ function renderForm(v: M.View | null): void {
         <h2>${esc(t('settings'))}</h2>
         ${check('maybe')}${check('maybeCounts')}${check('openEdit')}${check('hidden')}${editing ? check('closed') : ''}
         ${field('holidays', t('holidayCal'), `<select name="holidays">${M.HOLIDAY_CALENDARS.map((c) => `<option value="${c}"${d.holidays === c ? ' selected' : ''}>${esc(t(`holidayCal.${c}`))}</option>`).join('')}</select>`, t('holidayCalHint'))}
-        ${field('email', t('yourEmailOptional'), `<input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(d.email)}" autocomplete="email" inputmode="email">`, t('adminEmailHint'))}
+        ${emailsField(d, editing)}
       </section>
       <p class="err" id="form-err" hidden></p>
       <div class="savebar">
@@ -831,7 +875,8 @@ function bindForm(): void {
   form.addEventListener('input', (e) => {
     const el = e.target as HTMLInputElement;
     const n = el.name;
-    if (n === 'name' || n === 'description' || n === 'location' || n === 'email') d[n] = el.value;
+    if (n === 'name' || n === 'description' || n === 'location') d[n] = el.value;
+    else if (n === 'email') syncEmails();
     d.dirty = true;
   });
   // Enter in a text field shouldn't create the event by accident.
@@ -1191,8 +1236,8 @@ async function submitForm(): Promise<void> {
   if (re) return fail(tx(`err.${re}`));
   const r = M.sanitizeEvent(draftToEvent(d));
   if (!r.ok) return fail(tx(`err.${r.error}`));
-  const em = M.cleanEmail(d.email);
-  if (!em.ok) return fail(t('err.email'), control(form, 'email'));
+  const em = M.cleanEmails(d.emails);
+  if (!em.ok) return fail(t(`err.${em.error}`), emailInputs().find((i) => !M.cleanEmail(i.value).ok));
   if (v) {
     const keep = new Set(r.event.options);
     let lost = 0;
@@ -1203,13 +1248,13 @@ async function submitForm(): Promise<void> {
   try {
     if (v) {
       const { id, token } = here();
-      const { view } = await api<{ view: M.View }>('PUT', `/events/${id}`, { token, body: { event: r.event, email: em.email } });
+      const { view } = await api<{ view: M.View }>('PUT', `/events/${id}`, { token, body: { event: r.event, emails: em.emails } });
       d.dirty = false;
       setView(view);
       toast(t('saved'));
       closeSub();
     } else {
-      const res = await api<M.Created>('POST', '/events', { body: { event: r.event, email: em.email } });
+      const res = await api<M.Created>('POST', '/events', { body: { event: r.event, emails: em.emails } });
       store.put(res.id, { name: r.event.name, admin: res.token });
       d.dirty = false;
       app.flash = { kind: 'created' };
@@ -1346,15 +1391,13 @@ function actionsHtml(v: M.View): string {
   const add = M.canAdd(who, ev.settings);
   const shareBtn = `<button type="button" class="btn" data-act="share" data-url="${esc(eventUrl(id))}" data-title="${esc(ev.name)}">${icon('share')}${esc(t('shareEvent'))}</button>`;
   if (v.role === 'admin') {
-    // The admin's own answer (v.me, see poll.ts) and answers for others.
-    const mine = v.people.some((p) => p.id === v.me);
+    // The admin link is no person (poll.ts): it adds and changes anyone's
+    // answers, an organiser's own too.
     const quiet = app.flash?.kind === 'created';
     return `<section class="card role">
-      <div class="role-text"><div class="role-head"><b>${esc(t('youAreAdmin'))}</b><button type="button" class="linkish small leave" data-act="leave">${icon('logout')}${esc(t('leave'))}</button></div><p class="muted">${esc(t('adminHint'))}</p>
-        ${!mine && v.people.length ? `<button type="button" class="linkish small" data-act="mark-own">${esc(t('markOwnQ'))}</button>` : ''}</div>
+      <div class="role-text"><div class="role-head"><b>${esc(t('youAreAdmin'))}</b><button type="button" class="linkish small leave" data-act="leave">${icon('logout')}${esc(t('leave'))}</button></div><p class="muted">${esc(t('adminHint'))}</p></div>
       <div class="row wrap">
-        ${mine ? `<button type="button" class="btn primary" data-act="answer">${icon('edit')}${esc(t('editYourAnswers'))}</button>` : `<button type="button" class="btn${quiet ? '' : ' primary'}" data-act="answer">${icon('plus')}${esc(t('addYourAnswers'))}</button>`}
-        <button type="button" class="btn" data-act="answer-other">${icon('plus')}${esc(t('addForOther'))}</button>
+        <button type="button" class="btn${quiet ? '' : ' primary'}" data-act="answer">${icon('plus')}${esc(t('addAnswers'))}</button>
         <button type="button" class="btn" data-act="edit-event">${icon('edit')}${esc(t('editEvent'))}</button>
         <button type="button" class="btn" data-act="toggle-closed">${icon('lock')}${esc(t(ev.settings.closed ? 'reopen' : 'close'))}</button>
         <button type="button" class="btn" data-act="admin-more" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('dots')}</button>
@@ -1628,9 +1671,9 @@ function mountResults(v: M.View): void {
 function peopleHtml(v: M.View, stored: Stored | null): string {
   const ev = v.event;
   const who = { role: v.role, me: v.me };
-  // The admin's own entry comes from the server (v.me); others also go by the
-  // entry this device added.
-  const mine = (p: M.Person) => p.id === v.me || Boolean(v.role !== 'admin' && stored?.pid && p.id === stored.pid);
+  // Your own entry: your personal link's (v.me), or the one this device has
+  // the personal link to.
+  const mine = (p: M.Person) => p.id === v.me || Boolean(stored?.pid && p.id === stored.pid);
   const rows = v.people
     .map((p) => {
       const edit = M.canEdit(who, ev.settings, p.id);
@@ -1662,9 +1705,9 @@ function renderAnswer(v: M.View, sub: string | null): void {
   const ev = v.event;
   const who = { role: v.role, me: v.me };
   // 'new': the admin adds answers for someone else.
-  const other = sub === 'new' && v.role === 'admin';
+  // ('new' is from before: the admin's "for someone else".)
   const pid = sub === 'new' ? null : sub;
-  const target = pid ? v.people.find((p) => p.id === pid) : v.me && !other ? v.people.find((p) => p.id === v.me) : null;
+  const target = pid ? v.people.find((p) => p.id === pid) : v.me ? v.people.find((p) => p.id === v.me) : null;
   if (pid && !target) {
     toast(t('err.person'));
     return closeSub();
@@ -1673,15 +1716,15 @@ function renderAnswer(v: M.View, sub: string | null): void {
     toast(t(ev.settings.closed ? 'err.closed' : 'err.forbidden'));
     return closeSub();
   }
-  const own = target ? target.id === v.me : !other;
+  // The admin link's entries are never its own: they get no email.
+  const own = v.role !== 'admin' && (target ? target.id === v.me : true);
   if (!app.answer) {
     app.answer = {
       pid: target?.id ?? null,
       own,
       name: target?.name ?? '',
       comment: target?.comment ?? '',
-      // The admin's own new entry starts with the admin email.
-      email: target?.email ?? (own && v.role === 'admin' ? (v.adminEmail ?? '') : ''),
+      email: target?.email ?? '',
       answers: { ...(target?.answers ?? {}) },
       brush: M.YES,
       view: 'cal',
@@ -1689,7 +1732,7 @@ function renderAnswer(v: M.View, sub: string | null): void {
     };
   }
   const a = answer();
-  const title = target ? (own ? t('editYourAnswers') : t('editAnswersOf', { name: target.name })) : t(own ? 'addYourAnswers' : 'addForOther');
+  const title = target ? (own ? t('editYourAnswers') : t('editAnswersOf', { name: target.name })) : t(own ? 'addYourAnswers' : 'addAnswers');
   document.title = `${title} · ${ev.name}`;
   const hint: Key =
     ev.mode === 'dates'
@@ -1719,7 +1762,7 @@ function renderAnswer(v: M.View, sub: string | null): void {
         ${field('name', `${t(own ? 'yourName' : 'personName')} *`, `<input name="name" required maxlength="${M.LIMITS.person}" value="${esc(a.name)}"${own ? ' autocomplete="name"' : ' autocomplete="off"'}>`)}
         ${field('comment', t('commentOptional'), `<input name="comment" maxlength="${M.LIMITS.comment}" value="${esc(a.comment)}" placeholder="${esc(t('commentPh'))}">`)}
         ${
-          own
+          a.own
             ? `<details class="fold" ${a.email ? 'open' : ''}>
                 <summary>${esc(t('addEmail'))}</summary>
                 ${field('email', t('emailOptional'), `<input type="email" name="email" maxlength="${M.LIMITS.email}" value="${esc(a.email)}" autocomplete="email" inputmode="email">`, t('emailHint'))}
@@ -1883,7 +1926,7 @@ async function saveAnswer(): Promise<void> {
     $opt('#answer-form [name="name"]')?.focus();
     return;
   }
-  const body: { name: string; comment: string; answers: M.Answers; email?: string; own?: boolean } = { name, comment: a.comment, answers: a.answers };
+  const body: { name: string; comment: string; answers: M.Answers; email?: string } = { name, comment: a.comment, answers: a.answers };
   if (a.own) {
     if (!M.cleanEmail(a.email).ok) {
       toast(t('err.email'));
@@ -1901,15 +1944,12 @@ async function saveAnswer(): Promise<void> {
       toast(t('saved'));
       closeSub();
     } else {
-      if (v.role === 'admin' && a.own) body.own = true;
       const r = await api<M.Added>('POST', `/events/${id}/people`, { token, body });
       app.answer = null;
       if (v.role === 'admin') {
         setView(r.view);
         closeSub();
-        // Their own answers need no link: the admin link is theirs.
-        if (a.own) toast(t('saved'));
-        else linkDialog(t('personLinkTitle', { name }), t('addedByAdminText'), linkUrl(id, r.token));
+        linkDialog(t('personLinkTitle', { name }), t('addedByAdminText'), linkUrl(id, r.token));
       } else {
         store.put(id, { name: v.event.name, me: r.token, pid: r.pid });
         app.flash = { kind: 'savedNew', name };
@@ -2034,14 +2074,11 @@ async function swapLink(path: string, body: unknown, patch: (token: string) => P
 
 async function adminMore(): Promise<void> {
   const { id, token } = here();
-  const v = current();
   const r = await menu(t('adminMenu'), [
-    ...(v.people.length ? [{ id: 'own', label: t('whichIsYours'), hint: t('whichIsYoursHint') }] : []),
     { id: 'reset', label: t('newAdminLink'), hint: t('newAdminLinkHint') },
     { id: 'delete', label: t('deleteEvent'), hint: t('deleteEventHint'), danger: true },
   ]);
-  if (r === 'own') await markOwn();
-  else if (r === 'reset') {
+  if (r === 'reset') {
     if (!(await ask(t('newAdminLinkQ'), { ok: t('makeNewLink') }))) return;
     await swapLink(`/events/${id}/admin-link`, undefined, (tok) => ({ admin: tok }), t('newLinkDone'), t('newAdminLinkDoneText'));
   } else if (r === 'delete') {
@@ -2059,29 +2096,6 @@ async function adminMore(): Promise<void> {
   }
 }
 
-// The admin says which answer is theirs. The entry this device added comes
-// first, as a suggestion only: before the server knew, the first entry an
-// admin added was taken for theirs, and it wasn't always.
-async function markOwn(): Promise<void> {
-  const v = current();
-  const { id, token } = here();
-  const hint = store.get(id)?.pid;
-  const people = [...v.people].sort((a, b) => Number(b.id === hint) - Number(a.id === hint));
-  const r = await menu(t('whichIsYours'), [
-    ...people.map((p) => ({ id: p.id, label: p.name, on: p.id === v.me, hint: p.id === hint ? t('fromThisDevice') : undefined })),
-    ...(v.me ? [{ id: 'none', label: t('noneOfThem') }] : []),
-  ]);
-  if (!r || r === v.me) return;
-  try {
-    const { view } = await api<{ view: M.View }>('PUT', `/events/${id}/own`, { token, body: { pid: r === 'none' ? null : r } });
-    setView(view);
-    render();
-    toast(t(r === 'none' ? 'ownUnmarked' : 'ownMarked'));
-  } catch (e) {
-    toast(errText(e));
-  }
-}
-
 // No accounts: being "signed in" is having the link on this device. Signing
 // out forgets the event here (both links) after showing the link once more,
 // and leaves for the home page, replacing the token URL in the history.
@@ -2090,7 +2104,7 @@ async function leave(): Promise<void> {
   const { id, token } = here();
   if (!token) return;
   const admin = v.role === 'admin';
-  const email = admin ? v.adminEmail : v.people.find((p) => p.id === v.me)?.email;
+  const email = admin ? v.adminEmails?.length : v.people.find((p) => p.id === v.me)?.email;
   const r = await dialog(`
     <h3>${esc(t('leaveQ'))}</h3>
     <p>${esc(t(admin ? 'leaveTextAdmin' : 'leaveTextMine'))}</p>
@@ -2238,10 +2252,10 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
 
   // Event page
   answer: () => openSub('answer'),
-  'answer-other': () => openSub('answer=new'),
-  'mark-own': () => markOwn(),
   leave: () => leave(),
   'edit-event': () => openSub('edit'),
+  'email-add': () => addEmail(),
+  'email-remove': (b) => removeEmail(b),
   'edit-entry': (b) => openSub(`answer=${b.dataset.pid}`),
   'delete-entry': (b) => deleteEntry(data(b, 'pid')),
   'person-link': (b) => personLink(data(b, 'pid')),

@@ -250,6 +250,12 @@ a { color: var(--accent); }
 .field { display: block; margin: 0 0 .9rem; }
 .field .label { display: block; margin-bottom: .3rem; font-weight: 600; font-size: .9rem; }
 .field .hint { display: block; margin-top: .3rem; color: var(--muted); font-size: .825rem; }
+/* The organisers' addresses (event form): one field each, an × on each but a lone one. */
+.email-rows { display: grid; gap: .4rem; }
+.email-row { display: flex; gap: .25rem; align-items: center; }
+.email-row input { flex: 1; min-width: 0; }
+.emails[data-one] .email-row .icon-btn { display: none; }
+.emails > .linkish { margin-top: .3rem; }
 input, select, textarea {
   width: 100%;
   min-height: 2.75rem;

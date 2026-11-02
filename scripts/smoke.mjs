@@ -549,83 +549,131 @@ await hc.close();
   await un.close();
 }
 
-// --- V) The admin's own answer, and answers for others ----------------------------------------
+// --- V) Organisers: answers with the admin link, and the organisers' addresses ---------------
 {
   const ad = await page({ refused: true });
   await ad.context().setExtraHTTPHeaders({ 'x-dev-ip': `10.9.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` });
   await ad.goto(`${BASE}/`);
   const days = [D(0), D(1), D(2)];
   const made = await ad.evaluate(async (days) => {
-    const r = await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: { name: 'Teammøte', mode: 'dates', start: days[0], end: days[2], options: days }, email: '' }) });
+    const r = await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: { name: 'Teammøte', mode: 'dates', start: days[0], end: days[2], options: days }, emails: [] }) });
     return r.json();
   }, days);
-  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  const adminUrl = `${BASE}/e/${made.id}/${made.token}`;
+  await ad.goto(adminUrl);
   await ad.waitForSelector('.role');
-  check((await ad.locator('.role [data-act="answer"]').textContent()).includes('Legg til dine svar'), 'the admin has "Add your answers"');
-  check((await ad.locator('.role [data-act="mark-own"]').count()) === 0, 'and no "pick your answer" before anyone answered');
-  // For someone else: no email, a link afterwards.
-  await ad.click('.role [data-act="answer-other"]');
-  check((await ad.locator('h1').textContent()) === 'Legg til svar for en annen' && (await ad.locator('#answer-form [name=email]').count()) === 0, '"for someone else" has no email field');
-  check((await ad.locator('#answer-form [data-field="name"] .label').textContent()) === 'Navn *', 'and asks for "Navn", not "Navnet ditt"');
-  await ad.fill('#answer-form [name=name]', 'Kari');
-  await day(ad, D(0)).click();
+  check((await ad.locator('.role [data-act="answer"]').textContent()).includes('Legg til svar') && (await ad.locator('.role [data-act="answer-other"], [data-act="mark-own"]').count()) === 0, 'the admin has one "Legg til svar"');
+  await ad.locator('.role').screenshot({ path: `${SHOTS}/37-admin-role.png` });
+  // Anyone's answers, an organiser's own too: no email, and the person's link afterwards.
+  const add = async (p, name, date) => {
+    await p.click('.role [data-act="answer"]');
+    await p.waitForSelector('#answer-form');
+    const ok = (await p.locator('h1').textContent()) === 'Legg til svar' && (await p.locator('#answer-form [name=email]').count()) === 0;
+    await p.fill('#answer-form [name=name]', name);
+    await day(p, date).click();
+    await p.click('[data-act="save-answer"]');
+    await p.waitForSelector('#dlg[open]');
+    const title = await p.locator('#dlg h3').textContent();
+    await p.click('#dlg button[value=""]');
+    return ok && title.includes(`Lenken til ${name}`);
+  };
+  check(await add(ad, 'Kari', D(0)), '"Legg til svar" has no email field, and saving shows that person’s link');
+  check((await ad.locator('#answer-form [data-field="name"] .label').count()) === 0, 'and closes the form');
+  check(await add(ad, 'Ola Admin', D(1)), 'an organiser adds their own answers the same way');
+  check((await ad.locator('.plist .tag').count()) === 0, 'and nobody is "deg" with the admin link');
+  const api = (method, body, path = '', token = made.token) =>
+    ad.evaluate(
+      async ([id, token, method, body, path]) => {
+        const r = await fetch(`/api/events/${id}${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+        return { status: r.status, ...(await r.json()) };
+      },
+      [made.id, token, method, body, path],
+    );
+  let a = (await api('GET')).view;
+  check(a.me === null && a.adminEmails.length === 0 && !('adminEmail' in a), 'the admin link is no person: no "me", and no addresses yet');
+  // Kari sets her email with her own link; the admin changing her answers keeps it.
+  const kari = a.people.find((p) => p.name === 'Kari');
+  const kariTok = (await api('POST', {}, `/people/${kari.id}/link`)).token;
+  await api('PUT', { name: 'Kari', comment: '', email: 'kari@example.com', answers: kari.answers }, `/people/${kari.id}`, kariTok);
+  await ad.locator('.plist li', { hasText: 'Kari' }).locator('[data-act="edit-entry"]').click();
+  await ad.waitForSelector('#answer-form');
+  check((await ad.locator('h1').textContent()) === 'Endre svarene til Kari' && (await ad.locator('#answer-form [name=email]').count()) === 0, 'the admin changes anyone’s answers, without an email field');
+  await day(ad, D(2)).click();
   await ad.click('[data-act="save-answer"]');
-  await ad.waitForSelector('#dlg[open]');
-  check((await ad.locator('#dlg h3').textContent()).includes('Lenken til Kari'), 'saving shows the link for that person');
-  await ad.click('#dlg button[value=""]');
-  check((await ad.locator('.plist li', { hasText: 'Kari' }).locator('.tag').count()) === 0, 'and Kari is not marked as you');
-  check((await ad.locator('.role [data-act="mark-own"]').count()) === 1, 'now "pick your answer" is offered');
-  // Their own: email field (prefilled from the event's admin email, empty here), no link dialog.
-  await ad.click('.role [data-act="answer"]');
-  check((await ad.locator('h1').textContent()) === 'Legg til dine svar', 'the own form says "your answers"');
+  await ad.waitForSelector('.role');
+  const kariView = (await api('GET', undefined, '', kariTok)).view;
+  const kariNow = kariView.people.find((p) => p.id === kari.id);
+  check(kariNow.email === 'kari@example.com' && kariNow.answers[D(2)] === 1, 'the change is saved and her email kept');
+  // An app from before sends own: true with an email: the entry still gets none.
+  const old = await api('POST', { name: 'Gammel', comment: '', email: 'old@example.com', answers: {}, own: true }, '/people');
+  check(!(await api('GET', undefined, '', old.token)).view.people.find((p) => p.id === old.pid).email, 'an entry added with the admin link never gets an email');
+  // A second organiser with the same admin link.
+  const co = await page({ refused: true });
+  await co.context().setExtraHTTPHeaders({ 'x-dev-ip': `10.8.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` });
+  await co.goto(adminUrl);
+  await co.waitForSelector('.role');
+  check(await add(co, 'Per', D(0)), 'a second organiser with the admin link adds their answers too');
+  await co.close();
+  // The organisers' addresses: a list in the event form; each gets the admin link back.
   const ownMail = `admin-${Date.now()}@example.com`;
-  await ad.fill('#answer-form [name=name]', 'Ola Admin');
-  await ad.click('#answer-form .fold summary');
-  await ad.fill('#answer-form [name=email]', ownMail);
-  await day(ad, D(1)).click();
-  await ad.click('[data-act="save-answer"]');
+  const coMail = `co-${Date.now()}@example.com`;
+  await ad.click('[data-act="edit-event"]');
+  await ad.waitForSelector('#ev-form');
+  check((await ad.locator('#ev-form [data-field="email"] .label').textContent()) === 'E-post til arrangørene (valgfritt)', 'the event form asks for the organisers’ email');
+  const mails = ad.locator('#ev-form input[name=email]');
+  const removeBtns = ad.locator('#ev-form [data-act="email-remove"]');
+  check((await mails.count()) === 1 && !(await removeBtns.first().isVisible()), 'one email field, with no × while it is alone');
+  await mails.nth(0).fill(ownMail);
+  await ad.click('#ev-form [data-act="email-add"]');
+  check((await mails.count()) === 2 && (await ad.evaluate(() => document.activeElement === document.querySelectorAll('#ev-form input[name=email]')[1])), '"add another" adds a field and moves to it');
+  await ad.keyboard.type(coMail.toUpperCase());
+  await ad.click('#ev-form [data-act="email-add"]');
+  await mails.nth(2).fill('ikke en adresse');
+  await ad.click('#ev-form button[type=submit]');
+  await ad.waitForSelector('#form-err:not([hidden])');
+  check((await ad.locator('#form-err').textContent()).includes('ser ikke riktig ut') && (await ad.evaluate(() => document.activeElement === document.querySelectorAll('#ev-form input[name=email]')[2])), 'a wrong address is pointed out, in its own field');
+  await removeBtns.nth(2).click();
+  check((await mails.count()) === 2 && (await removeBtns.first().isVisible()), 'its × removes it');
+  for (let i = 0; i < 10 && (await ad.locator('#ev-form [data-act="email-add"]').isVisible()); i++) await ad.click('#ev-form [data-act="email-add"]');
+  check((await mails.count()) === 10, 'at most 10 fields');
+  await ad.click('#ev-form button[type=submit]');
   await ad.waitForSelector('.role');
-  check(!(await ad.locator('#dlg[open]').count()), 'saving your own answers shows no link');
-  check((await ad.locator('.plist li', { hasText: 'Ola Admin' }).locator('.tag').textContent()) === 'deg', 'your row is marked "deg"');
-  check((await ad.locator('.role [data-act="answer"]').textContent()).includes('Endre svarene dine'), 'the button becomes "Change your answers"');
-  await ad.locator('.people').screenshot({ path: `${SHOTS}/31-admin-own-people.png` });
-  const views = await ad.evaluate(async ([id, admin]) => {
-    const get = (tok) => fetch(`/api/events/${id}`, { headers: tok ? { authorization: `Bearer ${tok}` } : {} }).then((r) => r.json());
-    const a = await get(admin);
-    const kari = a.view.people.find((p) => p.name === 'Kari');
-    const { token } = await fetch(`/api/events/${id}/people/${kari.id}/link`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${admin}` }, body: '{}' }).then((r) => r.json());
-    return { a: a.view, visitor: (await get(null)).view, kari: (await get(token)).view };
-  }, [made.id, made.token]);
-  const olaIn = (v) => v.people.find((p) => p.name === 'Ola Admin');
-  check(olaIn(views.a).email === ownMail && views.a.me === olaIn(views.a).id, 'the admin view has their own email and them as "me"');
-  check(views.a.adminEmail === ownMail, 'with no admin email, theirs becomes it');
-  check(!('email' in olaIn(views.visitor)) && !('email' in olaIn(views.kari)), 'nobody else sees that email');
-  // An email code for that address brings back both links.
-  const asked = await ad.evaluate(async (email) => (await fetch('/api/lookup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, lang: 'nb' }) })).json(), ownMail);
-  const found = await ad.evaluate(async ([email, code]) => (await fetch('/api/lookup/code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, code }) })).json(), [ownMail, asked.echo]);
-  const hit = (found.events ?? []).find((e) => e.id === made.id);
-  check(Boolean(hit?.admin && hit?.me && hit.pid === olaIn(views.a).id), 'an email code for it gives both the admin link and the personal one');
-  // Unmark, then mark again from the role card.
-  await ad.click('[data-act="admin-more"]');
-  await ad.click('#dlg .menu-item[value="own"]');
-  await ad.click('#dlg .menu-item[value="none"]');
-  await ad.waitForSelector('.role [data-act="mark-own"]');
-  check((await ad.locator('.plist .tag').count()) === 0 && (await ad.locator('.role [data-act="answer"]').textContent()).includes('Legg til dine svar'), '"None of them" unmarks it');
-  await ad.locator('.role').screenshot({ path: `${SHOTS}/32-admin-mark-own.png` });
-  await ad.click('.role [data-act="mark-own"]');
-  await ad.locator('#dlg .menu-item', { hasText: 'Ola Admin' }).click();
-  await ad.waitForSelector('.role [data-act="mark-own"]', { state: 'detached' });
-  check((await ad.locator('.plist li', { hasText: 'Ola Admin' }).locator('.tag').count()) === 1, 'picking it marks it again');
-  // Deleting their own answers keeps the admin link.
+  a = (await api('GET')).view;
+  check(JSON.stringify(a.adminEmails) === JSON.stringify([ownMail, coMail]), 'the list is saved, cleaned, without the empty fields');
+  await ad.click('[data-act="edit-event"]');
+  await ad.waitForSelector('#ev-form');
+  check(JSON.stringify(await mails.evaluateAll((els) => els.map((e) => e.value))) === JSON.stringify([ownMail, coMail]), 'and shown again, one field each');
+  await ad.locator('#ev-form [data-field="email"]').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await ad.locator('#ev-form [data-field="email"]').screenshot({ path: `${SHOTS}/36-organiser-emails.png` });
+  await ad.click('#ev-form [data-act="close-sub"]');
+  await ad.waitForSelector('.role');
+  const codeFor = async (email) => {
+    const asked = await ad.evaluate(async (email) => (await fetch('/api/lookup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, lang: 'nb' }) })).json(), email);
+    const found = await ad.evaluate(async ([email, code]) => (await fetch('/api/lookup/code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, code }) })).json(), [email, asked.echo]);
+    return (found.events ?? []).find((e) => e.id === made.id);
+  };
+  const ownHit = await codeFor(ownMail);
+  const coHit = await codeFor(coMail);
+  check(ownHit?.admin === made.token && coHit?.admin === made.token && !coHit.me, 'an email code for each organiser address gives the admin link');
+  // Apps from before send `email` back as '' with every change: the list stays.
+  const legacy = await api('PUT', { event: a.event, email: '' });
+  check(legacy.status === 200 && legacy.view.adminEmails.length === 2, 'an old app’s empty `email` leaves the list alone');
+  const tooMany = await api('PUT', { event: a.event, emails: Array.from({ length: 11 }, (_, i) => `p${i}@example.com`) });
+  check(tooMany.status === 400 && tooMany.error === 'emails', 'more than 10 addresses is refused');
+  check((await api('PUT', { pid: null }, '/own')).status === 404, 'PUT /own is gone');
+  // Deleting someone's answers keeps the admin link.
   const adminPath = new URL(ad.url()).pathname;
+  await ad.reload();
+  await ad.waitForSelector('.plist');
+  await ad.locator('.people').screenshot({ path: `${SHOTS}/31-admin-people.png` });
   await ad.locator('.plist li', { hasText: 'Ola Admin' }).locator('[data-act="delete-entry"]').click();
   await ad.click('#dlg button[value="yes"]');
-  await ad.waitForSelector('.role [data-act="answer"]:has-text("Legg til dine svar")');
-  check(new URL(ad.url()).pathname === adminPath, 'deleting your own answers keeps you on the admin link');
+  await ad.waitForSelector('.plist li:has-text("Ola Admin")', { state: 'detached' });
+  check(new URL(ad.url()).pathname === adminPath, 'deleting answers keeps you on the admin link');
   // Signing out: the link once more, then the event is gone from this device.
   await ad.click('.role [data-act="leave"]');
   await ad.waitForSelector('#dlg[open]');
-  check((await ad.locator('#dlg .linkbox input').inputValue()) === `${BASE}/e/${made.id}/${made.token}`, '"Logg ut" shows the admin link first');
+  check((await ad.locator('#dlg .linkbox input').inputValue()) === adminUrl, '"Logg ut" shows the admin link first');
   check((await ad.locator('#dlg').textContent()).includes('kode til e-postadressen'), 'and that an email code can bring it back');
   await ad.locator('#dlg').screenshot({ path: `${SHOTS}/35-leave.png` });
   await ad.click('#dlg button[value=""]');
