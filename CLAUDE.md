@@ -143,20 +143,23 @@ transforming (enums, namespaces, parameter properties) is off
 - **Permissions:** the admin can do everything; `closed` blocks everyone
   else; people edit their own entry; `openEdit` lets anyone edit/delete any
   entry (not with `hidden`, where only the admin sees others' answers).
-  Emails are only returned to their owner (and `adminEmail` to the admin).
-- **The admin's own answer:** meta `adminPid` is the admin's own entry, so
-  with the admin link they are also that participant (`me` in their view):
-  they see and set its email, and it's marked "deg". They add it with
-  "Legg til dine svar" (`own: true` on the POST); "Legg til svar for en
-  annen" (`#answer=new`) makes an entry with no email and shows its link.
-  Events from before (or a wrong pick) are fixed with
-  `PUT /api/events/:id/own` (`markOwn`, from the role card or the admin
-  menu); the entry this device added is only offered as a suggestion,
-  never taken for theirs. Deleting it clears `adminPid`. An email the admin
-  types on their own entry becomes `adminEmail` while that is empty, so a
-  code for it brings both links back; never take it from an email already
-  on the entry (`setOwn`), since the entry's personal link can set that,
-  and a personal link must never lead to the admin link.
+  Emails are only returned to their owner (and `adminEmails` to the admin).
+- **Organisers:** the admin link is no person: `me` is null in its view,
+  and several organisers may share it. An organiser who answers ("Legg til
+  dine svar", `own: true` on the POST, so it may have an email) gets an
+  ordinary entry; the app keeps its personal link on that device, which
+  marks the entry "deg" there (`ownPid`). With the admin link the app
+  changes that entry without its email field (the admin view has no email);
+  the personal link sets the email. "Legg til svar for en annen"
+  (`#answer=new`) makes an entry with no email and shows its link.
+  `adminEmails` (meta, JSON; at most 10, `cleanEmails`) are the organisers'
+  addresses: each gets the admin link back with an email code. The event
+  form has them comma-separated (`type=email multiple`). `PUT` takes only
+  `emails`, never the old `email`: apps from before send that back as ''
+  and would wipe the list. Events from before have one `adminEmail` (read as
+  the list) and maybe `adminPid` (ignored). Never let an address entered
+  with a personal link reach `adminEmails`: a personal link must never
+  lead to the admin link.
 - **Email codes (`/find`):** an address entered on events gets a 6-digit
   code by email, and the code adds those events' links to the device. The
   mail (multipart text + HTML, inline styles, no remote images) also has a

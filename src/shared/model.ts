@@ -88,7 +88,8 @@ export interface View {
   people: Person[];
   count: number;
   hidden: boolean;
-  adminEmail?: string;
+  // Admin only: the organisers' addresses, which get the admin link back.
+  adminEmails?: string[];
 }
 // POST /api/events and POST /api/events/:id/people.
 export interface Created {
@@ -122,6 +123,7 @@ export const LIMITS = {
   person: 60,
   comment: 300,
   email: 254,
+  adminEmails: 10,
   people: 200,
   options: 2000,
   daysDates: 366,
@@ -400,6 +402,23 @@ export function cleanEmail(v: unknown): { ok: true; email: string } | { ok: fals
   if (!s) return { ok: true, email: '' };
   if (s.length > LIMITS.email || !EMAIL_RE.test(s)) return { ok: false };
   return { ok: true, email: s };
+}
+
+// The organisers' addresses: a list (or a string of addresses separated by
+// commas, semicolons or spaces, as the event form has them), cleaned, without
+// repeats. Too many is an error of its own.
+export function cleanEmails(v: unknown): { ok: true; emails: string[] } | { ok: false; error: 'email' | 'emails' } {
+  if (v === undefined || v === null) return { ok: true, emails: [] };
+  const list = typeof v === 'string' ? v.split(/[\s,;]+/) : Array.isArray(v) ? v : null;
+  if (!list) return { ok: false, error: 'email' };
+  const out = new Set<string>();
+  for (const x of list) {
+    const e = typeof x === 'string' ? cleanEmail(x) : ({ ok: false } as const);
+    if (!e.ok) return { ok: false, error: 'email' };
+    if (e.email) out.add(e.email);
+  }
+  if (out.size > LIMITS.adminEmails) return { ok: false, error: 'emails' };
+  return { ok: true, emails: [...out] };
 }
 
 export function validTimeZone(tz: unknown): tz is string {

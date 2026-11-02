@@ -288,3 +288,16 @@ test('expiry is 30 days after the last date', () => {
   const ev = event(datesEvent);
   assert.equal(M.fromTime(M.expiresAt(ev)), M.addDays(ev.end, 31));
 });
+
+test('the organisers’ addresses: a list or a string, cleaned, no repeats, at most 10', () => {
+  assert.deepEqual(M.cleanEmails(undefined), { ok: true, emails: [] });
+  assert.deepEqual(M.cleanEmails(''), { ok: true, emails: [] });
+  assert.deepEqual(M.cleanEmails(' Kari@Example.com, ola@example.com;kari@example.com  '), { ok: true, emails: ['kari@example.com', 'ola@example.com'] });
+  assert.deepEqual(M.cleanEmails(['Kari@example.com', '', 'per@example.com']), { ok: true, emails: ['kari@example.com', 'per@example.com'] });
+  assert.deepEqual(M.cleanEmails(['kari@example.com', 'nope']), { ok: false, error: 'email' });
+  assert.deepEqual(M.cleanEmails([5]), { ok: false, error: 'email' });
+  assert.deepEqual(M.cleanEmails({ a: 1 }), { ok: false, error: 'email' });
+  const many = Array.from({ length: 11 }, (_, i) => `p${i}@example.com`);
+  assert.deepEqual(M.cleanEmails(many.slice(0, 10)), { ok: true, emails: many.slice(0, 10) });
+  assert.deepEqual(M.cleanEmails(many), { ok: false, error: 'emails' });
+});

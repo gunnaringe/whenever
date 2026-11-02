@@ -5,14 +5,14 @@
 // this Worker (see run_worker_first in wrangler.jsonc). Admin and personal links travel as
 // `Authorization: Bearer <token>`; the Poll object checks them (src/link.js).
 //
-//   POST   /api/events                       { event, email? } -> { id, token, view }
+//   POST   /api/events                       { event, emails? } -> { id, token, view }
 //   GET    /api/events/:id                   -> { view }
-//   PUT    /api/events/:id                   { event, email? } (admin) -> { view }
+//   PUT    /api/events/:id                   { event, emails? } (admin) -> { view }
 //   DELETE /api/events/:id                   (admin) -> { ok }
 //   POST   /api/events/:id/admin-link        (admin) new admin link -> { token }
-//   PUT    /api/events/:id/own               { pid | null } (admin) which entry is the admin's -> { view }
 //   POST   /api/events/:id/people            { name, email?, comment?, answers, own? } -> { pid, token, view }
-//                                             (own: the admin's own entry; the admin's others get no email)
+//                                             (with the admin link, own: an organiser's own entry,
+//                                             which may have an email; others get none)
 //   PUT    /api/events/:id/people/:pid       entry -> { view }
 //   DELETE /api/events/:id/people/:pid       -> { view }
 //   POST   /api/events/:id/people/:pid/link  { reset? } (self or admin) -> { token }
@@ -40,7 +40,7 @@ import { SMTP_HOST, SMTP_PORT, MAILABLE_RE, isMailLang, codeMail, linkHost, send
 import type { Mail } from './mail.ts';
 import { pageMeta, pageText } from './preview.ts';
 import type { EventPreview, PageMeta, PageText } from './preview.ts';
-import { sanitizeEvent, cleanEmail } from '../shared/model.ts';
+import { sanitizeEvent, cleanEmail, cleanEmails } from '../shared/model.ts';
 
 export { Poll, Lookup };
 
@@ -112,11 +112,16 @@ function event(body: unknown) {
   return r.event;
 }
 
-function adminEmail(body: unknown, optional: boolean): string | undefined {
-  if (optional && field(body, 'email') === undefined) return undefined;
-  const e = cleanEmail(field(body, 'email'));
-  if (!e.ok) throw new HttpError(400, 'email');
-  return e.email;
+// The organisers' addresses, `emails`; undefined when the body has none.
+// Creating also takes the one `email` that clients from before the list
+// send. Changing never does: those clients send back the `adminEmail` that
+// views no longer have, as '', which would wipe the list.
+function adminEmails(body: unknown, legacy: boolean): string[] | undefined {
+  const v = field(body, 'emails') ?? (legacy ? field(body, 'email') : undefined);
+  if (v === undefined) return undefined;
+  const e = cleanEmails(v);
+  if (!e.ok) throw new HttpError(400, e.error);
+  return e.emails;
 }
 
 const stub = (env: Env, id: string) => env.POLLS.get(env.POLLS.idFromName(id));
@@ -229,16 +234,16 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
     if (method !== 'POST') throw new HttpError(405, 'method');
     const body = await readJson(req);
     const ev = event(body);
-    const email = adminEmail(body, false) ?? '';
+    const emails = adminEmails(body, true) ?? [];
     for (let i = 0; i < 5; i++) {
       const id = newId();
-      const made = await stub(env, id).create(ev, email);
+      const made = await stub(env, id).create(ev, emails);
       if (made) return json({ id, ...made });
     }
     throw new HttpError(503, 'busy');
   }
 
-  const m = pathname.match(/^\/api\/events\/([^/]+)(?:\/(admin-link|own|people)(?:\/([^/]+)(\/link)?)?)?$/);
+  const m = pathname.match(/^\/api\/events\/([^/]+)(?:\/(admin-link|people)(?:\/([^/]+)(\/link)?)?)?$/);
   if (!m || !ID_RE.test(m[1])) throw new HttpError(404, 'notFound');
   const [, id, sub, pid, linkPath] = m;
   if (pid !== undefined && !PID_RE.test(pid)) throw new HttpError(404, 'person');
@@ -249,7 +254,7 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
     if (method === 'GET') return send(await poll.get(cred));
     if (method === 'PUT') {
       const body = await readJson(req);
-      return send(await poll.update(cred, event(body), adminEmail(body, true)));
+      return send(await poll.update(cred, event(body), adminEmails(body, false)));
     }
     if (method === 'DELETE') return send(await poll.destroy(cred));
     throw new HttpError(405, 'method');
@@ -258,13 +263,6 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
   if (sub === 'admin-link') {
     if (method !== 'POST' || pid) throw new HttpError(405, 'method');
     return send(await poll.resetAdmin(cred));
-  }
-
-  if (sub === 'own') {
-    if (method !== 'PUT' || pid) throw new HttpError(405, 'method');
-    const own = field(await readJson(req), 'pid');
-    if (own !== null && !(typeof own === 'string' && PID_RE.test(own))) throw new HttpError(400, 'person');
-    return send(await poll.setOwn(cred, own));
   }
 
   // people
