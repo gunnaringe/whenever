@@ -26,8 +26,8 @@
 // reached (codes.ts). Mail goes by SMTP (mail.ts) with the secrets SMTP_USER
 // and SMTP_PASS. In `wrangler dev --var MAIL_ECHO:1`, from this machine, nothing is
 // mailed: the reply carries the code as `echo` and the link's token as
-// `echoLink`, and x-dev-ip stands in for the client's IP, so the smoke test
-// can run often. The link's token is never logged and never in a reply
+// `echoLink`, and x-dev-ip stands in for the client's IP (here and in the
+// API's rate limit), so the smoke test can run often. The link's token is never logged and never in a reply
 // outside dev.
 
 import { connect } from 'cloudflare:sockets';
@@ -74,10 +74,10 @@ function newId(): string {
   return out;
 }
 
-async function limited(req: Request, env: Env): Promise<boolean> {
+// Per client IP; in dev, as for email codes, x-dev-ip stands in for it.
+async function limited(req: Request, env: Env & Vars): Promise<boolean> {
   if (!env.LIMIT) return false;
-  const key = req.headers.get('cf-connecting-ip') ?? 'local';
-  const { success } = await env.LIMIT.limit({ key });
+  const { success } = await env.LIMIT.limit({ key: clientIp(req, echoing(req, env)) });
   return !success;
 }
 

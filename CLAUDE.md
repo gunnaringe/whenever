@@ -195,7 +195,9 @@ transforming (enums, namespaces, parameter properties) is off
     with addresses removed; never log an address or a code.
   - In dev (`npm run dev` sets `--var MAIL_ECHO:1`), a request from this
     machine (loopback `cf-connecting-ip`) gets the code back as `echo`
-    instead of a mail, and `x-dev-ip` stands in for its IP.
+    instead of a mail, and `x-dev-ip` stands in for its IP (also in the
+    API's rate limit, so smoke sections with their own `x-dev-ip` don't
+    use up the shared 120 a minute).
     wrangler dev rewrites the URL and `Host` to the route's host, so a
     hostname check can't tell dev from production.
 - **Routes:** paths `/`, `/new`, `/find`, `/e/:id`, `/e/:id/:token` (SPA fallback

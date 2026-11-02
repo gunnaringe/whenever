@@ -591,6 +591,8 @@ await hc.close();
   await ad.locator('.people').screenshot({ path: `${SHOTS}/31-admin-own-people.png` });
   const stored = await ad.evaluate((id) => JSON.parse(localStorage.getItem('whenever-v1')).events[id], made.id);
   check(stored.admin === made.token && Boolean(stored.me) && Boolean(stored.pid), 'this device keeps the admin link and the personal one');
+  check((await ad.locator('.role [data-mine]').getAttribute('href')) === `/e/${made.id}/${stored.me}`, 'and the admin card links to your own answers');
+  await ad.locator('.role').screenshot({ path: `${SHOTS}/37-admin-role-mine.png` });
   const viewsOf = (p) =>
     p.evaluate(
       async ([id, admin, mine]) => {
@@ -618,6 +620,7 @@ await hc.close();
   check(olaIn(views.mine).email === ownMail && olaIn(views.mine).answers[D(2)] === 1, 'the change is saved and the email kept');
   // A second organiser with the same admin link answers as themself.
   const co = await page({ refused: true });
+  await co.context().setExtraHTTPHeaders({ 'x-dev-ip': `10.8.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` });
   await co.goto(adminUrl);
   await co.waitForSelector('.role');
   check((await co.locator('.role [data-act="answer"]').textContent()).includes('Legg til dine svar') && (await co.locator('.plist .tag').count()) === 0, 'a second organiser sees nobody as "deg"');
@@ -683,6 +686,7 @@ await hc.close();
   check(new URL(ad.url()).pathname === adminPath, 'deleting your own answers keeps you on the admin link');
   const after = await ad.evaluate((id) => JSON.parse(localStorage.getItem('whenever-v1')).events[id], made.id);
   check(after.admin === made.token && !after.me && !after.pid, 'and this device forgets the personal link');
+  check((await ad.locator('.role [data-mine]').count()) === 0, 'and the link to your answers goes with it');
   // Signing out: the link once more, then the event is gone from this device.
   await ad.click('.role [data-act="leave"]');
   await ad.waitForSelector('#dlg[open]');

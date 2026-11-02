@@ -1355,11 +1355,14 @@ function actionsHtml(v: M.View): string {
   const add = M.canAdd(who, ev.settings);
   const shareBtn = `<button type="button" class="btn" data-act="share" data-url="${esc(eventUrl(id))}" data-title="${esc(ev.name)}">${icon('share')}${esc(t('shareEvent'))}</button>`;
   if (v.role === 'admin') {
-    // Your own answers (ownPid) and answers for others.
+    // Your own answers (ownPid) and answers for others. Your personal link
+    // opens them as a participant, where you can also change their email.
     const mine = ownPid(v) !== null;
+    const mineTok = mine ? store.get(id)?.me : undefined;
     const quiet = app.flash?.kind === 'created';
     return `<section class="card role">
-      <div class="role-text"><div class="role-head"><b>${esc(t('youAreAdmin'))}</b><button type="button" class="linkish small leave" data-act="leave">${icon('logout')}${esc(t('leave'))}</button></div><p class="muted">${esc(t('adminHint'))}</p></div>
+      <div class="role-text"><div class="role-head"><b>${esc(t('youAreAdmin'))}</b><button type="button" class="linkish small leave" data-act="leave">${icon('logout')}${esc(t('leave'))}</button></div><p class="muted">${esc(t('adminHint'))}</p>
+        ${mineTok ? `<a class="linkish small" href="/e/${id}/${mineTok}" data-link data-mine>${esc(t('openMine'))}</a>` : ''}</div>
       <div class="row wrap">
         ${mine ? `<button type="button" class="btn primary" data-act="answer">${icon('edit')}${esc(t('editYourAnswers'))}</button>` : `<button type="button" class="btn${quiet ? '' : ' primary'}" data-act="answer">${icon('plus')}${esc(t('addYourAnswers'))}</button>`}
         <button type="button" class="btn" data-act="answer-other">${icon('plus')}${esc(t('addForOther'))}</button>
