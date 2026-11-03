@@ -11,8 +11,10 @@
 //   DELETE /api/events/:id                   (admin) -> { ok }
 //   POST   /api/events/:id/admin-link        (admin) new admin link -> { token }
 //   GET    /api/events/:id/live              WebSocket: live views (poll.ts)
-//   POST   /api/events/:id/people            { name, email?, comment?, answers } -> { pid, token, view }
-//                                             (with the admin link: no email)
+//   POST   /api/events/:id/invite            { names } (admin) list who is expected -> { view, added, skipped }
+//   POST   /api/events/:id/people            { name, email?, comment?, answers, claim? } -> { pid, token, view }
+//                                             (with the admin link: no email; claim: a listed
+//                                             name's pid, to answer as them, see poll.ts)
 //   PUT    /api/events/:id/people/:pid       entry -> { view }
 //   DELETE /api/events/:id/people/:pid       -> { view }
 //   POST   /api/events/:id/people/:pid/link  { reset? } (self or admin) -> { token }
@@ -243,7 +245,7 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
     throw new HttpError(503, 'busy');
   }
 
-  const m = pathname.match(/^\/api\/events\/([^/]+)(?:\/(admin-link|live|people)(?:\/([^/]+)(\/link)?)?)?$/);
+  const m = pathname.match(/^\/api\/events\/([^/]+)(?:\/(admin-link|invite|live|people)(?:\/([^/]+)(\/link)?)?)?$/);
   if (!m || !ID_RE.test(m[1])) throw new HttpError(404, 'notFound');
   const [, id, sub, pid, linkPath] = m;
   if (pid !== undefined && !PID_RE.test(pid)) throw new HttpError(404, 'person');
@@ -268,6 +270,11 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
   if (sub === 'admin-link') {
     if (method !== 'POST' || pid) throw new HttpError(405, 'method');
     return send(await poll.resetAdmin(cred));
+  }
+
+  if (sub === 'invite') {
+    if (method !== 'POST' || pid) throw new HttpError(405, 'method');
+    return send(await poll.invite(cred, field(await readJson(req), 'names')));
   }
 
   // people

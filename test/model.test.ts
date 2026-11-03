@@ -301,3 +301,18 @@ test('the organisers’ addresses: a list or a string, cleaned, no repeats, at m
   assert.deepEqual(M.cleanEmails(many.slice(0, 10)), { ok: true, emails: many.slice(0, 10) });
   assert.deepEqual(M.cleanEmails(many), { ok: false, error: 'emails' });
 });
+
+test('listed names: one per line or a pasted list, cleaned, no repeats', () => {
+  assert.deepEqual(M.cleanNames('Kari\nOla\n\n  Per Hansen  \n'), ['Kari', 'Ola', 'Per Hansen']);
+  assert.deepEqual(M.cleanNames('Kari, Ola; Per'), ['Kari', 'Ola', 'Per']);
+  assert.deepEqual(M.cleanNames('- Kari\n• Ola\n1. Per\n2) Siri\n* Liv'), ['Kari', 'Ola', 'Per', 'Siri', 'Liv']);
+  // The first spelling stays; case and spaces don't make another person.
+  assert.deepEqual(M.cleanNames(['Kari Nordmann', 'kari  nordmann', 'KARI NORDMANN', 'Åse', 'åse']), ['Kari Nordmann', 'Åse']);
+  assert.deepEqual(M.cleanNames(['Kari', 5, null, '', '  ']), ['Kari']);
+  assert.deepEqual(M.cleanNames(undefined), []);
+  assert.deepEqual(M.cleanNames({ a: 1 }), []);
+  assert.equal(M.cleanNames(['x'.repeat(200)])[0].length, M.LIMITS.person);
+  // Names in a list are kept whole: a hyphen or number inside stays.
+  assert.deepEqual(M.cleanNames(['Anne-Lise', 'Ola 2']), ['Anne-Lise', 'Ola 2']);
+  assert.equal(M.nameKey('  Kari \t Nordmann '), 'kari nordmann');
+});

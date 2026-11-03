@@ -160,6 +160,29 @@ transforming (enums, namespaces, parameter properties) is off
   the list) and maybe `adminPid` (ignored). Never let an address entered
   with a personal link reach `adminEmails`: a personal link must never
   lead to the admin link.
+- **Listed names ("6 av 15 har svart"):** the admin can list who they
+  expect («Legg til navn» in the Svar card, `POST /invite`, `cleanNames`:
+  one per line, pasted lists, bullets; names already there are skipped,
+  ignoring case and spaces, `nameKey`). Each name is a `people` row with
+  `replied = 0`, no answers and its own personal link from the start (copy
+  it from the row). Any save of an entry sets `replied = 1`, also with
+  nothing marked: that is «Kan ingen av dagene», not «Har ikke svart».
+  Rows from before have `replied` 1 (the constructor adds the column to old
+  tables). `View.people` is only those who answered, so every result
+  (tally, heat, ranks, `n` in "X av N kan") ignores the waiting names;
+  `View.waiting` (id, name) lists them, `waitingCount` counts them, and
+  `count` counts the answered. With hidden answers only the admin gets the
+  names (who hasn't answered tells who has); others get only the counts and
+  their own row. Someone answering with the event link picks their name
+  («Er du en av disse?», typing it picks it too): `claim` in the POST fills
+  that row and gives it a new secret, so a link sent to them before stops
+  working and the event link never hands out another's link; 409 `taken`
+  if it was answered meanwhile. Not with hidden answers, not for a
+  participant or the admin (the admin answers for a name by editing its
+  row). The app reads `waiting`/`waitingCount` with defaults, since a Poll
+  object can still run the code from before right after a deploy. «Kopier
+  påminnelse» copies the waiting names with the event link for a group
+  chat.
 - **Email codes (`/find`):** an address entered on events gets a 6-digit
   code by email, and the code adds those events' links to the device. The
   mail (multipart text + HTML, inline styles, no remote images) also has a
@@ -384,7 +407,8 @@ transforming (enums, namespaces, parameter properties) is off
   changes), then `BASE=http://127.0.0.1:8787 npm run smoke`: a browser
   end-to-end check (dates and times events, chips, drag and touch painting,
   undo and redo in the picker, several participants, permissions, link reset, picking the date and the
-  `.ics` download, ties and the ranking setting, holiday calendars, the
+  `.ics` download, ties and the ranking setting, listed names (adding,
+  answering as one, answering for one, hidden answers), holiday calendars, the
   events menu, finding events by an email code, the language menu and
   nn/is dates, themes against a dark and a light device, link-preview tags,
   the text for AI assistants and without JavaScript, the `llms.txt` flow,

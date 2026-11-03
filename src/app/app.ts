@@ -5,7 +5,7 @@
 // Sub-views of an event (hash): #answer, #answer=<pid>, #edit
 
 import * as M from '../shared/model.ts';
-import { t, tx, holidayNames, getLang, setLang, isLang, LANGS, LANG_NAMES, fmtDate, fmtRange, monthName, slotLabel, windowLabel, weekdayShort, weekdayLong, durationLabel, cap } from './i18n.ts';
+import { t, tx, holidayNames, getLang, setLang, isLang, LANGS, LANG_NAMES, fmtDate, fmtRange, monthName, slotLabel, windowLabel, weekdayShort, weekdayLong, durationLabel, cap, joinAnd } from './i18n.ts';
 import type { Key, Lang } from './i18n.ts';
 import { api, ApiError, writing } from './api.ts';
 import * as live from './live.ts';
@@ -48,6 +48,8 @@ interface Draft extends M.DayWindow {
 // The answer editor's state while it is open.
 interface AnswerDraft {
   pid: string | null;
+  // A new answer as one of the listed names still waiting (its id).
+  claim: string | null;
   own: boolean;
   name: string;
   comment: string;
@@ -160,6 +162,23 @@ const touch = () => matchMedia('(pointer: coarse)').matches;
 
 const eventUrl = (id: string) => `${location.origin}/e/${id}`;
 const linkUrl = (id: string, token: string | null) => `${location.origin}/e/${id}/${token}`;
+
+// The names the organisers listed that haven't answered (none from a Poll
+// object still on the code from before them).
+const waitingOf = (v: M.View): M.Waiting[] => v.waiting ?? [];
+// "6 av 15" counts everyone listed or answered, also hidden ones.
+const expected = (v: M.View): number => v.count + (v.waitingCount ?? 0);
+
+// An entry by id: one who answered, or a listed name still waiting (as an
+// entry with no answers).
+type Entry = M.Person & { waiting?: true };
+function entryOf(v: M.View, pid: string | null): Entry | undefined {
+  if (!pid) return undefined;
+  const p = v.people.find((x) => x.id === pid);
+  if (p) return p;
+  const w = waitingOf(v).find((x) => x.id === pid);
+  return w && { id: w.id, name: w.name, comment: '', answers: {}, updated: 0, waiting: true };
+}
 
 // A new event's holiday calendar: where the browser's clock is, else its
 // languages, else none (a foreign calendar would be worse than none).
@@ -1425,11 +1444,12 @@ function actionsHtml(v: M.View): string {
     </section>`;
   }
   if (v.role === 'participant') {
-    const me = v.people.find((p) => p.id === v.me);
+    const me = entryOf(v, v.me);
+    const hint = me?.waiting ? t('youNotAnswered') : app.flash?.kind === 'savedNew' ? '' : t('personalHint');
     return `<section class="card role">
-      <div class="role-text"><div class="role-head"><b>${esc(t('hiName', { name: me?.name ?? '' }))}</b><button type="button" class="linkish small leave" data-act="leave">${icon('logout')}${esc(t('leave'))}</button></div>${app.flash?.kind === 'savedNew' ? '' : `<p class="muted">${esc(t('personalHint'))}</p>`}</div>
+      <div class="role-text"><div class="role-head"><b>${esc(t('hiName', { name: me?.name ?? '' }))}</b><button type="button" class="linkish small leave" data-act="leave">${icon('logout')}${esc(t('leave'))}</button></div>${hint ? `<p class="muted">${esc(hint)}</p>` : ''}</div>
       <div class="row wrap">
-        ${M.canEdit(who, ev.settings, v.me) ? `<button type="button" class="btn primary" data-act="answer">${icon('edit')}${esc(t('editYourAnswers'))}</button>` : ''}
+        ${M.canEdit(who, ev.settings, v.me) ? `<button type="button" class="btn primary" data-act="answer">${icon(me?.waiting ? 'plus' : 'edit')}${esc(t(me?.waiting ? 'addYourAnswers' : 'editYourAnswers'))}</button>` : ''}
         <button type="button" class="btn" data-act="copy" data-url="${esc(linkUrl(id, token))}">${icon('copy')}${esc(t('copyMyLink'))}</button>
         ${shareBtn}
         <button type="button" class="btn" data-act="me-more" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('dots')}</button>
@@ -1595,12 +1615,14 @@ function detailHtml(v: M.View): string {
     label = ev.mode === 'dates' ? fmtDate(p.k, 'long') : slotLabel(p.k, ev.slot);
   }
   const byId = new Map(v.people.map((x) => [x.id, x.name]));
+  const wait = waitingOf(v);
   const names = (ids: string[]) => (ids.length ? ids.map((x) => `<span class="pn">${esc(byId.get(x))}</span>`).join('') : '<span class="muted">–</span>');
   return `<div class="detail">
     <h3>${esc(cap(label))}</h3>
     <div class="dg yes"><b>${icon('check')}${esc(t('canCome'))} (${g.yes.length})</b><div>${names(g.yes)}</div></div>
     ${g.maybe.length || ev.settings.maybe ? `<div class="dg maybe"><b>${icon('maybe')}${esc(t('ifNeedBe'))} (${g.maybe.length})</b><div>${names(g.maybe)}</div></div>` : ''}
     <div class="dg no"><b>${icon('x')}${esc(t('cannot'))} (${g.no.length})</b><div>${names(g.no)}</div></div>
+    ${wait.length ? `<div class="dg wait"><b>${icon('clock')}${esc(t('noAnswer'))} (${wait.length})</b><div>${wait.map((w) => `<span class="pn">${esc(w.name)}</span>`).join('')}</div></div>` : ''}
     ${decideHtml(v, p.k)}
   </div>`;
 }
@@ -1712,11 +1734,85 @@ function peopleHtml(v: M.View, stored: Stored | null): string {
       </li>`;
     })
     .join('');
+  const total = expected(v);
+  const listed = total > v.count;
+  const pct = total ? (100 * v.count) / total : 0;
   return `<section class="card people">
-    <h2>${esc(t('responses'))} <span class="count">${v.count}</span></h2>
+    <h2>${esc(t('responses'))} <span class="count">${listed ? esc(t('nOfTotal', { n: v.count, m: total })) : v.count}</span></h2>
+    ${listed ? `<div class="progress" role="img" aria-label="${esc(t('answeredOf', { n: v.count, m: total }))}"><i style="width:${pct.toFixed(1)}%"></i></div>` : ''}
     ${v.hidden ? `<p class="muted small">${esc(t('hiddenPeople'))}</p>` : ''}
     ${rows ? `<ul class="plist">${rows}</ul>` : `<p class="muted">${esc(t('noAnswersYet'))}</p>`}
+    ${waitingHtml(v, stored)}
   </section>`;
+}
+
+// Who the organisers listed and hasn't answered yet: for the admin with
+// their links and a reminder to copy, for others just the names (not with
+// hidden answers: the server sends only your own then).
+function waitingHtml(v: M.View, stored: Stored | null): string {
+  const list = waitingOf(v);
+  const admin = v.role === 'admin';
+  const addBtn = admin ? `<button type="button" class="btn small" data-act="add-names">${icon('plus')}${esc(t('addNames'))}</button>` : '';
+  if (!list.length || (v.hidden && !admin)) return addBtn ? `<div class="row wrap people-tools">${addBtn}</div>` : '';
+  const mine = (id: string) => id === v.me || id === stored?.pid;
+  const head = `<h3 class="wait-head">${esc(t('notAnswered'))} <span class="count">${list.length}</span></h3>`;
+  if (!admin) return `${head}<div class="wait-names">${list.map((w) => `<span class="pn${mine(w.id) ? ' mine' : ''}">${esc(w.name)}${mine(w.id) ? ` <span class="tag">${esc(t('you'))}</span>` : ''}</span>`).join('')}</div>`;
+  const btn = (act: string, ic: string, label: string, pid: string) => `<button type="button" class="icon-btn" data-act="${act}" data-pid="${pid}" title="${esc(label)}" aria-label="${esc(label)}">${icon(ic)}</button>`;
+  const rows = list
+    .map(
+      (w) => `<li class="wait" data-pid="${w.id}">
+        <span class="avatar" style="--hue:${hue(w.name)}" aria-hidden="true">${esc(initials(w.name))}</span>
+        <div class="pinfo"><b>${esc(w.name)}</b><span class="psum">${esc(t('notAnswered'))}</span></div>
+        <div class="pact">
+          ${btn('person-link', 'link', t('copyPersonLink', { name: w.name }), w.id)}
+          ${btn('edit-entry', 'edit', t('answerFor', { name: w.name }), w.id)}
+          ${btn('delete-entry', 'trash', t('removeName', { name: w.name }), w.id)}
+        </div>
+      </li>`,
+    )
+    .join('');
+  return `${head}<ul class="plist">${rows}</ul>
+    <div class="row wrap people-tools">${addBtn}<button type="button" class="btn small" data-act="copy-reminder">${icon('copy')}${esc(t('copyReminder'))}</button></div>`;
+}
+
+// The organisers list who they expect: names, one per line.
+async function addNames(): Promise<void> {
+  const { id, token } = here();
+  let text = '';
+  const r = await dialog(
+    `<h3>${esc(t('addNamesTitle'))}</h3>
+    <p>${esc(t('addNamesText'))}</p>
+    <textarea id="names" rows="8" maxlength="${M.LIMITS.people * (M.LIMITS.person + 1)}" aria-label="${esc(t('addNamesTitle'))}" placeholder="${esc(t('addNamesPh'))}"></textarea>
+    <div class="row end">
+      <button value="" class="btn">${esc(t('cancel'))}</button>
+      <button value="add" class="btn primary">${icon('plus')}${esc(t('addNamesOk'))}</button>
+    </div>`,
+    {
+      onOpen: (dlg) => {
+        const ta = $<HTMLTextAreaElement>('#names', dlg);
+        ta.addEventListener('input', () => (text = ta.value));
+        ta.focus();
+      },
+    },
+  );
+  if (r !== 'add') return;
+  const names = M.cleanNames(text);
+  if (!names.length) return toast(t('err.names'));
+  try {
+    const res = await api<{ view: M.View; added: number; skipped: number }>('POST', `/events/${id}/invite`, { token, body: { names } });
+    setView(res.view);
+    render();
+    toast([res.added ? t('namesAdded', { n: res.added }) : '', res.skipped ? t('namesSkipped', { n: res.skipped }) : ''].filter(Boolean).join(' '));
+  } catch (e) {
+    toast(errText(e));
+  }
+}
+
+// For the group chat: "Ola, Per og Kari: husk å svare på «Sommerfest»! <link>".
+function copyReminder(): void {
+  const v = current();
+  const names = waitingOf(v).map((w) => w.name);
+  if (names.length) copyText(t('reminderText', { names: joinAnd(names), name: v.event.name, url: eventUrl(here().id) }));
 }
 
 // --- Answer editor --------------------------------------------------------------------------
@@ -1727,7 +1823,7 @@ function renderAnswer(v: M.View, sub: string | null): void {
   // 'new': the admin adds answers for someone else.
   // ('new' is from before: the admin's "for someone else".)
   const pid = sub === 'new' ? null : sub;
-  const target = pid ? v.people.find((p) => p.id === pid) : v.me ? v.people.find((p) => p.id === v.me) : null;
+  const target = entryOf(v, pid ?? v.me);
   if (pid && !target) {
     toast(t('err.person'));
     return closeSub();
@@ -1741,6 +1837,7 @@ function renderAnswer(v: M.View, sub: string | null): void {
   if (!app.answer) {
     app.answer = {
       pid: target?.id ?? null,
+      claim: null,
       own,
       name: target?.name ?? '',
       comment: target?.comment ?? '',
@@ -1752,7 +1849,15 @@ function renderAnswer(v: M.View, sub: string | null): void {
     };
   }
   const a = answer();
-  const title = target ? (own ? t('editYourAnswers') : t('editAnswersOf', { name: target.name })) : t(own ? 'addYourAnswers' : 'addAnswers');
+  const title = target
+    ? own
+      ? t(target.waiting ? 'addYourAnswers' : 'editYourAnswers')
+      : t(target.waiting ? 'answerFor' : 'editAnswersOf', { name: target.name })
+    : t(own ? 'addYourAnswers' : 'addAnswers');
+  // A new answer can be one of the listed names still waiting: the admin
+  // answers for them, someone with the event link says it's them (not
+  // with hidden answers, see poll.ts).
+  const claimable = target ? [] : v.role === 'admin' || (v.role === 'visitor' && !ev.settings.hidden) ? waitingOf(v) : [];
   document.title = `${title} · ${ev.name}`;
   const hint: Key =
     ev.mode === 'dates'
@@ -1779,6 +1884,7 @@ function renderAnswer(v: M.View, sub: string | null): void {
     </section>
     <section class="card">
       <form id="answer-form" novalidate>
+        ${claimable.length ? claimHtml(claimable, v.role === 'admin', a.claim) : ''}
         ${field('name', `${t(own ? 'yourName' : 'personName')} *`, `<input name="name" required maxlength="${M.LIMITS.person}" value="${esc(a.name)}"${own ? ' autocomplete="name"' : ' autocomplete="off"'}>`)}
         ${field('comment', t('commentOptional'), `<input name="comment" maxlength="${M.LIMITS.comment}" value="${esc(a.comment)}" placeholder="${esc(t('commentPh'))}">`)}
         ${
@@ -1803,12 +1909,43 @@ function renderAnswer(v: M.View, sub: string | null): void {
       a[n] = el.value;
       a.dirty = true;
     }
+    // Typing a listed name picks it.
+    if (n === 'name' && !a.claim) {
+      const w = claimable.find((x) => M.nameKey(x.name) === M.nameKey(el.value));
+      if (w) setClaim(w.id);
+    }
   });
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     saveAnswer();
   });
   mountPicker(v);
+}
+
+// "Er du en av disse?": the listed names still waiting, to answer as one.
+function claimHtml(list: M.Waiting[], admin: boolean, on: string | null): string {
+  return `<fieldset class="claim">
+    <legend>${esc(t(admin ? 'claimAdmin' : 'claimQ'))}</legend>
+    <div class="chip-row">${list.map((w) => `<button type="button" class="chip${w.id === on ? ' on' : ''}" data-act="claim" data-pid="${w.id}" aria-pressed="${w.id === on}">${esc(w.name)}</button>`).join('')}</div>
+    <p class="muted small">${esc(t(admin ? 'claimAdminHint' : 'claimHint'))}</p>
+  </fieldset>`;
+}
+
+// Pick a listed name to answer as (again: unpick), and fill in the name.
+function setClaim(pid: string | null): void {
+  const a = answer();
+  a.claim = pid;
+  a.dirty = true;
+  const w = pid ? waitingOf(current()).find((x) => x.id === pid) : null;
+  const input = $opt<HTMLInputElement>('#answer-form [name="name"]');
+  if (w && input && M.nameKey(input.value) !== M.nameKey(w.name)) {
+    input.value = w.name;
+    a.name = w.name;
+  }
+  for (const b of $$('[data-act="claim"]')) {
+    b.classList.toggle('on', b.dataset.pid === pid);
+    b.setAttribute('aria-pressed', String(b.dataset.pid === pid));
+  }
 }
 
 function pickerToolbar(v: M.View): string {
@@ -1955,10 +2092,13 @@ async function saveAnswer(): Promise<void> {
     }
     body.email = a.email;
   }
+  // The admin answers for a listed name by changing its entry.
+  const pid = a.pid ?? (v.role === 'admin' ? a.claim : null);
+  if (a.claim && !pid) Object.assign(body, { claim: a.claim });
   setBusy(true);
   try {
-    if (a.pid) {
-      const { view } = await api<{ view: M.View }>('PUT', `/events/${id}/people/${a.pid}`, { token, body });
+    if (pid) {
+      const { view } = await api<{ view: M.View }>('PUT', `/events/${id}/people/${pid}`, { token, body });
       setView(view);
       app.answer = null;
       toast(t('saved'));
@@ -1979,6 +2119,16 @@ async function saveAnswer(): Promise<void> {
     }
   } catch (e) {
     toast(errText(e));
+    // Someone else answered as that name meanwhile: show what's left.
+    if (e instanceof ApiError && (e.code === 'taken' || e.code === 'person') && a.claim) {
+      a.claim = null;
+      try {
+        setView((await api<{ view: M.View }>('GET', `/events/${id}`, { token })).view);
+        render();
+      } catch {
+        // The live update brings it.
+      }
+    }
   } finally {
     setBusy(false);
   }
@@ -1997,10 +2147,11 @@ function linkDialog(title: string, text: string, url: string): Promise<string> {
 async function deleteEntry(pid: string): Promise<void> {
   const v = current();
   const { id, token } = here();
-  const p = v.people.find((x) => x.id === pid);
+  const p = entryOf(v, pid);
   if (!p) return;
   const own = pid === v.me;
-  if (!(await ask(own ? t('deleteMineQ') : t('deleteEntryQ', { name: p.name }), { ok: t('delete'), danger: true }))) return;
+  const q = own ? t('deleteMineQ') : t(p.waiting ? 'removeNameQ' : 'deleteEntryQ', { name: p.name });
+  if (!(await ask(q, { ok: t(p.waiting && !own ? 'remove' : 'delete'), danger: true }))) return;
   try {
     const { view } = await api<{ view: M.View }>('DELETE', `/events/${id}/people/${pid}`, { token });
     if (store.get(id)?.pid === pid) store.forgetMe(id);
@@ -2019,7 +2170,7 @@ async function deleteEntry(pid: string): Promise<void> {
 
 async function personLink(pid: string): Promise<void> {
   const { id, token } = here();
-  const p = current().people.find((x) => x.id === pid);
+  const p = entryOf(current(), pid);
   try {
     const r = await api<{ token: string }>('POST', `/events/${id}/people/${pid}/link`, { token, body: { reset: false } });
     linkDialog(t('personLinkTitle', { name: p?.name ?? '' }), t('personLinkText'), linkUrl(id, r.token));
@@ -2282,6 +2433,9 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   'edit-entry': (b) => openSub(`answer=${b.dataset.pid}`),
   'delete-entry': (b) => deleteEntry(data(b, 'pid')),
   'person-link': (b) => personLink(data(b, 'pid')),
+  'add-names': () => addNames(),
+  'copy-reminder': () => copyReminder(),
+  claim: (b) => setClaim(answer().claim === b.dataset.pid ? null : data(b, 'pid')),
   'toggle-closed': () => toggleClosed(),
   'admin-more': () => adminMore(),
   'me-more': () => meMore(),

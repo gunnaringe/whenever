@@ -621,7 +621,7 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
 .dg.yes .i { color: var(--yes); }
 .dg.maybe .i { color: var(--maybe); }
 .dg.no .i { color: var(--danger); }
-.dg > div { display: flex; flex-wrap: wrap; gap: .3rem; }
+.dg > div { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: .3rem; }
 .pn { padding: .05rem .55rem; border-radius: 999px; background: var(--card); border: 1px solid var(--line); font-size: .85rem; }
 @media (max-width: 480px) { .dg { grid-template-columns: 1fr; gap: .2rem; } }
 
@@ -658,6 +658,22 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
 .pcomment::before { content: "“"; }
 .pcomment::after { content: "”"; }
 .pact { display: flex; }
+/* Listed names that haven't answered yet (poll.ts), and how many have. */
+.progress { height: .4rem; margin: -.25rem 0 .75rem; border-radius: 999px; background: var(--soft); overflow: hidden; }
+.progress i { display: block; height: 100%; border-radius: inherit; background: var(--yes); }
+.wait-head { display: flex; gap: .45rem; align-items: center; margin: 1rem 0 .4rem; font-size: 1rem; }
+.wait-head .count { display: inline-grid; place-items: center; min-width: 1.5rem; height: 1.5rem; padding: 0 .35rem; border-radius: 999px; background: var(--soft); font-size: .8rem; }
+.wait-names { display: flex; flex-wrap: wrap; gap: .3rem; }
+.wait-names .pn.mine { border-color: var(--accent); }
+.plist li.wait .avatar { background: var(--soft); color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--line); }
+.plist li.wait .pinfo > b { color: var(--muted); font-weight: 600; }
+.people-tools { margin-top: .75rem; }
+.dg.wait .i { color: var(--muted); }
+.claim { margin: 0 0 1rem; padding: 0; border: 0; }
+.claim legend { padding: 0; margin-bottom: .5rem; font-weight: 600; }
+.claim .chip-row { margin-bottom: .3rem; }
+.claim .chip.on { background: var(--accent); color: var(--accent-ink); }
+.claim p { margin: 0; }
 
 /* --- Answer editor ---------------------------------------------------------------- */
 
