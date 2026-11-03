@@ -132,8 +132,9 @@ transforming (enums, namespaces, parameter properties) is off
 - **Picking the final date:** the admin picks an option (dates) or a
   window start (times) in the detail panel; it's stored as the event's
   `decided`. `sanitizeEvent` drops it unless it is in `decisionKeys`, so
-  editing the options away clears it. Picking also closes the event;
-  undoing the pick leaves it closed. `decision()` gives the picked tally or
+  editing the options away clears it. The admin's pick also closes the
+  event; undoing it leaves it closed. With `decide`, anyone may pick and
+  unpick (`POST /decide`), which never closes it: only organisers close. `decision()` gives the picked tally or
   window for the "Avtalt" card. The picked option is marked everywhere in
   its own colour (`--pick`, one per theme), apart from the "most can" ring
   and the selection: a check badge (`.dk`) on the calendar day and table
@@ -142,9 +143,33 @@ transforming (enums, namespaces, parameter properties) is off
   browser (`src/app/ics.ts`). Times are wall-clock in the event's `tz`, and
   `zonedUtc` converts them to UTC with `Intl`. The file may only carry the
   public event URL, never a link token.
-- **Permissions:** the admin can do everything; `closed` blocks everyone
-  else; people edit their own entry; `openEdit` lets anyone edit/delete any
-  entry (not with `hidden`, where only the admin sees others' answers).
+- **Permissions:** the admin can do everything. Everyone else may do what
+  the settings say (the form's «Deltakerne kan», `PERMISSIONS`), all of them
+  alike: whoever has the event link gets a personal one by answering, so
+  splitting the two would hold for nobody. `closed` stops all of it, and
+  `hidden` everything that needs the others' answers (`openEdit`, `claims`,
+  `decide`; `settingsOf` turns them off, and the form greys them out). The
+  rules are the `can*` functions in `model.ts`, used by both the app and the
+  `Poll` object; don't test settings by hand elsewhere.
+  - `hidden`: «se svarene», ticked when off: the others' answers, names
+    and how many (see Listed names).
+  - `newNames`: answer under a new name; off, only listed names answer
+    (claim, or their personal link), else 403 `listOnly`.
+  - `claims`: answer as a listed name with the event link.
+  - `rename`: change an entry's name (`keepName`: off, a PUT or claim must
+    send the name as it is, ignoring case and spaces, else 403 `rename`;
+    the form makes it read-only).
+  - `openEdit`: change and delete anyone's entry.
+  - `decide`: pick and unpick the final date (`POST /decide`), which unlike
+    the admin's pick leaves the event open.
+  - `details`: change the event's name, location and description
+    (`PUT /details`, a small dialog from the head card).
+
+  Defaults are what everyone could do before the settings existed:
+  `settingsOf` fills a missing one from `DEFAULT_SETTINGS` (stored events,
+  views from a Poll object still on the code from before), and the admin's
+  `PUT` keeps a setting the client left out (the Worker passes the sent
+  `settings` along), so an old tab or API client never resets a new one.
   Emails are only returned to their owner (and `adminEmails` to the admin).
 - **Organisers:** the admin link is no person: `me` is null in its view,
   and several organisers may share it (a small office can share it with
@@ -179,8 +204,8 @@ transforming (enums, namespaces, parameter properties) is off
   that row and returns its link as it is (the same one the organisers can
   send, which keeps working). The row's email is replaced by the claim's (or
   none), so the event link never shows anyone another's email; 409 `taken`
-  if it was answered meanwhile. Not with hidden answers, not for a
-  participant or the admin (the admin answers for a name by editing its
+  if it was answered meanwhile. Only with `claims` (never with hidden
+  answers), not for a participant or the admin (the admin answers for a name by editing its
   row, with `waiting: true`, so 409 `answered` if the person answered
   themself meanwhile, and their answers stay). Typing a listed name picks
   it and typing on unpicks it ("Ola" → "Olav"); a tapped name stays. The app reads `waiting`/`waitingCount` with defaults, since a Poll
@@ -438,7 +463,8 @@ transforming (enums, namespaces, parameter properties) is off
   `.ics` download, ties and the ranking setting, listed names (adding,
   answering as one, answering for one, hidden answers), drafts (who sees
   them, counting, taking an answer back), tapping a waiting name, answering
-  for others with openEdit, the name box with 40 names (cut, filtering
+  for others with openEdit, the participants' permissions (each setting in
+  the API and the page, the settings card at 360 px), the name box with 40 names (cut, filtering
   without moving anything), the long waiting list, the «Vis som besvart»
   row at 360 px in all six languages, holiday calendars, the
   events menu, finding events by an email code, the language menu and

@@ -7,11 +7,16 @@
 //
 //   POST   /api/events                       { event, emails? } -> { id, token, view }
 //   GET    /api/events/:id                   -> { view }
-//   PUT    /api/events/:id                   { event, emails? } (admin) -> { view }
+//   PUT    /api/events/:id                   { event, emails? } (admin) -> { view } (a setting
+//                                             left out keeps its value, see poll.ts)
 //   DELETE /api/events/:id                   (admin) -> { ok }
 //   POST   /api/events/:id/admin-link        (admin) new admin link -> { token }
 //   GET    /api/events/:id/live              WebSocket: live views (poll.ts)
 //   POST   /api/events/:id/invite            { names } (admin) list who is expected -> { view, added, skipped }
+//   POST   /api/events/:id/decide            { decided: key | null } (admin, or anyone with
+//                                             settings.decide) -> { view }; doesn't close
+//   PUT    /api/events/:id/details           { name, description, location } (admin, or
+//                                             anyone with settings.details) -> { view }
 //   POST   /api/events/:id/people            { name, email?, comment?, answers, claim?, draft? } -> { pid, token, view }
 //                                             (with the admin link: no email; claim: a listed
 //                                             name's pid, to answer as them, see poll.ts)
@@ -247,7 +252,7 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
     throw new HttpError(503, 'busy');
   }
 
-  const m = pathname.match(/^\/api\/events\/([^/]+)(?:\/(admin-link|invite|live|people)(?:\/([^/]+)(\/link)?)?)?$/);
+  const m = pathname.match(/^\/api\/events\/([^/]+)(?:\/(admin-link|decide|details|invite|live|people)(?:\/([^/]+)(\/link)?)?)?$/);
   if (!m || !ID_RE.test(m[1])) throw new HttpError(404, 'notFound');
   const [, id, sub, pid, linkPath] = m;
   if (pid !== undefined && !PID_RE.test(pid)) throw new HttpError(404, 'person');
@@ -258,7 +263,7 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
     if (method === 'GET') return send(await poll.get(cred));
     if (method === 'PUT') {
       const body = await readJson(req);
-      return send(await poll.update(cred, event(body), adminEmails(body, false)));
+      return send(await poll.update(cred, event(body), adminEmails(body, false), field(field(body, 'event'), 'settings') ?? {}));
     }
     if (method === 'DELETE') return send(await poll.destroy(cred));
     throw new HttpError(405, 'method');
@@ -272,6 +277,16 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
   if (sub === 'admin-link') {
     if (method !== 'POST' || pid) throw new HttpError(405, 'method');
     return send(await poll.resetAdmin(cred));
+  }
+
+  if (sub === 'decide') {
+    if (method !== 'POST' || pid) throw new HttpError(405, 'method');
+    return send(await poll.decide(cred, field(await readJson(req), 'decided') ?? null));
+  }
+
+  if (sub === 'details') {
+    if (method !== 'PUT' || pid) throw new HttpError(405, 'method');
+    return send(await poll.details(cred, await readJson(req)));
   }
 
   if (sub === 'invite') {

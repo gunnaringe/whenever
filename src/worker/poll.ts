@@ -63,7 +63,7 @@
 // also how events made before the index got into it).
 
 import { DurableObject } from 'cloudflare:workers';
-import { LIMITS, sanitizeEntry, cleanAnswers, cleanNames, canAdd, canEdit, expiresAt, nameKey } from '../shared/model.ts';
+import { LIMITS, sanitizeEntry, sanitizeEvent, settingsOf, cleanAnswers, cleanNames, canAdd, canClaim, canDecide, canChangeDetails, canEdit, canRename, canSee, decisionKeys, expiresAt, nameKey } from '../shared/model.ts';
 import type { Added, Created, Entry, LinkState, LiveMessage, Person, PollEvent, View, Waiting, Who } from '../shared/model.ts';
 import { newPid, newSecret, token, same, parse } from './link.ts';
 import type { Credential } from './link.ts';
@@ -85,6 +85,9 @@ const deleteAt = (ev: PollEvent) => Math.max(expiresAt(ev), Date.now() + MIN_LIF
 const lookup = (env: Env) => env.LOOKUP.getByName('lookup');
 const visitor = (link: LinkState): Who => ({ role: 'visitor', me: null, link });
 const TAKEN: Failure = { error: 'taken', status: 409 };
+const CLOSED: Failure = { error: 'closed', status: 403 };
+const LIST_ONLY: Failure = { error: 'listOnly', status: 403 };
+const RENAME: Failure = { error: 'rename', status: 403 };
 const ANSWERED: Failure = { error: 'answered', status: 409 };
 
 // A live socket's state (serializeAttachment): the link it sent, if it has
@@ -182,8 +185,11 @@ export class Poll extends DurableObject<Env> {
     this.sql.exec(`INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`, k, String(v));
   }
 
+  // Settings stored before one existed read as its default (settingsOf).
   event(): PollEvent {
-    return JSON.parse(this.getMeta('event') ?? 'null') as PollEvent;
+    const ev = JSON.parse(this.getMeta('event') ?? 'null') as PollEvent;
+    if (ev) ev.settings = settingsOf(ev.settings);
+    return ev;
   }
 
   who(cred: Cred): Who {
@@ -217,11 +223,11 @@ export class Poll extends DurableObject<Env> {
   view(who: Who): View {
     const ev = this.event();
     const rows = this.sql.exec<PersonRow>(`SELECT id, name, comment, email, answers, updated, replied FROM people ORDER BY seq`).toArray();
-    const hidden = ev.settings.hidden && who.role !== 'admin';
+    const hidden = !canSee(who, ev.settings);
     const people: Person[] = [];
     const waiting: Waiting[] = [];
     // Someone with the event link may answer as a waiting name (claim).
-    const claims = who.role === 'visitor' && !ev.settings.hidden && canAdd(who, ev.settings);
+    const claims = canClaim(who, ev.settings);
     let count = 0;
     for (const r of rows) {
       if (r.replied) count += 1;
@@ -332,10 +338,14 @@ export class Poll extends DurableObject<Env> {
   }
 
   // emails: the organisers' new list, or undefined to keep it.
-  async update(cred: Cred, event: PollEvent, emails: string[] | undefined): Promise<Failure | { view: View }> {
+  // `sent` is the settings as the client sent them: one it left out keeps
+  // its stored value, as an app or API client from before a setting sends
+  // the event back without it (the Worker from before sends nothing here).
+  async update(cred: Cred, event: PollEvent, emails: string[] | undefined, sent?: unknown): Promise<Failure | { view: View }> {
     if (!this.exists()) return NOT_FOUND;
     const who = this.who(cred);
     if (who.role !== 'admin') return FORBIDDEN;
+    if (sent !== undefined) event = { ...event, settings: settingsOf(sent, this.event().settings) };
     this.setMeta('event', JSON.stringify(event));
     if (emails !== undefined) this.setAdminEmails(emails);
     // Answers to dates or times that are no longer offered are dropped.
@@ -365,7 +375,7 @@ export class Poll extends DurableObject<Env> {
     if (!this.exists()) return NOT_FOUND;
     const who = this.who(cred);
     const ev = this.event();
-    if (!canAdd(who, ev.settings)) return { error: 'closed', status: 403 };
+    if (who.role !== 'admin' && ev.settings.closed) return CLOSED;
     const o = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
     // An entry added with the admin link gets no email (see the top).
     const own = who.role !== 'admin';
@@ -373,6 +383,7 @@ export class Poll extends DurableObject<Env> {
     if (!r.ok) return { error: r.error, status: 400 };
     const replied = o.draft === true ? 0 : 1;
     if (o.claim !== undefined && o.claim !== null) return this.claim(who, ev, String(o.claim), r.entry, replied);
+    if (!canAdd(who, ev.settings)) return LIST_ONLY;
     const { n, seq } = this.sql.exec<{ n: number; seq: number }>(`SELECT COUNT(*) AS n, COALESCE(MAX(seq), 0) AS seq FROM people`).one();
     if (n >= LIMITS.people) return { error: 'full', status: 409 };
     let pid = newPid();
@@ -395,15 +406,18 @@ export class Poll extends DurableObject<Env> {
   // Someone with the event link answers as a name the organisers listed
   // (see the top): only a name still waiting, never with hidden answers, and
   // only someone who isn't anyone here yet (the admin edits the entry). They
-  // get its link as it is; its email is replaced, never shown.
+  // get its link as it is; its email is replaced, never shown. Without
+  // `rename` the name stays as listed.
   async claim(who: Who, ev: PollEvent, pid: string, entry: Entry, replied: number): Promise<Failure | Added> {
-    if (who.role !== 'visitor' || ev.settings.hidden) return FORBIDDEN;
-    const row = this.sql.exec<{ replied: number; secret: string; email: string }>(`SELECT replied, secret, email FROM people WHERE id = ?`, pid).toArray()[0];
+    if (!canClaim(who, ev.settings)) return FORBIDDEN;
+    const row = this.sql.exec<{ name: string; replied: number; secret: string; email: string }>(`SELECT name, replied, secret, email FROM people WHERE id = ?`, pid).toArray()[0];
     if (!row) return NO_PERSON;
     if (row.replied) return TAKEN;
+    const name = this.keepName(who, ev, row.name, entry.name);
+    if (name === null) return RENAME;
     this.sql.exec(
       `UPDATE people SET name = ?, comment = ?, email = ?, answers = ?, replied = ?, updated = ? WHERE id = ?`,
-      entry.name, entry.comment, entry.email ?? '', JSON.stringify(entry.answers), replied, Date.now(), pid,
+      name, entry.comment, entry.email ?? '', JSON.stringify(entry.answers), replied, Date.now(), pid,
     );
     this.bump();
     const out = { pid, token: token(pid, row.secret), view: this.view({ role: 'participant', me: pid, link: 'ok' }) };
@@ -445,7 +459,7 @@ export class Poll extends DurableObject<Env> {
     if (!this.exists()) return NOT_FOUND;
     const who = this.who(cred);
     const ev = this.event();
-    const row = this.sql.exec<{ email: string; replied: number }>(`SELECT email, replied FROM people WHERE id = ?`, pid).toArray()[0];
+    const row = this.sql.exec<{ name: string; email: string; replied: number }>(`SELECT name, email, replied FROM people WHERE id = ?`, pid).toArray()[0];
     if (!row) return NO_PERSON;
     if (!canEdit(who, ev.settings, pid)) return FORBIDDEN;
     // Only the person themself sees or changes their email.
@@ -456,16 +470,61 @@ export class Poll extends DurableObject<Env> {
     if (o.waiting === true && row.replied && !own) return ANSWERED;
     const r = sanitizeEntry({ ...o, email: own ? o.email ?? '' : undefined }, ev);
     if (!r.ok) return { error: r.error, status: 400 };
+    const name = this.keepName(who, ev, row.name, r.entry.name);
+    if (name === null) return RENAME;
     // Saving answers counts them, even with nothing marked; a draft keeps
     // them without (see the top).
     this.sql.exec(
       `UPDATE people SET name = ?, comment = ?, answers = ?, replied = ?, updated = ? WHERE id = ?`,
-      r.entry.name, r.entry.comment, JSON.stringify(r.entry.answers), o.draft === true ? 0 : 1, Date.now(), pid,
+      name, r.entry.comment, JSON.stringify(r.entry.answers), o.draft === true ? 0 : 1, Date.now(), pid,
     );
     if (own) this.sql.exec(`UPDATE people SET email = ? WHERE id = ?`, r.entry.email ?? '', pid);
     this.bump();
     const out = { view: this.view(who) };
     if (own) await this.reindex();
+    await this.push();
+    return out;
+  }
+
+  // The name an entry gets: the one sent, or without `rename` the one it
+  // has (the same, ignoring case and spaces), else null.
+  keepName(who: Who, ev: PollEvent, was: string, sent: string): string | null {
+    if (canRename(who, ev.settings)) return sent;
+    return nameKey(sent) === nameKey(was) ? was : null;
+  }
+
+  // Picking the final date or time (key), or undoing it (null), for those
+  // the settings let (`decide`). Unlike the admin's PUT, which also closes
+  // the event, this leaves it as it is: only the organisers close it.
+  async decide(cred: Cred, key: unknown): Promise<Failure | { view: View }> {
+    if (!this.exists()) return NOT_FOUND;
+    const who = this.who(cred);
+    const ev = this.event();
+    if (!canDecide(who, ev.settings)) return ev.settings.closed && who.role !== 'admin' ? CLOSED : FORBIDDEN;
+    if (key !== null && (typeof key !== 'string' || !decisionKeys(ev).has(key))) return { error: 'decided', status: 400 };
+    const next: PollEvent = { ...ev };
+    if (key === null) delete next.decided;
+    else next.decided = key;
+    this.setMeta('event', JSON.stringify(next));
+    this.bump();
+    const out = { view: this.view(who) };
+    await this.push();
+    return out;
+  }
+
+  // The event's name, location and description, for those the settings let
+  // (`details`); everything else stays.
+  async details(cred: Cred, input: unknown): Promise<Failure | { view: View }> {
+    if (!this.exists()) return NOT_FOUND;
+    const who = this.who(cred);
+    const ev = this.event();
+    if (!canChangeDetails(who, ev.settings)) return ev.settings.closed && who.role !== 'admin' ? CLOSED : FORBIDDEN;
+    const o = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+    const r = sanitizeEvent({ ...ev, name: o.name, description: o.description ?? '', location: o.location ?? '' });
+    if (!r.ok) return { error: r.error, status: 400 };
+    this.setMeta('event', JSON.stringify({ ...ev, name: r.event.name, description: r.event.description, location: r.event.location }));
+    this.bump();
+    const out = { view: this.view(who) };
     await this.push();
     return out;
   }

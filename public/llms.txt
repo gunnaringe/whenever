@@ -32,9 +32,15 @@ View {
     settings: {
       maybe: boolean                "if need be" (2) may be answered
       maybeCounts: boolean          rank by yes + if need be (else by yes)
-      openEdit: boolean             anyone may change anyone's answers
-      hidden: boolean               only the organiser sees others' answers
-      closed: boolean               only the organiser may add or change answers
+      // What everyone but the organisers may do (see Permissions):
+      hidden: boolean               only the organisers see others' answers and how many
+      newNames: boolean             answer under a new name (else only the listed names)
+      claims: boolean               answer as a listed name with the event link
+      rename: boolean               change the name on an entry
+      openEdit: boolean             change and delete anyone's answers
+      decide: boolean               pick and unpick the final date or time
+      details: boolean              change the poll's name, location and description
+      closed: boolean               only the organisers may change anything
     }
     decided?: string                the organiser's final pick (a key)
     holidays?: "no" | "se" | "dk" | "none"   which holidays the organiser's form marks
@@ -97,7 +103,7 @@ With the admin link the entry gets no email; only its person can add one, with t
 
 Add `"draft": true` (here or on PUT) only when the person says they aren't sure yet: the answers are kept but not counted, and the entry stays in `waiting` until saved without it. Saving without `draft` counts the answers, so a PUT on a draft without it answers for real.
 
-If the person is one of the names in `view.waiting` (ask them; never guess from a similar name), add `"claim": "<that id>"`: the answers go on that name instead of a new entry, replacing any draft there (its `answers` and `comment` in `waiting`: show them to the person and start from them). The returned token is that name's personal link, the same one the organisers can send (it keeps working). The name's email is replaced by the one you send, or none. 409 `taken` means it has been answered meanwhile. Not when `settings.hidden` or `settings.closed`, and not with a personal or the admin link. With a personal link whose `me` is in `waiting`, PUT that entry instead.
+If the person is one of the names in `view.waiting` (ask them; never guess from a similar name), add `"claim": "<that id>"`: the answers go on that name instead of a new entry, replacing any draft there (its `answers` and `comment` in `waiting`: show them to the person and start from them). The returned token is that name's personal link, the same one the organisers can send (it keeps working). The name's email is replaced by the one you send, or none. 409 `taken` means it has been answered meanwhile. Only with `settings.claims` (not when `hidden` or `closed`), and not with a personal or the admin link. Without `settings.newNames` this is the only way to answer with the public link: a POST without `claim` gets 403 `listOnly`. With a personal link whose `me` is in `waiting`, PUT that entry instead.
 
 The returned token is this person's own link, `https://finn-tid.apphub.casa/e/<id>/<token>`. Give it to them: it is the only way to change these answers later (or to find them again without the app). `email` is optional (max 254 characters): with it, the app's /find can mail them a code that brings their polls back. Name: 1 to 60 characters; comment: up to 300 (longer text is cut).
 
@@ -113,7 +119,14 @@ PUT replaces the whole entry: send `name`, `comment` and the full `answers` agai
 
 `DELETE /api/events/<id>/people/<pid>` removes an entry (with a personal link, that link then stops working).
 
-Who may change an entry: its own person, the admin, and (when `settings.openEdit` and not `hidden`) anyone with the public link. When `settings.closed`, only the admin. Don't POST a second entry when `me` is set; change that one.
+Who may change an entry: its own person, the admin, and (when `settings.openEdit` and not `hidden`) anyone with the public link. When `settings.closed`, only the admin. Don't POST a second entry when `me` is set; change that one. Without `settings.rename` only the admin may change an entry's name (on PUT and claim, send it as it is: another gets 403 `rename`).
+
+### Permissions
+
+The admin link may do everything. Everyone else (public or personal link: anyone with the public link gets a personal one by answering) may do what `event.settings` allow, nothing at all when `closed`, and nothing that needs others' answers (`openEdit`, `claims`, `decide`) when `hidden`. With those settings:
+
+- `decide`: `POST /api/events/<id>/decide` `{ "decided": "<key>" }` picks the final date or time (times mode: the first slot of a window), `{ "decided": null }` unpicks it -> `{ view }`. Unlike the admin's pick, it leaves the poll open. Ask the person first: everyone sees it.
+- `details`: `PUT /api/events/<id>/details` `{ "name", "description", "location" }` (all three, as for PUT on an entry) -> `{ view }`. Nothing else about the poll changes.
 
 ## Organise (admin link)
 
@@ -140,7 +153,7 @@ POST /api/events
 
 With the admin token:
 
-- `PUT /api/events/<id>` `{ "event": {...}, "emails"?: [...] }` -> `{ view }`: send the whole event back (from `view.event`) with your changes; leave `emails` out to keep the organisers' addresses, or send the whole new list. Answers to options you remove are dropped. Set `event.decided` to an option (times mode: the first slot of a window) to pick the final date or time; leave it out to unpick.
+- `PUT /api/events/<id>` `{ "event": {...}, "emails"?: [...] }` -> `{ view }`: send the whole event back (from `view.event`) with your changes; a setting left out keeps its value; leave `emails` out to keep the organisers' addresses, or send the whole new list. Answers to options you remove are dropped. Set `event.decided` to an option (times mode: the first slot of a window) to pick the final date or time; leave it out to unpick. The app also sets `settings.closed` when it picks.
 - `DELETE /api/events/<id>` -> `{ "ok": true }`: deletes the poll for everyone.
 - `POST /api/events/<id>/people` adds an entry for anyone, an organiser too (no email); give the person its link.
 - `POST /api/events/<id>/invite` `{ "names": ["Kari", "Ola"] }` -> `{ view, added, skipped }`: list who is expected, so the poll shows who hasn't answered. Each name gets its own personal link (`/link` below) to send them. Names already there (answered or not, ignoring case) are skipped. To answer for a listed name, PUT its entry with `"waiting": true`: if they answered themselves meanwhile, you get 409 `answered` and their answers stay. DELETE removes a name from the list.
@@ -151,8 +164,8 @@ With the admin token:
 
 Errors are `{ "error": "<code>" }` with the HTTP status:
 
-- 400: `json`, `name`, `range`, `rangeLong`, `hours`, `options`, `tooMany`, `personName`, `email`, `emails` (more than 10), `names` (no names), `person` (what the code names is wrong)
-- 403: `forbidden` (your link may not do this), `closed`
+- 400: `json`, `name`, `range`, `rangeLong`, `hours`, `options`, `tooMany`, `personName`, `email`, `emails` (more than 10), `names` (no names), `person` (what the code names is wrong), `decided` (not an option to pick)
+- 403: `forbidden` (your link may not do this), `closed`, `listOnly` (only the listed names may answer), `rename` (the name may not change)
 - 404: `notFound` (no such poll, or it is deleted), `person`
 - 405 `method`, 409 `full` (200 people), `tooManyNames` (names and answers over 200), `taken` (that name has answered), `answered` (they answered themselves meanwhile), 413 `size`, 415 `type`, 429 `rate`, 503 `busy`, 500 `server`
 

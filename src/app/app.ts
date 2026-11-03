@@ -440,6 +440,9 @@ function setView(view: M.View, id = here().id, token = here().token): void {
   app.view = view;
   app.viewKey = `${id}/${token ?? ''}`;
   app.viewJson = JSON.stringify(view);
+  // A Poll object still on the code from before sends settings without the
+  // newer ones: they read as their defaults.
+  view.event.settings = M.settingsOf(view.event.settings);
   if (token && view.link === 'ok') {
     if (view.role === 'admin') store.put(id, { name: view.event.name, admin: token });
     else if (view.role === 'participant') store.put(id, { name: view.event.name, me: token, pid: view.me ?? undefined });
@@ -856,11 +859,14 @@ function renderForm(v: M.View | null): void {
       ${icon(mode === 'dates' ? 'cal' : 'clock')}
       <span><b>${esc(t(`mode.${mode}`))}</b><small>${esc(t(`mode.${mode}Hint`))}</small></span>
     </label>`;
-  const check = (key: keyof M.Settings) => `
+  const check = (key: keyof M.Settings) => {
+    const on = shownOn(d.settings, key);
+    return `
     <label class="check${key === 'maybeCounts' ? ' sub' : ''}">
-      <input type="checkbox" name="s-${key}" ${d.settings[key] ? 'checked' : ''} ${(key === 'openEdit' && d.settings.hidden) || (key === 'maybeCounts' && !d.settings.maybe) ? 'disabled' : ''}>
+      <input type="checkbox" name="s-${key}" ${on ? 'checked' : ''} ${blocked(d.settings, key) ? 'disabled' : ''}>
       <span><b>${esc(t(`set.${key}`))}</b><small>${esc(t(`set.${key}Hint`))}</small></span>
     </label>`;
+  };
   paint(`
     <form id="ev-form" class="stack" novalidate>
       ${editing ? `<a class="back" href="${esc(location.pathname)}" data-act="close-sub">${icon('back')}${esc(t('back'))}</a>` : ''}
@@ -906,7 +912,12 @@ function renderForm(v: M.View | null): void {
       </section>
       <section class="card">
         <h2>${esc(t('settings'))}</h2>
-        ${check('maybe')}${check('maybeCounts')}${check('openEdit')}${check('hidden')}${editing ? check('closed') : ''}
+        ${check('maybe')}${check('maybeCounts')}
+        <fieldset class="perms">
+          <legend>${esc(t('permsTitle'))}</legend>
+          ${M.PERMISSIONS.map(check).join('')}
+        </fieldset>
+        ${editing ? check('closed') : ''}
         ${field('holidays', t('holidayCal'), `<select name="holidays">${M.HOLIDAY_CALENDARS.map((c) => `<option value="${c}"${d.holidays === c ? ' selected' : ''}>${esc(t(`holidayCal.${c}`))}</option>`).join('')}</select>`, t('holidayCalHint'))}
         ${emailsField(d, editing)}
       </section>
@@ -920,6 +931,13 @@ function renderForm(v: M.View | null): void {
   refreshDays();
   refreshTimes();
 }
+
+// The event form's settings: «se svarene» is `hidden` the other way round;
+// what needs the others' answers can't be on while they are hidden, and
+// counting maybes needs maybes.
+const blocked = (s: M.Settings, key: keyof M.Settings): boolean =>
+  ((key === 'openEdit' || key === 'claims' || key === 'decide') && s.hidden) || (key === 'maybeCounts' && !s.maybe);
+const shownOn = (s: M.Settings, key: keyof M.Settings): boolean => !blocked(s, key) && (key === 'hidden' ? !s.hidden : s[key]);
 
 function bindForm(): void {
   const form = $<HTMLFormElement>('#ev-form');
@@ -955,15 +973,17 @@ function bindForm(): void {
       refreshDays();
     }
     else if (n.startsWith('s-')) {
-      d.settings[n.slice(2) as keyof M.Settings] = el.checked;
-      if (n === 's-hidden') {
-        if (el.checked) d.settings.openEdit = false;
-        const openEdit = control(form, 's-openEdit');
-        openEdit.checked = d.settings.openEdit;
-        openEdit.disabled = el.checked;
+      const key = n.slice(2) as keyof M.Settings;
+      // «se svarene» is `hidden`, ticked when it is off.
+      d.settings[key] = key === 'hidden' ? !el.checked : el.checked;
+      // The ones that hang on it: unticked and greyed while it is off, and
+      // back as they were when it is on again (the server drops them).
+      for (const k of Object.keys(d.settings) as (keyof M.Settings)[]) {
+        const box = form.querySelector<HTMLInputElement>(`[name="s-${k}"]`);
+        if (!box || k === key) continue;
+        box.disabled = blocked(d.settings, k);
+        box.checked = shownOn(d.settings, k);
       }
-      // Without maybe answers there is nothing for it to count.
-      if (n === 's-maybe') control(form, 's-maybeCounts').disabled = !el.checked;
     }
   });
   form.addEventListener('submit', (e) => {
@@ -1428,12 +1448,18 @@ function headHtml(v: M.View): string {
     meta.push([icon('globe'), `${t('timesIn', { tz: ev.tz.replace(/_/g, ' ') })}${mine !== ev.tz ? ` ${t('yourTz', { tz: mine.replace(/_/g, ' ') })}` : ''}`]);
   }
   if (ev.location) meta.push([icon('pin'), ev.location]);
-  if (ev.settings.hidden) meta.push([icon('eye-off'), t('metaHidden')]);
-  if (ev.settings.openEdit && !ev.settings.hidden) meta.push([icon('users'), t('metaOpenEdit')]);
+  const s = ev.settings;
+  if (s.hidden) meta.push([icon('eye-off'), t('metaHidden')]);
+  if (s.openEdit) meta.push([icon('users'), t('metaOpenEdit')]);
+  if (!s.newNames) meta.push([icon('users'), t('metaListOnly')]);
+  if (s.decide && !s.closed) meta.push([icon('check'), t('metaDecide')]);
+  // The admin changes it all in the event form.
+  const details = v.role !== 'admin' && M.canChangeDetails(v, s);
   return `<section class="card head">
     <h1>${esc(ev.name)}</h1>
     <ul class="meta">${meta.map(([i, s]) => `<li>${i}<span>${esc(s)}</span></li>`).join('')}</ul>
     ${ev.description ? `<p class="desc">${esc(ev.description)}</p>` : ''}
+    ${details ? `<p class="head-edit"><button type="button" class="linkish small" data-act="edit-details">${icon('edit')}${esc(t('editDetails'))}</button></p>` : ''}
   </section>`;
 }
 
@@ -1471,9 +1497,13 @@ function actionsHtml(v: M.View): string {
       </div>
     </section>`;
   }
+  // Only the listed names may answer: by tapping one, if they may.
+  const claim = M.canClaim(who, ev.settings) && waitingOf(v).length > 0;
+  const listOnly = !add && !ev.settings.closed;
   return `<section class="card role cta">
-    ${add ? `<button type="button" class="btn primary big" data-act="answer">${icon('plus')}${esc(t('addYourAnswers'))}</button>` : ''}
+    ${add || claim ? `<button type="button" class="btn primary big" data-act="answer">${icon('plus')}${esc(t('addYourAnswers'))}</button>` : ''}
     ${shareBtn}
+    ${listOnly ? `<p class="muted small">${esc(t(claim ? 'listOnlyClaim' : 'listOnlyInfo'))}</p>` : ''}
   </section>`;
 }
 
@@ -1650,10 +1680,11 @@ function whenLabel(ev: M.PollEvent, key: string): string {
   return w ? windowLabel(w) : slotLabel(key, ev.slot);
 }
 
-// For the admin, under the details of an option: pick it as the final date.
+// Under the details of an option: pick it as the final date (the admin, or
+// anyone the settings let).
 function decideHtml(v: M.View, key: string): string {
   const ev = v.event;
-  if (v.role !== 'admin' || !M.decisionKeys(ev).has(key)) return '';
+  if (!M.canDecide(v, ev.settings) || !M.decisionKeys(ev).has(key)) return '';
   if (ev.decided === key) return `<p class="decided-mark">${icon('check')}${esc(t('decidedThis'))}</p>`;
   return `<button type="button" class="btn small" data-act="decide" data-k="${key}">${icon('check')}${esc(t('decideThis', { when: whenLabel(ev, key) }))}</button>`;
 }
@@ -1670,7 +1701,7 @@ function decidedHtml(v: M.View): string {
     ${n && !v.hidden ? `<p class="muted">${esc(countText(pick, n, ev.settings))}</p>` : ''}
     <div class="row wrap">
       <button type="button" class="btn primary" data-act="ics">${icon('cal')}${esc(t('addToCalendar'))}</button>
-      ${v.role === 'admin' ? `<button type="button" class="btn" data-act="undecide">${esc(t('undoDecision'))}</button>` : ''}
+      ${M.canDecide(v, ev.settings) ? `<button type="button" class="btn" data-act="undecide">${esc(t('undoDecision'))}</button>` : ''}
     </div>
   </section>`;
 }
@@ -1782,7 +1813,7 @@ function waitingHtml(v: M.View, stored: Stored | null): string {
   const rows = admin || (ev.settings.openEdit && !ev.settings.hidden && !ev.settings.closed);
   if (!rows) {
     // Someone with the event link taps their name to answer as it.
-    const tap = v.role === 'visitor' && !ev.settings.hidden && M.canAdd(who, ev.settings);
+    const tap = M.canClaim(who, ev.settings);
     const names = list
       .map((w) =>
         tap
@@ -1850,6 +1881,53 @@ async function addNames(): Promise<void> {
   }
 }
 
+// Anyone the settings let (`details`) changes the event's name, location
+// and description; the admin does it in the event form.
+async function editDetails(): Promise<void> {
+  const { id, token } = here();
+  const ev = current().event;
+  const d = { name: ev.name, location: ev.location, description: ev.description };
+  const r = await dialog(
+    `<h3>${esc(t('editDetails'))}</h3>
+    <div id="details-form" class="stack">
+      ${field('name', `${t('eventName')} *`, `<input name="name" maxlength="${M.LIMITS.name}" required value="${esc(d.name)}" autocomplete="off">`)}
+      ${field('location', t('locationOptional'), `<input name="location" maxlength="${M.LIMITS.location}" value="${esc(d.location)}" autocomplete="off">`)}
+      ${field('description', t('descriptionOptional'), `<textarea name="description" rows="3" maxlength="${M.LIMITS.description}">${esc(d.description)}</textarea>`)}
+      <p class="muted small">${esc(t('editDetailsHint'))}</p>
+    </div>
+    <div class="row end">
+      <button value="" class="btn">${esc(t('cancel'))}</button>
+      <button value="save" class="btn primary">${icon('check')}${esc(t('save'))}</button>
+    </div>`,
+    {
+      onOpen: (dlg) => {
+        // In the dialog's own form (ui.ts): a form inside it would be dropped.
+        const box = $('#details-form', dlg);
+        box.addEventListener('input', (e) => {
+          const el = e.target as HTMLInputElement;
+          if (el.name === 'name' || el.name === 'location' || el.name === 'description') d[el.name] = el.value;
+        });
+        // Enter in a field saves (the form's first button is Cancel).
+        box.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter' || !(e.target as Element).matches('input')) return;
+          e.preventDefault();
+          $<HTMLButtonElement>('button[value="save"]', dlg).click();
+        });
+      },
+    },
+  );
+  if (r !== 'save') return;
+  if (!d.name.trim()) return toast(t('err.name'));
+  try {
+    const { view } = await api<{ view: M.View }>('PUT', `/events/${id}/details`, { token, body: d });
+    setView(view);
+    render();
+    toast(t('detailsSaved'));
+  } catch (e) {
+    toast(errText(e));
+  }
+}
+
 // For the group chat: "Ola, Per og Kari: husk å svare på «Sommerfest»! <link>".
 function copyReminder(): void {
   const v = current();
@@ -1872,9 +1950,11 @@ function renderAnswer(v: M.View, sub: string | null): void {
   }
   // A waiting name tapped in the Svar card by someone with the event link:
   // a new answer as that name, unless they may change its entry anyway.
-  const tapped = pid && found?.waiting && v.role === 'visitor' && !ev.settings.hidden && !M.canEdit(who, ev.settings, pid) ? found : undefined;
+  const tapped = pid && found?.waiting && M.canClaim(who, ev.settings) && !M.canEdit(who, ev.settings, pid) ? found : undefined;
   const target = tapped ? undefined : found;
-  if (target ? !M.canEdit(who, ev.settings, target.id) : !M.canAdd(who, ev.settings)) {
+  // A new answer: under a new name, or as a listed one.
+  const claimable = target ? [] : v.role === 'admin' || M.canClaim(who, ev.settings) ? waitingOf(v) : [];
+  if (target ? !M.canEdit(who, ev.settings, target.id) : !M.canAdd(who, ev.settings) && !claimable.length) {
     toast(t(ev.settings.closed ? 'err.closed' : 'err.forbidden'));
     return closeSub();
   }
@@ -1910,9 +1990,9 @@ function renderAnswer(v: M.View, sub: string | null): void {
       : t(target.waiting ? 'answerFor' : 'editAnswersOf', { name: target.name })
     : t(!own ? 'addAnswers' : fresh === false ? 'editYourAnswers' : 'addYourAnswers');
   // A new answer can be one of the listed names still waiting: the admin
-  // answers for them, someone with the event link says it's them (not
-  // with hidden answers, see poll.ts).
-  const claimable = target ? [] : v.role === 'admin' || (v.role === 'visitor' && !ev.settings.hidden) ? waitingOf(v) : [];
+  // answers for them, someone with the event link says it's them (as the
+  // settings let, see poll.ts), and must when only those may answer.
+  const listOnly = !target && !M.canAdd(who, ev.settings);
   document.title = `${title} · ${ev.name}`;
   const hint: Key =
     ev.mode === 'dates'
@@ -1939,8 +2019,8 @@ function renderAnswer(v: M.View, sub: string | null): void {
     </section>
     <section class="card">
       <form id="answer-form" novalidate>
-        ${field('name', `${t(own ? 'yourName' : 'personName')} *`, `<input name="name" required maxlength="${M.LIMITS.person}" value="${esc(a.name)}"${own ? ' autocomplete="name"' : ' autocomplete="off"'}>`)}
-        ${claimable.length ? claimHtml(claimable, v.role === 'admin', a.claim) : ''}
+        ${field('name', `${t(own ? 'yourName' : 'personName')} *`, `<input name="name" required maxlength="${M.LIMITS.person}" value="${esc(a.name)}"${own ? ' autocomplete="name"' : ' autocomplete="off"'}${nameFixed(v, a) ? ' readonly' : ''}>`, nameFixed(v, a) ? t('nameFixed') : '')}
+        ${claimable.length ? claimHtml(claimable, v.role === 'admin' ? 'admin' : listOnly ? 'list' : 'claim', a.claim) : ''}
         ${field('comment', t('commentOptional'), `<input name="comment" maxlength="${M.LIMITS.comment}" value="${esc(a.comment)}" placeholder="${esc(t('commentPh'))}">`)}
         ${
           a.own
@@ -1997,16 +2077,17 @@ function renderAnswer(v: M.View, sub: string | null): void {
 // under the name field. At most three rows (a fade and «Vis alle» for the
 // rest); typing filters them (filterClaims) in a box that never shrinks
 // meanwhile (lockClaims), so nothing under it moves.
-function claimHtml(list: M.Waiting[], admin: boolean, on: string | null): string {
+function claimHtml(list: M.Waiting[], kind: 'admin' | 'list' | 'claim', on: string | null): string {
+  const admin = kind === 'admin';
   return `<fieldset class="claim">
-    <legend>${esc(t(admin ? 'claimAdmin' : 'claimQ'))}</legend>
+    <legend>${esc(t(admin ? 'claimAdmin' : kind === 'list' ? 'claimWho' : 'claimQ'))}</legend>
     <div class="claim-box">
       <div class="chip-row">${list.map((w) => `<button type="button" class="chip${w.id === on ? ' on' : ''}" data-act="claim" data-pid="${w.id}" aria-pressed="${w.id === on}">${esc(w.name)}</button>`).join('')}</div>
       <p class="claim-none muted small" hidden>${esc(t('claimNone'))}</p>
     </div>
     <p class="best-more claim-more" hidden><button type="button" class="linkish small" data-act="claim-more" aria-expanded="false"></button></p>
     <p id="claim-status" class="vh" aria-live="polite"></p>
-    <p class="muted small">${esc(t(admin ? 'claimAdminHint' : 'claimHint'))}</p>
+    <p class="muted small">${esc(t(admin ? 'claimAdminHint' : kind === 'list' ? 'claimListHint' : 'claimHint'))}</p>
   </fieldset>`;
 }
 
@@ -2119,7 +2200,18 @@ function setClaim(pid: string | null, typed = false): void {
     b.classList.toggle('on', b.dataset.pid === pid);
     b.setAttribute('aria-pressed', String(b.dataset.pid === pid));
   }
+  if (input && input.readOnly !== nameFixed(current(), a)) {
+    render();
+    return;
+  }
   filterClaims();
+}
+
+// The name can't be changed (without `rename`): on an entry, or a listed
+// name tapped (a name typed is the listed one anyway; typing on unpicks it).
+function nameFixed(v: M.View, a: AnswerDraft): boolean {
+  if (M.canRename(v, v.event.settings)) return false;
+  return Boolean(a.pid || (a.claim && !a.claimTyped));
 }
 
 // The answers and comment in the form, to compare (key order aside).
@@ -2261,6 +2353,11 @@ async function saveAnswer(): Promise<void> {
     $opt('#answer-form [name="name"]')?.focus();
     return;
   }
+  if (!a.pid && !a.claim && !M.canAdd(v, v.event.settings)) {
+    toast(t('err.listOnly'));
+    $opt('#answer-form [name="name"]')?.focus();
+    return;
+  }
   const body: { name: string; comment: string; answers: M.Answers; email?: string } = { name, comment: a.comment, answers: a.answers };
   if (a.own) {
     if (!M.cleanEmail(a.email).ok) {
@@ -2372,17 +2469,22 @@ async function personLink(pid: string): Promise<void> {
   }
 }
 
-// The admin picks the final date or time (key), or undoes it (null). Picking
-// also closes the event for new answers.
+// Picking the final date or time (key), or undoing it (null). The admin's
+// pick also closes the event for new answers; anyone else's (with
+// `decide`) leaves it open, as only the organisers close it.
 async function decide(key: string | null): Promise<void> {
-  const ev = current().event;
+  const v = current();
+  const ev = v.event;
   const { id, token } = here();
-  const q = key ? t('decideQ', { when: whenLabel(ev, key) }) : t('undecideQ');
+  const admin = v.role === 'admin';
+  const q = key ? t(admin ? 'decideQ' : 'decideQOpen', { when: whenLabel(ev, key) }) : t(admin ? 'undecideQ' : 'undecideQOpen');
   if (!(await ask(q, { ok: t(key ? 'decideOk' : 'undoDecision') }))) return;
   try {
     const settings = key ? { ...ev.settings, closed: true } : ev.settings;
     const body = { event: { ...ev, settings, decided: key ?? undefined } };
-    const { view } = await api<{ view: M.View }>('PUT', `/events/${id}`, { token, body });
+    const { view } = admin
+      ? await api<{ view: M.View }>('PUT', `/events/${id}`, { token, body })
+      : await api<{ view: M.View }>('POST', `/events/${id}/decide`, { token, body: { decided: key } });
     setView(view);
     render();
     toast(t(key ? 'decidedToast' : 'undecidedToast'));
@@ -2627,6 +2729,7 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   'delete-entry': (b) => deleteEntry(data(b, 'pid')),
   'person-link': (b) => personLink(data(b, 'pid')),
   'add-names': () => addNames(),
+  'edit-details': () => editDetails(),
   'copy-reminder': () => copyReminder(),
   claim: (b) => setClaim(answer().claim === b.dataset.pid ? null : data(b, 'pid')),
   'claim-more': () => {

@@ -314,6 +314,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .check small { color: var(--muted); }
 .check:has(input:disabled) { opacity: .55; }
 .check.sub { padding-left: 2.05rem; border-top: 0; padding-top: 0; }
+/* «Deltakerne kan»: the settings for what everyone but the organisers may do. */
+.perms { border: 0; border-top: 1px solid var(--line); margin: 0; padding: 0; min-width: 0; }
+.perms legend { float: left; width: 100%; padding: .7rem 0 .15rem; font-weight: 600; }
+.perms legend + .check { clear: both; }
+.head-edit { margin: .6rem 0 0; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .6rem; }
 .chip {
