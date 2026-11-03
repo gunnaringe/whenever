@@ -2310,9 +2310,10 @@ async function saveAnswer(): Promise<void> {
       closeSub();
       return;
     }
-    // Someone else answered as that name meanwhile: show what's left.
+    // Someone else answered as that name meanwhile: show what's left (and
+    // take its draft out of the form, unless changed: it isn't yours).
     if (e instanceof ApiError && (e.code === 'taken' || e.code === 'person') && a.claim) {
-      a.claim = null;
+      setClaim(null);
       try {
         setView((await api<{ view: M.View }>('GET', `/events/${id}`, { token })).view);
         render();
