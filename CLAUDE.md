@@ -172,8 +172,9 @@ transforming (enums, namespaces, parameter properties) is off
   (tally, heat, ranks, `n` in "X av N kan") ignores the waiting names;
   `View.waiting` (id, name) lists them, `waitingCount` counts them, and
   `count` counts the answered. With hidden answers only the admin gets the
-  names (who hasn't answered tells who has); others get only the counts and
-  their own row. Someone answering with the event link picks their name
+  names (who hasn't answered tells who has); others get only their own row,
+  not even `count` and `waitingCount` (how many have answered tells about
+  the others too). Someone answering with the event link picks their name
   («Er du en av disse?», typing it picks it too): `claim` in the POST fills
   that row and returns its link as it is (the same one the organisers can
   send, which keeps working). The row's email is replaced by the claim's (or
@@ -258,7 +259,11 @@ transforming (enums, namespaces, parameter properties) is off
   the credential, and every change (`update`, `add`, `edit`, `drop`, each
   with `bump()` of the meta `rev` first) sends each socket its own view,
   from `who()` checked again each time: hidden answers stay hidden, and a
-  replaced link gets a visitor's view with `link: "invalid"`. Deleting the
+  replaced link gets a visitor's view with `link: "invalid"`. A socket whose
+  view didn't change but for `rev` gets nothing (`seen` in its attachment,
+  a fingerprint of what it was last sent), so with hidden answers nobody can
+  count the answers as they come in (only `rev` still tells that something
+  changed). Deleting the
   event (or its alarm) sends `{"type":"gone"}` and closes them. `View.rev`
   tells which of two views is newer, since a push can arrive before the
   reply to the change that caused it. In the app (`onLive`/`applyLive`): a

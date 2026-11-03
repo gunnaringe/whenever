@@ -98,11 +98,13 @@ export interface View {
   link: LinkState;
   // Those who have answered (with hidden answers, only your own).
   people: Person[];
-  // How many have answered, also when the answers are hidden.
-  count: number;
+  // How many have answered: not with hidden answers (but to the admin), as
+  // the number tells about the others too.
+  count?: number;
   // Listed but not answered yet: everyone for the admin, or when the answers
-  // aren't hidden; else only yourself. waitingCount is all of them. (A
-  // Poll object still running the code from before sends neither.)
+  // aren't hidden; else only yourself. waitingCount is all of them, sent
+  // like count. (A Poll object still running the code from before sends
+  // neither list nor count.)
   waiting?: Waiting[];
   waitingCount?: number;
   hidden: boolean;

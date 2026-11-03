@@ -14,7 +14,9 @@
 // not "hasn't answered"). The view's `people` are only those who answered,
 // so the results never count a name that is waiting; `waiting` lists the
 // others, but with hidden answers only to the admin (who hasn't answered
-// tells who has). Someone answering with the event link can say which listed
+// tells who has). With hidden answers nobody else gets the counts either,
+// and a live socket only hears of a change to its own view (push()), so
+// nobody can count the answers as they come in. Someone answering with the event link can say which listed
 // name they are (`claim` in add()): that entry gets their answers, and they
 // get its link, the same one the organisers can send (a link sent before
 // keeps working). Not once it is answered, and not when the answers are
@@ -86,13 +88,31 @@ const TAKEN: Failure = { error: 'taken', status: 409 };
 const ANSWERED: Failure = { error: 'answered', status: 409 };
 
 // A live socket's state (serializeAttachment): the link it sent, if it has
-// sent one yet, and when, for the 2 s limit.
+// sent one yet, and when, for the 2 s limit; and what it was last sent
+// (`seen`, see push()).
 interface Live {
   hello: boolean;
   cred: Cred;
   at: number;
+  seen?: string;
 }
 const HELLO_EVERY = 2000;
+
+// What a socket was sent, as a short fingerprint (cyrb53; it only tells two
+// views apart): the view without its rev, and the app's version.
+function seenOf(view: View, app: string): string {
+  const s = app + JSON.stringify({ ...view, rev: 0 });
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
 
 // The version of the app that is live: the hash in index.html's script name
 // (scripts/build.mjs). Read once per isolate; a deploy brings a new one.
@@ -227,12 +247,12 @@ export class Poll extends DurableObject<Env> {
       me: who.me,
       link: who.link,
       people,
-      count,
       waiting,
-      waitingCount: rows.length - count,
       hidden,
       rev: Number(this.getMeta('rev') ?? 0),
     };
+    // How many have answered tells as much as who (see the top).
+    if (!hidden) Object.assign(out, { count, waitingCount: rows.length - count });
     if (who.role === 'admin') out.adminEmails = this.adminEmails();
     return out;
   }
@@ -526,28 +546,37 @@ export class Poll extends DurableObject<Env> {
     const cred: Cred = tok === null || tok === undefined ? null : (parse(tok) ?? { bad: true });
     ws.serializeAttachment({ hello: true, cred, at: now } satisfies Live);
     if (!this.exists()) return this.gone();
-    ws.send(JSON.stringify({ type: 'view', view: this.view(this.who(cred)), app: await liveApp(this.env) } satisfies LiveMessage));
+    const app = await liveApp(this.env);
+    const view = this.view(this.who(cred));
+    ws.serializeAttachment({ hello: true, cred, at: now, seen: seenOf(view, app) } satisfies Live);
+    ws.send(JSON.stringify({ type: 'view', view, app } satisfies LiveMessage));
   }
 
-  // After a change: every socket that has said hello gets its own view.
+  // After a change: every socket that has said hello gets its own view, if
+  // it differs from the one it was last sent by more than the rev.
   // Sockets with the same role, entry and link state get the same text.
   async push(): Promise<void> {
     const sockets = this.ctx.getWebSockets();
     if (!sockets.length) return;
     const app = await liveApp(this.env);
-    const sent = new Map<string, string>();
+    const sent = new Map<string, { text: string; seen: string }>();
     for (const ws of sockets) {
       const live = ws.deserializeAttachment() as Live | null;
       if (!live?.hello) continue;
       const who = this.who(live.cred);
       const key = `${who.role} ${who.me} ${who.link}`;
-      let text = sent.get(key);
-      if (text === undefined) {
-        text = JSON.stringify({ type: 'view', view: this.view(who), app } satisfies LiveMessage);
-        sent.set(key, text);
+      let msg = sent.get(key);
+      if (!msg) {
+        const view = this.view(who);
+        msg = { text: JSON.stringify({ type: 'view', view, app } satisfies LiveMessage), seen: seenOf(view, app) };
+        sent.set(key, msg);
       }
+      // Nothing new for this socket but the rev: with hidden answers, someone
+      // else answered. Say nothing (see the top).
+      if (live.seen === msg.seen) continue;
       try {
-        ws.send(text);
+        ws.send(msg.text);
+        ws.serializeAttachment({ ...live, seen: msg.seen } satisfies Live);
       } catch {
         // Closing already; the page reconnects or falls back.
       }

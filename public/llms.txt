@@ -48,12 +48,14 @@ View {
   me: string | null                 your own entry's id (personal link only; null with the admin link)
   link: "none" | "invalid" | "ok"   whether the token you sent worked
   people: [{ id, name, comment, answers, updated, email? }]   those who have answered
-  count: number                     how many have answered (also when hidden)
+  count?: number                    how many have answered (not when hidden)
   waiting?: [{ id, name, comment?, answers?, email? }]   not answered yet: names the organisers listed,
                                     and drafts; a draft's comment and answers if you may change it or
                                     answer as it (claim)
-  waitingCount?: number             how many of those (also when hidden)
-  hidden: boolean                   true: people and waiting hold only your own entry
+  waitingCount?: number             how many of those (not when hidden)
+  hidden: boolean                   true: people and waiting hold only your own entry, and
+                                    count and waitingCount are left out (only the organisers
+                                    see how many have answered)
   adminEmails?: string[]            admin only: the organisers' addresses
   rev: number                       goes up with every change; of two views, the higher is newer
 }
@@ -65,7 +67,7 @@ Answered and waiting are not the same: an entry in `people` with no answers can 
 
 ### Follow a poll live
 
-To watch a poll change, instead of reading it again and again, open a WebSocket to `wss://finn-tid.apphub.casa/api/events/<id>/live` (no token in the URL). Send `{"token": "<token>"}` (or `{"token": null}`) as the first message. You get `{"type": "view", "view": View, "app": string}` straight away and after every change, as `GET` would return it for that token, and `{"type": "gone"}` if the poll is deleted (the socket then closes). Send `"ping"` now and then (the reply is `"pong"`) so it stays open; send the token again (at most every 2 s) for a fresh view. `app` is the web app's version, of no use to you.
+To watch a poll change, instead of reading it again and again, open a WebSocket to `wss://finn-tid.apphub.casa/api/events/<id>/live` (no token in the URL). Send `{"token": "<token>"}` (or `{"token": null}`) as the first message. You get `{"type": "view", "view": View, "app": string}` straight away and after every change that changes your view, as `GET` would return it for that token (with hidden answers, others' answers don't), and `{"type": "gone"}` if the poll is deleted (the socket then closes). Send `"ping"` now and then (the reply is `"pong"`) so it stays open; send the token again (at most every 2 s) for a fresh view. `app` is the web app's version, of no use to you.
 
 ### Keys and answers
 
