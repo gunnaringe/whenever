@@ -197,6 +197,54 @@ test('permissions', () => {
   assert.ok(M.canAdd(admin, { ...s, closed: true }));
 });
 
+test('settings: missing ones from the stored or default, wrong types ignored', () => {
+  const d = M.DEFAULT_SETTINGS;
+  assert.deepEqual(M.settingsOf(undefined), d);
+  assert.deepEqual(M.settingsOf({ maybe: false }), { ...d, maybe: false });
+  // Stored before the newer settings existed: those read as their defaults.
+  assert.deepEqual(M.settingsOf({ maybe: true, maybeCounts: false, openEdit: true, hidden: false, closed: false }), { ...d, openEdit: true });
+  // A change keeps what the client didn't send (or sent as something else).
+  const stored = { ...d, newNames: false, decide: true };
+  assert.deepEqual(M.settingsOf({ closed: true, decide: 'no' }, stored), { ...stored, closed: true });
+  assert.deepEqual(M.settingsOf({ decide: false }, stored), { ...stored, decide: false });
+  // Hidden answers leave the rest as set (the rules ignore them meanwhile).
+  assert.deepEqual(M.settingsOf({ hidden: true, openEdit: true, claims: true, decide: true }), { ...d, hidden: true, openEdit: true, claims: true, decide: true });
+  assert.equal(event({ ...datesEvent, settings: { newNames: false } }).settings.newNames, false);
+  assert.deepEqual(M.PERMISSIONS.filter((k) => !(k in d)), []);
+});
+
+test('permissions: what everyone but the admin may do', () => {
+  const s = { ...M.DEFAULT_SETTINGS };
+  const admin = { role: 'admin', me: null } as const;
+  const kari = { role: 'participant', me: 'k' } as const;
+  const guest = { role: 'visitor', me: null } as const;
+  const closed = { ...s, closed: true };
+  const hidden = { ...s, hidden: true };
+  // Seeing the others.
+  assert.ok(M.canSee(guest, s) && M.canSee(kari, s) && M.canSee(admin, hidden));
+  assert.ok(!M.canSee(guest, hidden) && !M.canSee(kari, hidden));
+  // A new name.
+  assert.ok(M.canAdd(guest, s) && M.canAdd(kari, s));
+  assert.ok(!M.canAdd(guest, { ...s, newNames: false }) && M.canAdd(admin, { ...s, newNames: false }));
+  // Answering as a listed name: only with the event link, as the settings let.
+  assert.ok(M.canClaim(guest, s));
+  assert.ok(!M.canClaim(kari, s) && !M.canClaim(admin, s));
+  assert.ok(!M.canClaim(guest, { ...s, claims: false }) && !M.canClaim(guest, closed) && !M.canClaim(guest, { ...hidden, claims: true }));
+  // Open editing needs the others' answers.
+  assert.ok(M.canEdit(guest, { ...s, openEdit: true }, 'k') && !M.canEdit(guest, { ...hidden, openEdit: true }, 'k'));
+  // Names.
+  assert.ok(M.canRename(guest, s) && M.canRename(kari, s));
+  assert.ok(!M.canRename(kari, { ...s, rename: false }) && !M.canRename(guest, { ...s, rename: false }) && M.canRename(admin, { ...s, rename: false }));
+  // Picking the date.
+  assert.ok(!M.canDecide(guest, s) && !M.canDecide(kari, s) && M.canDecide(admin, s));
+  assert.ok(M.canDecide(guest, { ...s, decide: true }) && M.canDecide(kari, { ...s, decide: true }));
+  assert.ok(!M.canDecide(guest, { ...closed, decide: true }) && !M.canDecide(kari, { ...hidden, decide: true }) && M.canDecide(admin, closed));
+  // The event's name, place and description.
+  assert.ok(!M.canChangeDetails(guest, s) && M.canChangeDetails(admin, s));
+  assert.ok(M.canChangeDetails(guest, { ...s, details: true }) && M.canChangeDetails(kari, { ...hidden, details: true }));
+  assert.ok(!M.canChangeDetails(guest, { ...closed, details: true }) && M.canChangeDetails(admin, closed));
+});
+
 test('ranking: most yes first and maybe breaks ties, unless maybe counts', () => {
   const options = ['2026-11-06', '2026-11-07', '2026-11-13', '2026-11-14'];
   const people: Answered[] = [

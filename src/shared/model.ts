@@ -16,9 +16,23 @@ export interface Settings {
   maybe: boolean;
   // Rank by yes + maybe. Off (the default): rank by yes, maybe breaks ties.
   maybeCounts: boolean;
+  // The rest is what everyone but the organisers may do (see Permissions).
+  // Change and delete everyone's answers.
   openEdit: boolean;
+  // Only the organisers see the answers, the names and how many.
   hidden: boolean;
+  // Only the organisers may change anything.
   closed: boolean;
+  // Answer under a name of one's own (else only the listed names answer).
+  newNames: boolean;
+  // Answer as a listed name with the event link (a claim).
+  claims: boolean;
+  // Change the name on an entry.
+  rename: boolean;
+  // Pick and unpick the final date or time.
+  decide: boolean;
+  // Change the event's name, location and description.
+  details: boolean;
 }
 // The times of day an event offers: slots of `slot` minutes from dayStart
 // to dayEnd (minutes after midnight).
@@ -160,7 +174,22 @@ export const MODES: readonly Mode[] = ['dates', 'times'];
 export const SLOTS: readonly number[] = [15, 30, 60];
 export const YES = 1;
 export const MAYBE = 2;
-export const DEFAULT_SETTINGS: Readonly<Settings> = { maybe: true, maybeCounts: false, openEdit: false, hidden: false, closed: false };
+// Events stored before a setting existed read it from here (settingsOf), so
+// the new ones default to what everyone could do before them.
+export const DEFAULT_SETTINGS: Readonly<Settings> = {
+  maybe: true,
+  maybeCounts: false,
+  openEdit: false,
+  hidden: false,
+  closed: false,
+  newNames: true,
+  claims: true,
+  rename: true,
+  decide: false,
+  details: false,
+};
+// The settings the event form shows under «Deltakerne kan», in order.
+export const PERMISSIONS = ['hidden', 'newNames', 'claims', 'rename', 'openEdit', 'decide', 'details'] as const satisfies readonly (keyof Settings)[];
 
 // Participant ids and link tokens (a 16-hex selector, then a 22-character
 // random secret; see src/worker/link.ts).
@@ -474,12 +503,7 @@ export function sanitizeEvent(input: unknown): { ok: true; event: PollEvent } | 
   const days = diffDays(start, end) + 1;
   if (days > (mode === 'times' ? LIMITS.daysTimes : LIMITS.daysDates)) return fail('rangeLong');
 
-  const s = record(o.settings);
-  const settings: Settings = { ...DEFAULT_SETTINGS };
-  for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
-    const v = s[k];
-    if (typeof v === 'boolean') settings[k] = v;
-  }
+  const settings = settingsOf(o.settings);
 
   const base = {
     v: 1 as const,
@@ -574,16 +598,54 @@ export function sanitizeEntry(input: unknown, ev: Pick<PollEvent, 'options'>): {
   return { ok: true, entry };
 }
 
-// --- Permissions (the Durable Object enforces the same rules) --------------------------
-
-export function canAdd(who: Pick<Who, 'role'>, settings: Settings): boolean {
-  return who.role === 'admin' || !settings.closed;
+// Settings as stored or sent: every one there, a missing or odd one from
+// `base` (the stored ones, on a change) or else DEFAULT_SETTINGS. What needs
+// the others' answers stays as set while they are hidden: the can*
+// functions ignore it then, and un-hiding brings it back.
+export function settingsOf(input: unknown, base: Settings = DEFAULT_SETTINGS): Settings {
+  const s = record(input);
+  const out: Settings = { ...DEFAULT_SETTINGS };
+  for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
+    const v = typeof s[k] === 'boolean' ? s[k] : base[k];
+    if (typeof v === 'boolean') out[k] = v;
+  }
+  return out;
 }
-export function canEdit(who: Pick<Who, 'role' | 'me'>, settings: Settings, pid: string | null): boolean {
+
+// --- Permissions (the Durable Object enforces the same rules) --------------------------
+//
+// The admin may do everything. Everyone else (with the event link or a
+// personal one: the event link gets a personal link by answering, so they
+// are one) may do what the settings say, nothing once the event is closed,
+// and nothing that needs the others' answers while those are hidden.
+
+type Asker = Pick<Who, 'role' | 'me'>;
+
+// The others' answers, names and how many have answered.
+export const canSee = (who: Pick<Who, 'role'>, s: Settings): boolean => who.role === 'admin' || !s.hidden;
+// A new entry under a name of one's own.
+export function canAdd(who: Pick<Who, 'role'>, s: Settings): boolean {
+  return who.role === 'admin' || (!s.closed && s.newNames);
+}
+// Answering as a listed name with the event link (see poll.ts).
+export function canClaim(who: Pick<Who, 'role'>, s: Settings): boolean {
+  return who.role === 'visitor' && !s.closed && !s.hidden && s.claims;
+}
+export function canEdit(who: Asker, s: Settings, pid: string | null): boolean {
   if (who.role === 'admin') return true;
-  if (settings.closed) return false;
+  if (s.closed) return false;
   if (who.me && who.me === pid) return true;
-  return settings.openEdit && !settings.hidden;
+  return s.openEdit && !s.hidden;
+}
+// The name on an entry one may change or claim.
+export const canRename = (who: Pick<Who, 'role'>, s: Settings): boolean => who.role === 'admin' || s.rename;
+// Picking the final date or time, and undoing it.
+export function canDecide(who: Pick<Who, 'role'>, s: Settings): boolean {
+  return who.role === 'admin' || (s.decide && !s.closed && !s.hidden);
+}
+// The event's name, location and description.
+export function canChangeDetails(who: Pick<Who, 'role'>, s: Settings): boolean {
+  return who.role === 'admin' || (s.details && !s.closed);
 }
 
 // --- Results -----------------------------------------------------------------------------

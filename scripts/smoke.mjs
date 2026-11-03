@@ -1057,6 +1057,188 @@ await hc.close();
   await Promise.all([ad.close(), kp.close(), op.close(), mp.close()]);
 }
 
+// --- Q) What participants may do: the settings under «Deltakerne kan» -----------------------
+{
+  const ad = await page({ refused: true });
+  await ad.goto(`${BASE}/`);
+  const days = [D(0), D(1), D(2)];
+  const mk = (name, settings) =>
+    ad.evaluate(
+      async ([days, name, settings]) => (await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: { name, mode: 'dates', start: days[0], end: days[2], options: days, settings } }) })).json(),
+      [days, name, settings],
+    );
+  const call = (ev, method, body, path = '', token = ev.token) =>
+    ad.evaluate(
+      async ([id, token, method, body, path]) => {
+        const r = await fetch(`/api/events/${id}${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+        return { status: r.status, ...(await r.json()) };
+      },
+      [ev.id, token, method, body, path],
+    );
+  const toastText = async (p) => {
+    await p.waitForSelector('#toast:not([hidden])', { timeout: 5000 });
+    const s = await p.locator('#toast').textContent();
+    await p.evaluate(() => (document.querySelector('#toast').hidden = true));
+    return s;
+  };
+
+  // The settings card: «Deltakerne kan», what hangs on «se svarene», 360 px in every language.
+  await ad.setViewportSize({ width: 360, height: 760 });
+  await ad.goto(`${BASE}/new`);
+  await ad.waitForSelector('.perms');
+  const boxes = () => ad.evaluate(() => Object.fromEntries([...document.querySelectorAll('.perms input')].map((e) => [e.name.slice(2), `${e.checked ? 'on' : 'off'}${e.disabled ? '-' : ''}`])));
+  check(JSON.stringify(await boxes()) === JSON.stringify({ hidden: 'on', newNames: 'on', claims: 'on', rename: 'on', openEdit: 'off', decide: 'off', details: 'off' }) && (await ad.locator('.perms legend').textContent()) === 'Deltakerne kan', 'the form says what participants can do, ticked as before the settings existed');
+  await ad.check('.perms [name="s-openEdit"]');
+  await ad.uncheck('.perms [name="s-hidden"]');
+  const greyed = await boxes();
+  await ad.check('.perms [name="s-hidden"]');
+  const back = await boxes();
+  check(greyed.openEdit === 'off-' && greyed.claims === 'off-' && greyed.decide === 'off-' && greyed.newNames === 'on' && back.openEdit === 'on' && back.claims === 'on', 'without «se svarene», what needs the others’ answers is greyed out, and comes back as it was');
+  await ad.locator('section.card:has(.perms)').screenshot({ path: `${SHOTS}/70-perms-settings.png` });
+  const tight = [];
+  for (const lang of ['nb-NO', 'nn-NO', 'sv-SE', 'da-DK', 'is-IS', 'en-GB']) {
+    const lp = await page({ lang });
+    await lp.setViewportSize({ width: 360, height: 760 });
+    await lp.goto(`${BASE}/new`);
+    await lp.waitForSelector('.perms');
+    const ok = await lp.evaluate(() => [...document.querySelectorAll('.perms .check')].every((c) => c.scrollWidth <= c.clientWidth) && document.documentElement.scrollWidth <= 360);
+    if (!ok) tight.push(lang);
+    await lp.close();
+  }
+  check(tight.length === 0, `«Deltakerne kan» fits 360 px in all six languages${tight.length ? ` (not ${tight.join(', ')})` : ''}`);
+  await ad.setViewportSize({ width: 390, height: 844 });
+
+  // Defaults, and a PUT from an app or API client that doesn't know the new settings.
+  const plain = await mk('Vanlig', { maybe: true });
+  const ps = plain.view.event.settings;
+  check(ps.newNames && ps.claims && ps.rename && !ps.decide && !ps.details, 'a poll made without them gets the defaults');
+  const ev0 = (await mk('Gammel klient', { newNames: false, decide: true, details: true }));
+  const { newNames, claims, rename, decide, details, ...old } = ev0.view.event.settings;
+  const put = await call(ev0, 'PUT', { event: { ...ev0.view.event, name: 'Gammel klient 2', settings: { ...old } } });
+  check(put.status === 200 && !put.view.event.settings.newNames && put.view.event.settings.decide && put.view.event.settings.details, 'the admin’s PUT without the new settings keeps them');
+  const hid = await call(ev0, 'PUT', { event: { ...put.view.event, settings: { ...put.view.event.settings, hidden: true } } });
+  check(hid.view.event.settings.hidden && (await call(ev0, 'POST', { decided: days[0] }, '/decide', null)).status === 403, 'with hidden answers, nobody else picks (the setting stays for later)');
+  const unhid = await call(ev0, 'PUT', { event: { ...hid.view.event, settings: { ...hid.view.event.settings, hidden: false } } });
+  check(unhid.view.event.settings.decide && (await call(ev0, 'POST', { decided: days[0] }, '/decide', null)).status === 200, 'and un-hiding brings it back');
+
+  // Only the listed names answer (newNames off).
+  const lo = await mk('Bare lista', { newNames: false });
+  await call(lo, 'POST', { names: ['Kari', 'Per'] }, '/invite');
+  const loV = (await call(lo, 'GET')).view;
+  const per = loV.waiting.find((w) => w.name === 'Per').id;
+  check((await call(lo, 'POST', { name: 'Ola', comment: '', answers: {} }, '/people', null)).error === 'listOnly', 'a new name gets 403 listOnly');
+  const vp = await page({ refused: true });
+  await vp.goto(`${BASE}/e/${lo.id}`);
+  await vp.waitForSelector('.role.cta');
+  check((await vp.locator('.head .meta').textContent()).includes('Bare navnene på listen kan svare') && (await vp.locator('.role.cta').textContent()).includes('Bare navnene på listen kan svare.'), 'the page says only the names on the list can answer');
+  await vp.click('.role [data-act="answer"]');
+  await vp.waitForSelector('#answer-form .claim');
+  check((await vp.locator('.claim legend').textContent()) === 'Hvem er du?', 'the form asks «Hvem er du?»');
+  await vp.locator('section.card:has(#answer-form)').screenshot({ path: `${SHOTS}/71-list-only.png` });
+  await vp.fill('#answer-form [name=name]', 'Ola');
+  await day(vp, D(0)).click();
+  await vp.click('[data-act="save-answer"]');
+  check((await toastText(vp)) === 'Bare navnene på listen kan svare. Velg ditt.', 'a name not on the list isn’t saved');
+  await vp.fill('#answer-form [name=name]', '');
+  await vp.locator('.claim .chip', { hasText: 'Per' }).click();
+  await vp.click('[data-act="save-answer"]');
+  await vp.waitForURL(new RegExp(`/e/${lo.id}/${per}`));
+  check(true, 'picking Per answers as Per');
+  const lo2 = await mk('Bare lenker', { newNames: false, claims: false });
+  await call(lo2, 'POST', { names: ['Kari'] }, '/invite');
+  const kari2 = (await call(lo2, 'GET')).view.waiting[0].id;
+  const vq = await page({ refused: true });
+  await vq.goto(`${BASE}/e/${lo2.id}`);
+  await vq.waitForSelector('.role.cta');
+  check((await vq.locator('.role [data-act="answer"]').count()) === 0 && (await vq.locator('.role.cta').textContent()).includes('med den personlige lenken de har fått fra arrangørene') && (await vq.locator('.wait-names .tap').count()) === 0, 'without claims too, only personal links answer: no button, no names to tap');
+  check((await call(lo2, 'POST', { name: 'Kari', comment: '', answers: {}, claim: kari2 }, '/people', null)).status === 403, 'and the API refuses a claim');
+
+  // No claims: listed names answer with their personal link; visitors see no drafts.
+  const nc = await mk('Uten trykk', { claims: false });
+  await call(nc, 'POST', { names: ['Kari'] }, '/invite');
+  const ncK = (await call(nc, 'GET')).view.waiting[0].id;
+  await call(nc, 'PUT', { name: 'Kari', comment: 'Usikker', answers: { [days[0]]: 1 }, waiting: true, draft: true }, `/people/${ncK}`);
+  await vq.goto(`${BASE}/e/${nc.id}`);
+  await vq.waitForSelector('.wait-names');
+  const ncV = (await call(nc, 'GET', undefined, '', null)).view;
+  check((await vq.locator('.wait-names .tap').count()) === 0 && !ncV.waiting[0].answers && !('comment' in ncV.waiting[0]), 'without claims: names aren’t tappable, and visitors get no drafts');
+  await vq.click('.role [data-act="answer"]');
+  await vq.waitForSelector('#answer-form');
+  check((await vq.locator('.claim').count()) === 0, 'and the form has no «Er du en av disse?»');
+
+  // Names stay (rename off).
+  const rn = await mk('Faste navn', { rename: false });
+  await call(rn, 'POST', { names: ['Kari', 'Per'] }, '/invite');
+  const rnW = (await call(rn, 'GET')).view.waiting;
+  const rnK = rnW.find((w) => w.name === 'Kari').id;
+  const rnP = rnW.find((w) => w.name === 'Per').id;
+  check((await call(rn, 'POST', { name: 'Karianne', comment: '', answers: {}, claim: rnP }, '/people', null)).error === 'rename', 'a claim under another name gets 403 rename');
+  const rp = await page({ refused: true });
+  await rp.goto(`${BASE}/e/${rn.id}`);
+  await rp.locator('.wait-names .pn.tap', { hasText: 'Kari' }).click();
+  await rp.waitForSelector('#answer-form');
+  check((await rp.locator('#answer-form [name=name]').getAttribute('readonly')) !== null && (await rp.locator('[data-field="name"] .hint').textContent()) === 'Navnet kan ikke endres i denne avstemningen.', 'tapping Kari: the name can’t be changed');
+  await rp.locator('.claim .chip', { hasText: 'Kari' }).click();
+  check((await rp.locator('#answer-form [name=name]').getAttribute('readonly')) === null, 'unpicked, a new name can be typed');
+  await rp.locator('.claim .chip', { hasText: 'Kari' }).click();
+  await day(rp, D(1)).click();
+  await rp.click('[data-act="save-answer"]');
+  await rp.waitForURL(new RegExp(`/e/${rn.id}/${rnK}`));
+  const rkTok = rp.url().split('/').pop();
+  check((await call(rn, 'PUT', { name: 'Kari N', comment: '', email: '', answers: {} }, `/people/${rnK}`, rkTok)).error === 'rename', 'Kari can’t rename herself (403 rename)');
+  const same = await call(rn, 'PUT', { name: ' kari ', comment: 'Ok', email: '', answers: {} }, `/people/${rnK}`, rkTok);
+  check(same.status === 200 && same.view.people.find((p) => p.id === rnK).name === 'Kari', 'the same name in other case and spaces is fine, and stays as listed');
+  await rp.click('.role [data-act="answer"]');
+  await rp.waitForSelector('#answer-form');
+  check((await rp.locator('#answer-form [name=name]').getAttribute('readonly')) !== null, 'her own form shows the name read-only');
+  check((await call(rn, 'PUT', { name: 'Kari Nordmann', comment: '', answers: {} }, `/people/${rnK}`)).status === 200, 'the admin still can');
+  check((await call(rn, 'POST', { name: 'Ola', comment: '', answers: {} }, '/people', null)).status === 200, 'and new names still answer under their own name');
+
+  // Picking the final date (decide on): anyone, and it stays open.
+  const dc = await mk('Alle velger', { decide: true });
+  await call(dc, 'POST', { name: 'Ola', comment: '', answers: { [days[1]]: 1 } }, '/people', null);
+  const dp = await page({ refused: true });
+  await dp.goto(`${BASE}/e/${dc.id}`);
+  await dp.waitForSelector('.best-item');
+  check((await dp.locator('.head .meta').textContent()).includes('Alle kan velge hva det blir'), 'the page says everyone can pick');
+  await dp.locator('.best-item').first().click();
+  await dp.click('.detail [data-act="decide"]');
+  check((await dp.locator('#dlg p').first().textContent()).endsWith('Alle som åpner avstemningen ser valget.'), 'a participant’s pick doesn’t say it closes anything');
+  await dp.click('#dlg button[value="yes"]');
+  await dp.waitForSelector('.decided [data-act="undecide"]');
+  const dv = (await call(dc, 'GET')).view;
+  check(dv.event.decided === days[1] && !dv.event.settings.closed && (await dp.locator('.role [data-act="answer"]').count()) === 1, 'a visitor picks the date, and the poll stays open');
+  check((await call(dc, 'POST', { decided: 'x' }, '/decide', null)).error === 'decided', 'something not an option gets 400 decided');
+  check((await call(dc, 'POST', { decide: days[0] }, '/decide', null)).error === 'decided' && (await call(dc, 'GET')).view.event.decided === days[1], 'a body without «decided» too, and the pick stays');
+  check((await call(dc, 'POST', { decided: null }, '/decide', null)).view.event.decided === undefined, 'and anyone can unpick it');
+  check((await call(plain, 'POST', { decided: days[0] }, '/decide', null)).status === 403, 'without decide, a visitor can’t pick');
+  await call(dc, 'PUT', { event: { ...dv.event, settings: { ...dv.event.settings, closed: true } } });
+  check((await call(dc, 'POST', { decided: days[0] }, '/decide', null)).error === 'closed', 'and nobody but the admin once it is closed');
+
+  // Changing the poll's name, place and description (details on).
+  const dt = await mk('Hyttetur', { details: true });
+  const tp = await page({ refused: true });
+  await tp.goto(`${BASE}/e/${dt.id}`);
+  await tp.click('.head [data-act="edit-details"]');
+  await tp.waitForSelector('#dlg[open] #details-form');
+  await tp.fill('#details-form [name=name]', 'Hyttetur i mars');
+  await tp.fill('#details-form [name=location]', 'Hytta på Geilo');
+  await tp.locator('#dlg').screenshot({ path: `${SHOTS}/72-edit-details.png` });
+  await tp.click('#dlg button[value="save"]');
+  await tp.waitForFunction(() => document.querySelector('.head h1')?.textContent === 'Hyttetur i mars');
+  check((await tp.locator('.head .meta').textContent()).includes('Hytta på Geilo'), 'a visitor changes the name and place');
+  await tp.locator('.head').screenshot({ path: `${SHOTS}/73-head-details.png` });
+  const dt2 = (await call(dt, 'PUT', { name: 'X', description: '', location: '', settings: { closed: true }, options: [days[0]] }, '/details', null)).view;
+  check(dt2.event.name === 'X' && !dt2.event.settings.closed && dt2.event.options.length === 3, 'and nothing else, whatever is sent');
+  check((await call(dt, 'PUT', { name: ' ', description: '', location: '' }, '/details', null)).error === 'name', 'a poll needs a name');
+  check((await call(plain, 'PUT', { name: 'Y', description: '', location: '' }, '/details', null)).status === 403, 'without details, a visitor can’t');
+  await ad.goto(`${BASE}/e/${dt.id}/${dt.token}`);
+  await ad.waitForSelector('.head h1');
+  check((await ad.locator('.head [data-act="edit-details"]').count()) === 0, 'the admin changes it in the event form instead');
+  errors.splice(0); // the 4xx above are on purpose
+  await Promise.all([ad.close(), vp.close(), vq.close(), rp.close(), dp.close(), tp.close()]);
+}
+
 // --- R) Ties beyond the first three, and the footer -----------------------------------------
 const tie = await page();
 await tie.goto(`${BASE}/`);
