@@ -1802,6 +1802,13 @@ check(true, 'auto follows the device switching to dark');
   await nojs.close();
   const img = await fetch(`${BASE}/og-nb.png`);
   check(img.ok && img.headers.get('content-type') === 'image/png' && (await img.arrayBuffer()).byteLength < 300_000, 'the card image is a small PNG');
+  // The site's icon as pictures, for those that can't use the SVG; they look
+  // at the root without reading the page, so these must not be the app.
+  const files = await Promise.all(['/favicon.ico', '/apple-touch-icon.png', '/robots.txt'].map((f) => fetch(`${BASE}${f}`)));
+  const types = files.map((r) => (r.ok ? r.headers.get('content-type') : String(r.status)));
+  check(types[0] === 'image/vnd.microsoft.icon' && types[1] === 'image/png' && types[2].startsWith('text/plain'), `the icon is at /favicon.ico and /apple-touch-icon.png, and robots.txt is text (${types.join(', ')})`);
+  const icons = await p.evaluate((h) => [...new DOMParser().parseFromString(h, 'text/html').querySelectorAll('link[rel~="icon"], link[rel="apple-touch-icon"]')].map((l) => l.getAttribute('href')), pub.html);
+  check(['/favicon.ico', '/icons/icon.svg', '/apple-touch-icon.png'].every((h) => icons.includes(h)), 'and the page links all three icons');
   await p.goto(`${BASE}/e/${ev.id}`);
   await p.waitForSelector('.role');
   check((await p.title()) === `${name} · Finn tid`, 'and the app still starts on the page');

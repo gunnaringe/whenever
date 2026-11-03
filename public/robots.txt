@@ -1,0 +1,3 @@
+# Everything may be read, also by the apps that show link previews.
+User-agent: *
+Allow: /
