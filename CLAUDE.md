@@ -175,8 +175,9 @@ transforming (enums, namespaces, parameter properties) is off
   names (who hasn't answered tells who has); others get only the counts and
   their own row. Someone answering with the event link picks their name
   («Er du en av disse?», typing it picks it too): `claim` in the POST fills
-  that row and gives it a new secret, so a link sent to them before stops
-  working and the event link never hands out another's link; 409 `taken`
+  that row and returns its link as it is (the same one the organisers can
+  send, which keeps working). The row's email is replaced by the claim's (or
+  none), so the event link never shows anyone another's email; 409 `taken`
   if it was answered meanwhile. Not with hidden answers, not for a
   participant or the admin (the admin answers for a name by editing its
   row, with `waiting: true`, so 409 `answered` if the person answered
@@ -188,14 +189,14 @@ transforming (enums, namespaces, parameter properties) is off
 - **Drafts («Vis som besvart»):** the answer form has that checkbox above
   Lagre, ticked whenever the form opens. Unticked, Lagre sends `draft: true`:
   the answers are kept with `replied = 0`, so the entry is (or goes back)
-  under «Har ikke svart ennå» and nothing counts it. No third state: to
-  everyone else a draft is just a waiting name; the view sends a waiting
-  entry's answers and comment only to those who may change it (`canEdit`:
-  its person, the admin, everyone with openEdit), so the form opens with
-  them. A waiting name with anything saved (answers, comment or email) is
-  `draft: true` for everyone and can't be claimed (409 `taken`, `saved()` in
-  poll.ts): a claim would rotate its link and overwrite the draft. So it isn't
-  tappable and isn't in the name box; organisers use the row's pencil.
+  under «Har ikke svart ennå» and nothing counts it. No third state: an
+  entry is an entry, and a draft shows only as a waiting name. The view
+  sends a waiting entry's answers and comment to whoever may change it
+  (`canEdit`: its person, the admin, everyone with openEdit) or answer as
+  it (a claim: any visitor, unless hidden or closed), so the form opens
+  with them: tapping a name, or picking it in the name box while the form
+  is empty, puts its draft in (`setClaim`, `loaded`; picking another takes
+  it out again if unchanged), so nobody saves over a draft unseen.
   Taking back an answer is the same: untick and save. Only the admin,
   or its own person, deletes a waiting entry (the list is the organisers').
   With openEdit everyone gets the waiting names as rows with «Svar for»;

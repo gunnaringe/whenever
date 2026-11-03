@@ -52,6 +52,9 @@ interface AnswerDraft {
   // whether typing the name picked it (then typing on can unpick it).
   claim: string | null;
   claimTyped: boolean;
+  // The draft of the name picked, put in the form (its id, and the form as
+  // it was then): picking another name takes it out again if unchanged.
+  loaded: { pid: string; was: string } | null;
   // Opened on a listed name still waiting: saving mustn't overwrite the
   // answers if they answer themselves meanwhile (poll.ts).
   waiting: boolean;
@@ -1777,12 +1780,11 @@ function waitingHtml(v: M.View, stored: Stored | null): string {
   // the answers (then "Svar for Kari" for all; the list stays the admin's).
   const rows = admin || (ev.settings.openEdit && !ev.settings.hidden && !ev.settings.closed);
   if (!rows) {
-    // Someone with the event link taps their name to answer as it, unless
-    // something is saved under it (a draft: only its link goes on).
+    // Someone with the event link taps their name to answer as it.
     const tap = v.role === 'visitor' && !ev.settings.hidden && M.canAdd(who, ev.settings);
     const names = list
       .map((w) =>
-        tap && !w.draft
+        tap
           ? `<button type="button" class="pn tap" data-act="edit-entry" data-pid="${w.id}" title="${esc(t('answerAs', { name: w.name }))}">${esc(w.name)}</button>`
           : `<span class="pn${mine(w.id) ? ' mine' : ''}">${esc(w.name)}${you(w.id)}</span>`,
       )
@@ -1882,32 +1884,34 @@ function renderAnswer(v: M.View, sub: string | null): void {
       pid: target?.id ?? null,
       claim: tapped?.id ?? null,
       claimTyped: false,
+      loaded: null,
       // Never answered: someone answering for them mustn't overwrite what
       // they answer meanwhile (a draft of theirs is theirs to see).
       waiting: Boolean(target?.waiting),
       counted: true,
       own,
+      // Tapped: the name's draft, but never its email (poll.ts).
       name: target?.name ?? tapped?.name ?? '',
-      comment: target?.comment ?? '',
+      comment: target?.comment ?? tapped?.comment ?? '',
       email: target?.email ?? '',
-      answers: { ...(target?.answers ?? {}) },
+      answers: { ...(target?.answers ?? tapped?.answers ?? {}) },
       brush: M.YES,
       view: 'cal',
       dirty: false,
     };
+    if (tapped && hasDraft(tapped)) app.answer.loaded = { pid: tapped.id, was: formSnap(app.answer) };
   }
   const a = answer();
-  const fresh = target?.waiting && !hasDraft(target);
+  const fresh = (target ?? tapped)?.waiting && !hasDraft(target ?? tapped);
   const title = target
     ? own
       ? t(fresh ? 'addYourAnswers' : 'editYourAnswers')
       : t(target.waiting ? 'answerFor' : 'editAnswersOf', { name: target.name })
-    : t(own ? 'addYourAnswers' : 'addAnswers');
+    : t(!own ? 'addAnswers' : fresh === false ? 'editYourAnswers' : 'addYourAnswers');
   // A new answer can be one of the listed names still waiting: the admin
   // answers for them, someone with the event link says it's them (not
-  // with hidden answers, see poll.ts). Not a name with a draft: the server
-  // refuses to claim it, and the admin's pencil opens it with the draft.
-  const claimable = target ? [] : v.role === 'admin' || (v.role === 'visitor' && !ev.settings.hidden) ? waitingOf(v).filter((w) => !w.draft) : [];
+  // with hidden answers, see poll.ts).
+  const claimable = target ? [] : v.role === 'admin' || (v.role === 'visitor' && !ev.settings.hidden) ? waitingOf(v) : [];
   document.title = `${title} · ${ev.name}`;
   const hint: Key =
     ev.mode === 'dates'
@@ -2077,6 +2081,12 @@ window.addEventListener('resize', () => {
 // Pick a listed name to answer as (again: unpick), and fill in the name.
 function setClaim(pid: string | null, typed = false): void {
   const a = answer();
+  const before = formSnap(a);
+  // The draft of the name picked before goes out again, unless changed.
+  if (a.loaded && a.loaded.pid !== pid) {
+    if (before === a.loaded.was) Object.assign(a, { answers: {}, comment: '' });
+    a.loaded = null;
+  }
   a.claim = pid;
   a.claimTyped = typed && pid !== null;
   a.dirty = true;
@@ -2086,12 +2096,34 @@ function setClaim(pid: string | null, typed = false): void {
     input.value = w.name;
     a.name = w.name;
   }
+  // A name with a draft: it fills a form with nothing in it yet, so nobody
+  // saves over a draft they haven't seen.
+  if (w && !a.loaded && formSnap(a) === EMPTY_FORM && (Object.keys(w.answers ?? {}).length || w.comment)) {
+    Object.assign(a, { answers: { ...w.answers }, comment: w.comment ?? '' });
+    a.loaded = { pid: w.id, was: formSnap(a) };
+  }
+  if (formSnap(a) !== before) {
+    // The calendar and the comment change: draw the form again, and go on
+    // typing the name where you were.
+    const typing = document.activeElement === input;
+    render();
+    const again = $opt<HTMLInputElement>('#answer-form [name="name"]');
+    if (typing && again) {
+      again.focus();
+      again.setSelectionRange(again.value.length, again.value.length);
+    }
+    return;
+  }
   for (const b of $$('[data-act="claim"]')) {
     b.classList.toggle('on', b.dataset.pid === pid);
     b.setAttribute('aria-pressed', String(b.dataset.pid === pid));
   }
   filterClaims();
 }
+
+// The answers and comment in the form, to compare (key order aside).
+const formSnap = (a: AnswerDraft): string => JSON.stringify([Object.entries(a.answers).sort(), a.comment]);
+const EMPTY_FORM = JSON.stringify([[], '']);
 
 function pickerToolbar(v: M.View): string {
   const ev = v.event;

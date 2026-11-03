@@ -361,7 +361,7 @@ export const is: Record<Key, Text> = {
   'err.options': 'Veldu að minnsta kosti einn mögulegan dag eða tíma.',
   'err.tooMany': 'Of margir mögulegir tímar (mest 2000). Veldu færri daga eða lengri reiti.',
   'err.server': 'Eitthvað fór úrskeiðis. Reyndu aftur.',
-  'err.taken': 'Einhver var að vista svör undir þessu nafni. Veldu annað eða skrifaðu nafnið þitt.',
+  'err.taken': 'Einhver var að svara undir þessu nafni. Veldu annað eða skrifaðu nafnið þitt.',
   'err.answered': 'Viðkomandi var að svara rétt í þessu, svo þau svör halda sér.',
   'err.names': 'Skrifaðu að minnsta kosti eitt nafn.',
   'err.tooManyNames': 'Þetta er of mikið. Viðburður getur haft í mesta lagi 200 nöfn og svör samanlagt.',

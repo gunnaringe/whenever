@@ -81,12 +81,11 @@ export interface Person {
 }
 // Someone who hasn't answered yet: a name the organisers listed, or an
 // entry saved as a draft. Its draft (answers, comment) comes only to those
-// who may change the entry, its email only to its own person. `draft` tells
-// everyone something is saved under the name, so it can't be claimed.
+// who may change the entry or answer as it (poll.ts), its email only to its
+// own person.
 export interface Waiting {
   id: string;
   name: string;
-  draft?: true;
   comment?: string;
   answers?: Answers;
   email?: string;

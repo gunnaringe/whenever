@@ -15,20 +15,19 @@
 // so the results never count a name that is waiting; `waiting` lists the
 // others, but with hidden answers only to the admin (who hasn't answered
 // tells who has). Someone answering with the event link can say which listed
-// name they are (`claim` in add()): that entry gets their answers and a new
-// secret, so a link sent to that person before stops working, and nobody
-// gets another's link from the event link alone. Not when the answers are
-// hidden.
+// name they are (`claim` in add()): that entry gets their answers, and they
+// get its link, the same one the organisers can send (a link sent before
+// keeps working). Not once it is answered, and not when the answers are
+// hidden. Its email never goes with it: the claim's own (or none) replaces
+// it, so nobody sees another's email from the event link alone.
 //
 // Drafts: saving with `draft: true` keeps the answers but leaves (or puts)
 // the entry among those who haven't answered, so nothing counts them. There
-// is no third state: a draft is only what the form shows when it is opened
-// again, so the view sends a waiting entry's answers only to those who may
-// change it (canEdit: its person, the admin, everyone with openEdit).
-// A name with something saved under it (answers, a comment or an email) is
-// marked `draft` for everyone and can't be claimed: that would rotate its
-// link and overwrite what's there. Only its link, or whoever may change it,
-// goes on from there, as with an answered name.
+// is no third state: an entry is an entry, and a draft is only what the form
+// shows when it is opened again. So the view sends a waiting entry's answers
+// to whoever may change it (canEdit: its person, the admin, everyone with
+// openEdit) or answer as it (a claim: anyone with the event link, unless
+// hidden or closed), and never shows them anywhere else.
 // Only the admin, or its own person, removes a waiting entry: the list is the
 // organisers'.
 //
@@ -84,9 +83,6 @@ const deleteAt = (ev: PollEvent) => Math.max(expiresAt(ev), Date.now() + MIN_LIF
 const lookup = (env: Env) => env.LOOKUP.getByName('lookup');
 const visitor = (link: LinkState): Who => ({ role: 'visitor', me: null, link });
 const TAKEN: Failure = { error: 'taken', status: 409 };
-// Something is saved under a waiting name: a draft (see the top).
-const saved = (r: { answers: string; comment: string; email: string }): boolean =>
-  Object.keys(JSON.parse(r.answers) as object).length > 0 || r.comment !== '' || r.email !== '';
 const ANSWERED: Failure = { error: 'answered', status: 409 };
 
 // A live socket's state (serializeAttachment): the link it sent, if it has
@@ -204,16 +200,18 @@ export class Poll extends DurableObject<Env> {
     const hidden = ev.settings.hidden && who.role !== 'admin';
     const people: Person[] = [];
     const waiting: Waiting[] = [];
+    // Someone with the event link may answer as a waiting name (claim).
+    const claims = who.role === 'visitor' && !ev.settings.hidden && canAdd(who, ev.settings);
     let count = 0;
     for (const r of rows) {
       if (r.replied) count += 1;
       if (hidden && r.id !== who.me) continue;
       if (!r.replied) {
         const w: Waiting = { id: r.id, name: r.name };
-        // The draft, for those who may change it (see the top).
-        if (saved(r)) {
-          w.draft = true;
-          if (canEdit(who, ev.settings, r.id)) Object.assign(w, { answers: JSON.parse(r.answers) as Person['answers'], comment: r.comment });
+        // The draft, for those who may change it or answer as it (see the top).
+        if (claims || canEdit(who, ev.settings, r.id)) {
+          const answers = JSON.parse(r.answers) as Person['answers'];
+          if (Object.keys(answers).length || r.comment) Object.assign(w, { answers, comment: r.comment });
         }
         if (r.id === who.me) w.email = r.email;
         waiting.push(w);
@@ -375,22 +373,21 @@ export class Poll extends DurableObject<Env> {
   }
 
   // Someone with the event link answers as a name the organisers listed
-  // (see the top): only a name still waiting with nothing saved under it,
-  // never with hidden answers, and only someone who isn't anyone here yet
-  // (the admin edits the entry).
+  // (see the top): only a name still waiting, never with hidden answers, and
+  // only someone who isn't anyone here yet (the admin edits the entry). They
+  // get its link as it is; its email is replaced, never shown.
   async claim(who: Who, ev: PollEvent, pid: string, entry: Entry, replied: number): Promise<Failure | Added> {
     if (who.role !== 'visitor' || ev.settings.hidden) return FORBIDDEN;
-    const row = this.sql.exec<{ replied: number; answers: string; comment: string; email: string }>(`SELECT replied, answers, comment, email FROM people WHERE id = ?`, pid).toArray()[0];
+    const row = this.sql.exec<{ replied: number; secret: string; email: string }>(`SELECT replied, secret, email FROM people WHERE id = ?`, pid).toArray()[0];
     if (!row) return NO_PERSON;
-    if (row.replied || saved(row)) return TAKEN;
-    const secret = newSecret();
+    if (row.replied) return TAKEN;
     this.sql.exec(
-      `UPDATE people SET name = ?, comment = ?, email = ?, answers = ?, secret = ?, replied = ?, updated = ? WHERE id = ?`,
-      entry.name, entry.comment, entry.email ?? '', JSON.stringify(entry.answers), secret, replied, Date.now(), pid,
+      `UPDATE people SET name = ?, comment = ?, email = ?, answers = ?, replied = ?, updated = ? WHERE id = ?`,
+      entry.name, entry.comment, entry.email ?? '', JSON.stringify(entry.answers), replied, Date.now(), pid,
     );
     this.bump();
-    const out = { pid, token: token(pid, secret), view: this.view({ role: 'participant', me: pid, link: 'ok' }) };
-    if (entry.email) await this.reindex();
+    const out = { pid, token: token(pid, row.secret), view: this.view({ role: 'participant', me: pid, link: 'ok' }) };
+    if (entry.email || row.email) await this.reindex();
     await this.push();
     return out;
   }
