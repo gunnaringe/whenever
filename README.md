@@ -14,7 +14,8 @@ and everyone marks when they can. At
   A new event guesses the country from the browser's time zone.
 - **One link to share.** Participants answer yes / maybe per day or drag
   across a time grid, and get a personal link to change their answers later
-  from any device. The organiser gets an admin link.
+  from any device. The organiser gets an admin link to share with any
+  co-organisers.
 - **No accounts, no cookies.** Each admin or personal link carries a random
   secret stored with the event. Email is optional: with it you can find
   your events on another device, by a code (and a one-tap link) sent to
