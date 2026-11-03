@@ -49,7 +49,9 @@ View {
   link: "none" | "invalid" | "ok"   whether the token you sent worked
   people: [{ id, name, comment, answers, updated, email? }]   those who have answered
   count: number                     how many have answered (also when hidden)
-  waiting?: [{ id, name }]          names the organisers listed that haven't answered yet
+  waiting?: [{ id, name, comment?, answers?, email? }]   not answered yet: names the organisers listed,
+                                    and drafts; a draft's comment and answers if you may change it or
+                                    answer as it (claim)
   waitingCount?: number             how many of those (also when hidden)
   hidden: boolean                   true: people and waiting hold only your own entry
   adminEmails?: string[]            admin only: the organisers' addresses
@@ -59,7 +61,7 @@ View {
 
 `email` is only ever returned on your own entry. `link: "invalid"` means the token is wrong or was replaced: tell the person; the poll is then shown as to a visitor.
 
-Answered and waiting are not the same: an entry in `people` with no answers can make none of the options; a name in `waiting` hasn't answered at all. "6 of 15 have answered" is `count` of `count + waitingCount`. Results count only `people`.
+Answered and waiting are not the same: an entry in `people` with no answers can make none of the options; a name in `waiting` hasn't answered at all, or saved a draft (not sure yet). "6 of 15 have answered" is `count` of `count + waitingCount`. Results count only `people`; never count a draft.
 
 ### Follow a poll live
 
@@ -91,7 +93,9 @@ POST /api/events/<id>/people
 
 With the admin link the entry gets no email; only its person can add one, with the entry's personal link.
 
-If the person is one of the names in `view.waiting` (ask them; never guess from a similar name), add `"claim": "<that id>"`: the answers go on that name instead of a new entry, and the returned token is a new personal link for it (one sent to them before stops working). 409 `taken` means it has been answered meanwhile. Not when `settings.hidden`, and not with a personal or the admin link. With a personal link whose `me` is in `waiting`, PUT that entry instead.
+Add `"draft": true` (here or on PUT) only when the person says they aren't sure yet: the answers are kept but not counted, and the entry stays in `waiting` until saved without it. Saving without `draft` counts the answers, so a PUT on a draft without it answers for real.
+
+If the person is one of the names in `view.waiting` (ask them; never guess from a similar name), add `"claim": "<that id>"`: the answers go on that name instead of a new entry, replacing any draft there (its `answers` and `comment` in `waiting`: show them to the person and start from them). The returned token is that name's personal link, the same one the organisers can send (it keeps working). The name's email is replaced by the one you send, or none. 409 `taken` means it has been answered meanwhile. Not when `settings.hidden` or `settings.closed`, and not with a personal or the admin link. With a personal link whose `me` is in `waiting`, PUT that entry instead.
 
 The returned token is this person's own link, `https://finn-tid.apphub.casa/e/<id>/<token>`. Give it to them: it is the only way to change these answers later (or to find them again without the app). `email` is optional (max 254 characters): with it, the app's /find can mail them a code that brings their polls back. Name: 1 to 60 characters; comment: up to 300 (longer text is cut).
 

@@ -15,10 +15,21 @@
 // so the results never count a name that is waiting; `waiting` lists the
 // others, but with hidden answers only to the admin (who hasn't answered
 // tells who has). Someone answering with the event link can say which listed
-// name they are (`claim` in add()): that entry gets their answers and a new
-// secret, so a link sent to that person before stops working, and nobody
-// gets another's link from the event link alone. Not when the answers are
-// hidden.
+// name they are (`claim` in add()): that entry gets their answers, and they
+// get its link, the same one the organisers can send (a link sent before
+// keeps working). Not once it is answered, and not when the answers are
+// hidden. Its email never goes with it: the claim's own (or none) replaces
+// it, so nobody sees another's email from the event link alone.
+//
+// Drafts: saving with `draft: true` keeps the answers but leaves (or puts)
+// the entry among those who haven't answered, so nothing counts them. There
+// is no third state: an entry is an entry, and a draft is only what the form
+// shows when it is opened again. So the view sends a waiting entry's answers
+// to whoever may change it (canEdit: its person, the admin, everyone with
+// openEdit) or answer as it (a claim: anyone with the event link, unless
+// hidden or closed), and never shows them anywhere else.
+// Only the admin, or its own person, removes a waiting entry: the list is the
+// organisers'.
 //
 // The admin link is no person: whoever has it can do everything, and several
 // organisers may share it. It adds and changes anyone's entry, an
@@ -189,12 +200,21 @@ export class Poll extends DurableObject<Env> {
     const hidden = ev.settings.hidden && who.role !== 'admin';
     const people: Person[] = [];
     const waiting: Waiting[] = [];
+    // Someone with the event link may answer as a waiting name (claim).
+    const claims = who.role === 'visitor' && !ev.settings.hidden && canAdd(who, ev.settings);
     let count = 0;
     for (const r of rows) {
       if (r.replied) count += 1;
       if (hidden && r.id !== who.me) continue;
       if (!r.replied) {
-        waiting.push({ id: r.id, name: r.name });
+        const w: Waiting = { id: r.id, name: r.name };
+        // The draft, for those who may change it or answer as it (see the top).
+        if (claims || canEdit(who, ev.settings, r.id)) {
+          const answers = JSON.parse(r.answers) as Person['answers'];
+          if (Object.keys(answers).length || r.comment) Object.assign(w, { answers, comment: r.comment });
+        }
+        if (r.id === who.me) w.email = r.email;
+        waiting.push(w);
         continue;
       }
       const p: Person = { id: r.id, name: r.name, comment: r.comment, answers: JSON.parse(r.answers), updated: r.updated };
@@ -331,7 +351,8 @@ export class Poll extends DurableObject<Env> {
     const own = who.role !== 'admin';
     const r = sanitizeEntry({ ...o, email: own ? o.email ?? '' : '' }, ev);
     if (!r.ok) return { error: r.error, status: 400 };
-    if (o.claim !== undefined && o.claim !== null) return this.claim(who, ev, String(o.claim), r.entry);
+    const replied = o.draft === true ? 0 : 1;
+    if (o.claim !== undefined && o.claim !== null) return this.claim(who, ev, String(o.claim), r.entry, replied);
     const { n, seq } = this.sql.exec<{ n: number; seq: number }>(`SELECT COUNT(*) AS n, COALESCE(MAX(seq), 0) AS seq FROM people`).one();
     if (n >= LIMITS.people) return { error: 'full', status: 409 };
     let pid = newPid();
@@ -339,8 +360,8 @@ export class Poll extends DurableObject<Env> {
     const secret = newSecret();
     const now = Date.now();
     this.sql.exec(
-      `INSERT INTO people (id, seq, name, comment, email, secret, answers, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      pid, seq + 1, r.entry.name, r.entry.comment, r.entry.email ?? '', secret, JSON.stringify(r.entry.answers), now, now,
+      `INSERT INTO people (id, seq, name, comment, email, secret, answers, created, updated, replied) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      pid, seq + 1, r.entry.name, r.entry.comment, r.entry.email ?? '', secret, JSON.stringify(r.entry.answers), now, now, replied,
     );
     // An admin adding an entry stays admin; anyone else is now that participant.
     const viewer: Who = who.role === 'admin' ? who : { role: 'participant', me: pid, link: 'ok' };
@@ -353,20 +374,20 @@ export class Poll extends DurableObject<Env> {
 
   // Someone with the event link answers as a name the organisers listed
   // (see the top): only a name still waiting, never with hidden answers, and
-  // only someone who isn't anyone here yet (the admin edits the entry).
-  async claim(who: Who, ev: PollEvent, pid: string, entry: Entry): Promise<Failure | Added> {
+  // only someone who isn't anyone here yet (the admin edits the entry). They
+  // get its link as it is; its email is replaced, never shown.
+  async claim(who: Who, ev: PollEvent, pid: string, entry: Entry, replied: number): Promise<Failure | Added> {
     if (who.role !== 'visitor' || ev.settings.hidden) return FORBIDDEN;
-    const row = this.sql.exec<{ replied: number }>(`SELECT replied FROM people WHERE id = ?`, pid).toArray()[0];
+    const row = this.sql.exec<{ replied: number; secret: string; email: string }>(`SELECT replied, secret, email FROM people WHERE id = ?`, pid).toArray()[0];
     if (!row) return NO_PERSON;
     if (row.replied) return TAKEN;
-    const secret = newSecret();
     this.sql.exec(
-      `UPDATE people SET name = ?, comment = ?, email = ?, answers = ?, secret = ?, replied = 1, updated = ? WHERE id = ?`,
-      entry.name, entry.comment, entry.email ?? '', JSON.stringify(entry.answers), secret, Date.now(), pid,
+      `UPDATE people SET name = ?, comment = ?, email = ?, answers = ?, replied = ?, updated = ? WHERE id = ?`,
+      entry.name, entry.comment, entry.email ?? '', JSON.stringify(entry.answers), replied, Date.now(), pid,
     );
     this.bump();
-    const out = { pid, token: token(pid, secret), view: this.view({ role: 'participant', me: pid, link: 'ok' }) };
-    if (entry.email) await this.reindex();
+    const out = { pid, token: token(pid, row.secret), view: this.view({ role: 'participant', me: pid, link: 'ok' }) };
+    if (entry.email || row.email) await this.reindex();
     await this.push();
     return out;
   }
@@ -415,8 +436,12 @@ export class Poll extends DurableObject<Env> {
     if (o.waiting === true && row.replied && !own) return ANSWERED;
     const r = sanitizeEntry({ ...o, email: own ? o.email ?? '' : undefined }, ev);
     if (!r.ok) return { error: r.error, status: 400 };
-    // Saving answers, even with nothing marked (see the top).
-    this.sql.exec(`UPDATE people SET name = ?, comment = ?, answers = ?, replied = 1, updated = ? WHERE id = ?`, r.entry.name, r.entry.comment, JSON.stringify(r.entry.answers), Date.now(), pid);
+    // Saving answers counts them, even with nothing marked; a draft keeps
+    // them without (see the top).
+    this.sql.exec(
+      `UPDATE people SET name = ?, comment = ?, answers = ?, replied = ?, updated = ? WHERE id = ?`,
+      r.entry.name, r.entry.comment, JSON.stringify(r.entry.answers), o.draft === true ? 0 : 1, Date.now(), pid,
+    );
     if (own) this.sql.exec(`UPDATE people SET email = ? WHERE id = ?`, r.entry.email ?? '', pid);
     this.bump();
     const out = { view: this.view(who) };
@@ -429,9 +454,11 @@ export class Poll extends DurableObject<Env> {
     if (!this.exists()) return NOT_FOUND;
     const who = this.who(cred);
     const ev = this.event();
-    const row = this.sql.exec<{ email: string }>(`SELECT email FROM people WHERE id = ?`, pid).toArray()[0];
+    const row = this.sql.exec<{ email: string; replied: number }>(`SELECT email, replied FROM people WHERE id = ?`, pid).toArray()[0];
     if (!row) return NO_PERSON;
     if (!canEdit(who, ev.settings, pid)) return FORBIDDEN;
+    // Waiting names are the organisers' list (see the top).
+    if (!row.replied && who.role !== 'admin' && who.me !== pid) return FORBIDDEN;
     this.sql.exec(`DELETE FROM people WHERE id = ?`, pid);
     // A participant who deleted their own entry has no link left; the admin stays admin.
     const viewer = who.role === 'admin' ? this.admin() : who.me === pid ? visitor('none') : who;

@@ -175,8 +175,9 @@ transforming (enums, namespaces, parameter properties) is off
   names (who hasn't answered tells who has); others get only the counts and
   their own row. Someone answering with the event link picks their name
   («Er du en av disse?», typing it picks it too): `claim` in the POST fills
-  that row and gives it a new secret, so a link sent to them before stops
-  working and the event link never hands out another's link; 409 `taken`
+  that row and returns its link as it is (the same one the organisers can
+  send, which keeps working). The row's email is replaced by the claim's (or
+  none), so the event link never shows anyone another's email; 409 `taken`
   if it was answered meanwhile. Not with hidden answers, not for a
   participant or the admin (the admin answers for a name by editing its
   row, with `waiting: true`, so 409 `answered` if the person answered
@@ -185,6 +186,26 @@ transforming (enums, namespaces, parameter properties) is off
   object can still run the code from before right after a deploy. «Kopier
   påminnelse» copies the waiting names with the event link for a group
   chat.
+- **Drafts («Vis som besvart»):** the answer form has that checkbox above
+  Lagre, ticked whenever the form opens. Unticked, Lagre sends `draft: true`:
+  the answers are kept with `replied = 0`, so the entry is (or goes back)
+  under «Har ikke svart ennå» and nothing counts it. No third state: an
+  entry is an entry, and a draft shows only as a waiting name. The view
+  sends a waiting entry's answers and comment to whoever may change it
+  (`canEdit`: its person, the admin, everyone with openEdit) or answer as
+  it (a claim: any visitor, unless hidden or closed), so the form opens
+  with them: tapping a name, or picking it in the name box while the form
+  is empty, puts its draft in (`setClaim`, `loaded`; picking another takes
+  it out again if unchanged), so nobody saves over a draft unseen.
+  Taking back an answer is the same: untick and save. Only the admin,
+  or its own person, deletes a waiting entry (the list is the organisers').
+  With openEdit everyone gets the waiting names as rows with «Svar for»;
+  without it, someone with the event link taps a name in the Svar card to
+  answer as it (`#answer=<pid>` on a name they can't change is a claim).
+  The form's name box (`claimHtml`) sits under the name field: at most three
+  rows (`.claim-box`, cut-off names `inert`, «Vis alle»), filtered as you
+  type (`filterClaims`: the start of any word) at a fixed height
+  (`lockClaims`). The Svar card shows the first `WAIT_SHOWN` waiting rows.
 - **Email codes (`/find`):** an address entered on events gets a 6-digit
   code by email, and the code adds those events' links to the device. The
   mail (multipart text + HTML, inline styles, no remote images) also has a
@@ -410,7 +431,11 @@ transforming (enums, namespaces, parameter properties) is off
   end-to-end check (dates and times events, chips, drag and touch painting,
   undo and redo in the picker, several participants, permissions, link reset, picking the date and the
   `.ics` download, ties and the ranking setting, listed names (adding,
-  answering as one, answering for one, hidden answers), holiday calendars, the
+  answering as one, answering for one, hidden answers), drafts (who sees
+  them, counting, taking an answer back), tapping a waiting name, answering
+  for others with openEdit, the name box with 40 names (cut, filtering
+  without moving anything), the long waiting list, the «Vis som besvart»
+  row at 360 px in all six languages, holiday calendars, the
   events menu, finding events by an email code, the language menu and
   nn/is dates, themes against a dark and a light device, link-preview tags,
   the text for AI assistants and without JavaScript, the `llms.txt` flow,

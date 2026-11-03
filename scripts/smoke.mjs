@@ -30,6 +30,9 @@ async function page({ mobile = true, lang = 'nb-NO', refused = false } = {}) {
     locale: lang,
     timezoneId: 'Europe/Oslo',
     hasTouch: mobile,
+    // Its own bucket of the API's rate limit (sections set their own where
+    // it matters), so the run never fills a shared one.
+    extraHTTPHeaders: { 'x-dev-ip': `10.200.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` },
   });
   const p = await ctx.newPage();
   p.on('console', (m) => m.type() === 'error' && !(refused && m.text().startsWith('Failed to load resource')) && errors.push(m.text()));
@@ -754,8 +757,11 @@ await hc.close();
   await vis.locator('#answer-form [name=name]').pressSequentially('v');
   check((await vis.locator('.claim .chip[aria-pressed="true"]').count()) === 0, 'and typing on unpicks it');
   await vis.fill('#answer-form [name=name]', 'ola');
+  check((await vis.locator('.claim .chip:visible').allTextContents()).join(',') === 'Ola', 'the names are filtered by what is typed');
+  await vis.fill('#answer-form [name=name]', '');
   await vis.locator('.claim .chip', { hasText: 'Siri' }).click();
   check((await vis.inputValue('#answer-form [name=name]')) === 'Siri' && (await vis.locator('.claim .chip[aria-pressed="true"]').textContent()) === 'Siri', 'tapping another name picks that one and fills it in');
+  await vis.fill('#answer-form [name=name]', '');
   await vis.locator('.claim .chip', { hasText: 'Ola' }).click();
   await day(vis, D(0)).click();
   await shot(vis, '62-names-claim', false);
@@ -766,7 +772,7 @@ await hc.close();
   check((await vis.locator('.best-item .bn').first().textContent()).startsWith('1 av 1 kan'), 'and the results count only those who answered (1 av 1 kan, not 1 av 4)');
   a = (await api('GET')).view;
   check(a.people.length === 1 && a.people[0].id === id('Ola') && a.count === 1 && a.waitingCount === 3, 'the answer went on Ola’s entry, not a new one');
-  check((await api('GET', undefined, '', olaOld)).view.link === 'invalid', 'and the link sent to Ola before no longer works');
+  check((await api('GET', undefined, '', olaOld)).view.link === 'ok' && vis.url().split('/').pop() === olaOld, 'and Ola got the link sent to him before, which still works');
   const again = await api('POST', { name: 'Ola', answers: {}, claim: id('Ola') }, '/people', null);
   check(again.status === 409 && again.error === 'taken', 'answering as a name that has answered: 409 taken');
 
@@ -851,6 +857,202 @@ await hc.close();
   const liv = (await api('GET', undefined, '', hid.token, hid.id)).view.waiting[0].id;
   check(hv.waiting.length === 0 && hv.waitingCount === 2 && (await api('POST', { name: 'Liv', answers: {}, claim: liv }, '/people', null, hid.id)).status === 403, 'the API sends no names, and refuses a claim');
   await Promise.all([ad.close(), vis.close(), kari.close()]);
+}
+
+// --- O) Drafts, tapping your name, answering for others, long lists ---------------------------
+{
+  const ad = await page({ refused: true });
+  await ad.context().setExtraHTTPHeaders({ 'x-dev-ip': `10.7.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` });
+  await ad.goto(`${BASE}/`);
+  const days = [D(0), D(1), D(2)];
+  const mk = (name, settings) =>
+    ad.evaluate(
+      async ([days, name, settings]) => (await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: { name, mode: 'dates', start: days[0], end: days[2], options: days, settings } }) })).json(),
+      [days, name, settings],
+    );
+  const call = (ev, method, body, path = '', token = ev.token) =>
+    ad.evaluate(
+      async ([id, token, method, body, path]) => {
+        const r = await fetch(`/api/events/${id}${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+        return { status: r.status, ...(await r.json()) };
+      },
+      [ev.id, token, method, body, path],
+    );
+
+  // Kari taps her name, saves a draft, then answers, then takes it back.
+  const ev = await mk('Sommerfest', { maybe: true });
+  await call(ev, 'POST', { names: ['Kari', 'Ola', 'Per'] }, '/invite');
+  const kp = await page();
+  await kp.goto(`${BASE}/e/${ev.id}`);
+  await kp.waitForSelector('.wait-names .pn.tap');
+  await kp.locator('.wait-names .pn.tap', { hasText: 'Kari' }).click();
+  await kp.waitForSelector('#answer-form');
+  check((await kp.locator('h1').textContent()) === 'Legg til dine svar' && (await kp.inputValue('#answer-form [name=name]')) === 'Kari' && (await kp.locator('.claim .chip[aria-pressed="true"]').textContent()) === 'Kari', 'tapping Kari in the Svar card opens the form as Kari');
+  check(await kp.locator('#answer-form [name=counted]').isChecked(), '«Vis som besvart» is ticked when the form opens');
+  await day(kp, D(0)).click();
+  await kp.locator('#answer-form [name=counted]').uncheck();
+  check((await kp.locator('#draft-note').isVisible()) && (await kp.locator('#draft-note').textContent()).startsWith('Lagres som utkast: du står under «Har ikke svart ennå»'), 'unticked, it says the answers are saved as a draft');
+  await kp.click('[data-act="save-answer"]');
+  await kp.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}/);
+  await kp.waitForSelector('.notice.ok h2');
+  const kariTok = kp.url().split('/').pop();
+  check((await kp.locator('.notice.ok h2').textContent()) === 'Utkastet ditt er lagret, Kari.' && (await kp.locator('.role p').textContent()) === 'Du har et utkast som ikke telles med ennå.', 'saved as a draft: «Utkastet ditt er lagret», and the role card says so');
+  check((await kp.locator('.people h2 .count').textContent()) === '0 av 3' && (await kp.locator('.wait-names .pn').allTextContents()).some((x) => x.startsWith('Kari')) && (await kp.locator('.best-item').count()) === 0, 'a draft isn’t counted: 0 av 3, Kari still waiting, no results');
+  const drafts = async (token) => (await call(ev, 'GET', undefined, '', token)).view.waiting.find((w) => w.name === 'Kari')?.answers;
+  check((await Promise.all([null, kariTok, ev.token].map(drafts))).every((x) => JSON.stringify(x) === JSON.stringify({ [D(0)]: 1 })), 'Kari, the organisers and anyone who may answer as her get her draft');
+  const kariId = (await call(ev, 'GET')).view.waiting.find((w) => w.name === 'Kari').id;
+  await kp.click('.role [data-act="answer"]');
+  await kp.waitForSelector('#answer-form');
+  check((await kp.locator('h1').textContent()) === 'Endre svarene dine' && (await kp.locator('#pick-sum').textContent()) === 'Du kan 1 av 3 dager' && (await kp.locator('#answer-form [name=counted]').isChecked()), 'her form opens with the draft, ticked');
+  await kp.click('[data-act="save-answer"]');
+  await kp.waitForFunction(() => document.querySelector('.people h2 .count')?.textContent === '1 av 3');
+  check((await kp.locator('.best-item .bn').first().textContent()).startsWith('1 av 1 kan'), 'saved ticked: counted, 1 av 3');
+  await kp.click('.role [data-act="answer"]');
+  await kp.waitForSelector('#answer-form');
+  await kp.locator('#answer-form [name=counted]').uncheck();
+  await kp.click('[data-act="save-answer"]');
+  await kp.waitForFunction(() => document.querySelector('.people h2 .count')?.textContent === '0 av 3');
+  check((await kp.locator('#toast').textContent()).startsWith('Utkastet er lagret') && JSON.stringify(await drafts(kariTok)) === JSON.stringify({ [D(0)]: 1 }), 'unticking takes the answer back: not counted, the answers kept');
+  const del = await call(ev, 'DELETE', undefined, `/people/${(await call(ev, 'GET')).view.waiting.find((w) => w.name === 'Ola').id}`, null);
+  check(del.status === 403, 'someone else can’t remove a waiting name');
+
+  // Someone else answers as Kari, who has a draft (and an email), and Per
+  // has a draft the organisers saved: all just waiting names.
+  await call(ev, 'PUT', { name: 'Kari', comment: 'Usikker', email: 'kari@example.com', answers: { [D(0)]: 1 }, draft: true }, `/people/${kariId}`, kariTok);
+  const perId = (await call(ev, 'GET')).view.waiting.find((w) => w.name === 'Per').id;
+  await call(ev, 'PUT', { name: 'Per', comment: 'Kanskje', answers: { [D(1)]: 2 }, waiting: true, draft: true }, `/people/${perId}`);
+  const kariFor = async (tok) => (await call(ev, 'GET', undefined, '', tok)).view.waiting.find((w) => w.name === 'Kari');
+  check((await kariFor(null)).comment === 'Usikker' && (await kariFor(null)).email === undefined && (await kariFor(kariTok)).email === 'kari@example.com', 'a visitor gets Kari’s draft, but never her email');
+  const e0 = (await call(ev, 'GET')).view.event;
+  await call(ev, 'PUT', { event: { ...e0, settings: { ...e0.settings, closed: true } } });
+  const perFor = async (tok) => (await call(ev, 'GET', undefined, '', tok)).view.waiting.find((w) => w.name === 'Per');
+  check((await perFor(null)).answers === undefined && JSON.stringify((await perFor(ev.token)).answers) === JSON.stringify({ [D(1)]: 2 }), 'closed: visitors can’t answer as anyone, so they get no drafts');
+  await call(ev, 'PUT', { event: e0 });
+  const other = await page({ refused: true });
+  await other.setViewportSize({ width: 360, height: 760 });
+  await other.goto(`${BASE}/e/${ev.id}`);
+  await other.waitForSelector('.wait-names .pn.tap');
+  check(JSON.stringify(await other.locator('.wait-names .pn.tap').allTextContents()) === JSON.stringify(['Kari', 'Ola', 'Per']), 'names with a draft look and tap like the others');
+  await other.locator('.wait-names .pn.tap', { hasText: 'Kari' }).click();
+  await other.waitForSelector('#answer-form');
+  const comment = () => other.inputValue('#answer-form [name=comment]');
+  check((await other.locator('h1').textContent()) === 'Endre svarene dine' && (await other.locator('#pick-sum').textContent()) === 'Du kan 1 av 3 dager' && (await comment()) === 'Usikker' && (await other.inputValue('#answer-form [name=email]')) === '', 'tapping Kari opens her draft, without her email');
+  await shot(other, '67-tap-draft', false);
+  await other.locator('.claim .chip', { hasText: 'Kari' }).click();
+  check((await comment()) === '' && (await other.locator('#pick-sum').textContent()) === 'Ingenting markert ennå', 'unpicking her takes her draft out again');
+  await other.fill('#answer-form [name=name]', '');
+  const perDay = async () => (await day(other, D(1)).getAttribute('class')).includes('a2');
+  await other.locator('.claim .chip', { hasText: 'Per' }).click();
+  check((await comment()) === 'Kanskje' && (await perDay()), 'picking Per in the name box puts his draft in the form');
+  await other.locator('.claim .chip', { hasText: 'Per' }).click();
+  check((await comment()) === '' && !(await perDay()), 'and unpicking takes it out');
+  await other.fill('#answer-form [name=name]', '');
+  await other.fill('#answer-form [name=name]', 'Per');
+  check((await comment()) === 'Kanskje' && (await other.evaluate(() => document.activeElement?.getAttribute('name'))) === 'name', 'typing «Per» puts it in too, and you go on typing');
+  await other.fill('#answer-form [name=name]', 'Pera');
+  check((await comment()) === '' && (await other.locator('.claim .chip[aria-pressed="true"]').count()) === 0, 'typing on takes it out again');
+  const cy = () => other.locator('#answer-form [name=comment]').evaluate((el) => Math.round(el.getBoundingClientRect().top + scrollY));
+  await other.fill('#answer-form [name=name]', '');
+  const cy0 = await cy();
+  await other.fill('#answer-form [name=name]', 'Zacharias');
+  const cy1 = await cy();
+  await other.fill('#answer-form [name=name]', 'pe');
+  check(cy0 === cy1 && cy1 === (await cy()) && (await other.locator('.claim-none').isHidden()), 'a one-row list keeps its height too, also with «Ingen på listen heter det» (360 px)');
+  // Per answers (here: the organisers for him) while his draft is in the form.
+  await other.locator('.claim .chip', { hasText: 'Per' }).click();
+  await call(ev, 'PUT', { name: 'Per', comment: 'Kanskje', answers: { [D(1)]: 2 }, waiting: true }, `/people/${perId}`);
+  await other.click('[data-act="save-answer"]');
+  await other.waitForFunction(() => !document.querySelector('.claim .chip[aria-pressed="true"]'));
+  check((await comment()) === '' && !(await perDay()) && (await other.locator('.claim .chip', { hasText: 'Per' }).count()) === 0 && (await other.locator('#toast').textContent()).startsWith('Noen har nettopp svart'), 'if Per answers meanwhile, saving says so and takes his draft out of the form');
+  await other.fill('#answer-form [name=name]', '');
+  await other.fill('#answer-form [name=name]', 'Kari');
+  check((await comment()) === 'Usikker', 'typing «Kari» puts her draft back');
+  await other.click('[data-act="save-answer"]');
+  await other.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}/);
+  await other.waitForSelector('.people h2 .count');
+  const kariNow = (await call(ev, 'GET', undefined, '', kariTok)).view;
+  const kariRow = kariNow.people.find((x) => x.id === kariId);
+  check(other.url().split('/').pop() === kariTok && kariNow.link === 'ok' && (await call(ev, 'POST', { reset: false }, `/people/${kariId}/link`)).token === kariTok, 'answering as Kari gives her own link, which still works for her (the same as the organisers’ copy)');
+  check(kariRow?.comment === 'Usikker' && JSON.stringify(kariRow.answers) === JSON.stringify({ [D(0)]: 1 }) && kariRow.email === '' && (await other.locator('.people h2 .count').textContent()) === '2 av 3', 'her draft was saved as the answer, counted, and her email replaced (none given)');
+  await other.context().close();
+
+  // With «Alle kan endre svarene»: anyone answers for a waiting name.
+  const open = await mk('Dugnad', { maybe: true, openEdit: true });
+  await call(open, 'POST', { names: ['Liv', 'Mona'] }, '/invite');
+  let ov = (await call(open, 'GET')).view;
+  const liv = ov.waiting.find((w) => w.name === 'Liv').id;
+  const mona = ov.waiting.find((w) => w.name === 'Mona').id;
+  const livTok = (await call(open, 'POST', { reset: false }, `/people/${liv}/link`)).token;
+  const monaTok = (await call(open, 'POST', { reset: false }, `/people/${mona}/link`)).token;
+  await call(open, 'PUT', { name: 'Mona', comment: '', email: '', answers: { [D(2)]: 1 }, draft: true }, `/people/${mona}`, monaTok);
+  const op = await page();
+  await op.goto(`${BASE}/e/${open.id}`);
+  await op.waitForSelector('.plist li.wait');
+  const livRow = op.locator('.plist li.wait', { hasText: 'Liv' });
+  check((await livRow.locator('[data-act="edit-entry"]').count()) === 1 && (await op.locator('.plist li.wait [data-act="person-link"], .plist li.wait [data-act="delete-entry"], [data-act="copy-reminder"]').count()) === 0, 'with «Alle kan endre svarene», waiting names have «Svar for», but no link or remove');
+  check(JSON.stringify((await call(open, 'GET', undefined, '', null)).view.waiting.find((w) => w.id === mona).answers) === JSON.stringify({ [D(2)]: 1 }), 'and anyone who may change Mona’s answers gets her draft');
+  await livRow.locator('[data-act="edit-entry"]').click();
+  await op.waitForSelector('#answer-form');
+  check((await op.locator('h1').textContent()) === 'Svar for Liv' && (await op.locator('.claim').count()) === 0 && (await op.locator('#answer-form [name=counted]').count()) === 1, 'answering for Liv: no name list, and the checkbox');
+  await op.locator('#answer-form [name=counted]').uncheck();
+  check((await op.locator('#draft-note').textContent()).startsWith('Lagres som utkast: personen står'), 'whose note is about her, not you');
+  await op.locator('#answer-form [name=counted]').check();
+  await day(op, D(1)).click();
+  await op.click('[data-act="save-answer"]');
+  await op.waitForFunction(() => document.querySelector('.people h2 .count')?.textContent === '1 av 2');
+  ov = (await call(open, 'GET', undefined, '', livTok)).view;
+  check(ov.link === 'ok' && ov.role === 'participant' && ov.people.some((p) => p.id === liv && p.answers[D(1)] === 1) && (await op.evaluate(() => localStorage.getItem('whenever-v1') ?? '')).includes(liv) === false, 'Liv is answered, her link still works, and this device didn’t get it');
+
+  // 40 names: a box of three rows, filtered as you type, at a fixed height.
+  const many = await mk('Julebord', { maybe: true });
+  const fill = Array.from({ length: 37 }, (_, i) => `Gjest ${String(i + 1).padStart(2, '0')}`);
+  await call(many, 'POST', { names: ['Kari', 'Karianne', 'Anne Karlsen', ...fill] }, '/invite');
+  const mp = await page();
+  await mp.goto(`${BASE}/e/${many.id}`);
+  await mp.waitForSelector('.role [data-act="answer"]');
+  await mp.click('.role [data-act="answer"]');
+  await mp.waitForSelector('#answer-form .claim-box');
+  const boxH = () => mp.locator('.claim-box').evaluate((e) => e.offsetHeight);
+  const below = () => mp.locator('#answer-form [name=comment]').evaluate((e) => Math.round(e.getBoundingClientRect().top + scrollY));
+  const h0 = await boxH();
+  const y0 = await below();
+  const inert = () => mp.locator('.claim-box .chip').evaluateAll((cs) => cs.filter((c) => c.inert).length);
+  check((await mp.locator('.claim-box.cut').count()) === 1 && h0 < 130 && (await inert()) > 20 && (await mp.locator('.claim-more button').textContent()) === 'Vis alle (40)', `40 names: three rows (${h0}px), the rest cut off and out of reach, «Vis alle (40)»`);
+  await mp.locator('#answer-form [name=name]').pressSequentially('ka');
+  check((await mp.locator('.claim .chip:visible').allTextContents()).join(',') === 'Kari,Karianne,Anne Karlsen' && (await boxH()) === h0 && (await below()) === y0, '«ka» shows Kari, Karianne and Anne Karlsen, and nothing below moves');
+  check((await mp.locator('#claim-status').textContent()) === '3 navn på listen passer', 'and a screen reader hears how many');
+  await mp.locator('#answer-form [name=name]').pressSequentially('x');
+  check((await mp.locator('.claim .chip:visible').count()) === 0 && (await mp.locator('.claim-none').isVisible()) && (await boxH()) === h0 && (await below()) === y0, 'no match: «Ingen på listen heter det», still the same height');
+  await mp.fill('#answer-form [name=name]', '');
+  await mp.click('.claim-more button');
+  check((await inert()) === 0 && (await boxH()) > h0 * 3 && (await mp.locator('.claim-more button').textContent()) === 'Vis færre', '«Vis alle» opens the box');
+  await shot(mp, '66-names-box', false);
+  // The admin's Svar card: the first ten, then «Vis alle».
+  await ad.goto(`${BASE}/e/${many.id}/${many.token}`);
+  await ad.waitForSelector('.plist li.wait');
+  check((await ad.locator('.plist li.wait').count()) === 10 && (await ad.locator('[data-act="wait-more"]').textContent()).startsWith('Vis alle (40)'), 'the admin sees the first 10 waiting names, then «Vis alle (40)»');
+  await ad.click('[data-act="wait-more"]');
+  await ad.waitForFunction(() => document.querySelectorAll('.plist li.wait').length === 40);
+  check(true, 'and all 40 after');
+
+  // The checkbox and the bar fit a 360 px phone in every language.
+  const fits = [];
+  for (const lang of ['nb-NO', 'nn-NO', 'sv-SE', 'da-DK', 'is-IS', 'en-GB']) {
+    const lp = await page({ lang });
+    await lp.setViewportSize({ width: 360, height: 760 });
+    await lp.goto(`${BASE}/e/${ev.id}#answer`);
+    await lp.waitForSelector('#answer-form [name=counted]');
+    const ok = await lp.evaluate(() => {
+      const bs = [...document.querySelectorAll('.savebar .btn')];
+      const one = bs.every((b) => b.getBoundingClientRect().top === bs[0].getBoundingClientRect().top);
+      const lab = document.querySelector('.check.counted');
+      return one && lab.scrollWidth <= lab.clientWidth && document.documentElement.scrollWidth <= 360;
+    });
+    if (!ok) fits.push(lang);
+    await lp.close();
+  }
+  check(fits.length === 0, `the checkbox and the bar fit 360 px in all six languages${fits.length ? ` (not ${fits.join(', ')})` : ''}`);
+  await Promise.all([ad.close(), kp.close(), op.close(), mp.close()]);
 }
 
 // --- R) Ties beyond the first three, and the footer -----------------------------------------

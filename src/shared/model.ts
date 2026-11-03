@@ -79,11 +79,16 @@ export interface Person {
   updated: number;
   email?: string;
 }
-// Someone the organisers listed who hasn't answered yet: just a name (and
-// their own personal link, which the admin can copy).
+// Someone who hasn't answered yet: a name the organisers listed, or an
+// entry saved as a draft. Its draft (answers, comment) comes only to those
+// who may change the entry or answer as it (poll.ts), its email only to its
+// own person.
 export interface Waiting {
   id: string;
   name: string;
+  comment?: string;
+  answers?: Answers;
+  email?: string;
 }
 // GET /api/events/:id and friends: the event as the caller may see it.
 export interface View {
