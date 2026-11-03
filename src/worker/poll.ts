@@ -25,6 +25,10 @@
 // is no third state: a draft is only what the form shows when it is opened
 // again, so the view sends a waiting entry's answers only to those who may
 // change it (canEdit: its person, the admin, everyone with openEdit).
+// A name with something saved under it (answers, a comment or an email) is
+// marked `draft` for everyone and can't be claimed: that would rotate its
+// link and overwrite what's there. Only its link, or whoever may change it,
+// goes on from there, as with an answered name.
 // Only the admin, or its own person, removes a waiting entry: the list is the
 // organisers'.
 //
@@ -80,6 +84,9 @@ const deleteAt = (ev: PollEvent) => Math.max(expiresAt(ev), Date.now() + MIN_LIF
 const lookup = (env: Env) => env.LOOKUP.getByName('lookup');
 const visitor = (link: LinkState): Who => ({ role: 'visitor', me: null, link });
 const TAKEN: Failure = { error: 'taken', status: 409 };
+// Something is saved under a waiting name: a draft (see the top).
+const saved = (r: { answers: string; comment: string; email: string }): boolean =>
+  Object.keys(JSON.parse(r.answers) as object).length > 0 || r.comment !== '' || r.email !== '';
 const ANSWERED: Failure = { error: 'answered', status: 409 };
 
 // A live socket's state (serializeAttachment): the link it sent, if it has
@@ -204,9 +211,9 @@ export class Poll extends DurableObject<Env> {
       if (!r.replied) {
         const w: Waiting = { id: r.id, name: r.name };
         // The draft, for those who may change it (see the top).
-        if (canEdit(who, ev.settings, r.id)) {
-          const answers = JSON.parse(r.answers) as Person['answers'];
-          if (Object.keys(answers).length || r.comment) Object.assign(w, { answers, comment: r.comment });
+        if (saved(r)) {
+          w.draft = true;
+          if (canEdit(who, ev.settings, r.id)) Object.assign(w, { answers: JSON.parse(r.answers) as Person['answers'], comment: r.comment });
         }
         if (r.id === who.me) w.email = r.email;
         waiting.push(w);
@@ -368,13 +375,14 @@ export class Poll extends DurableObject<Env> {
   }
 
   // Someone with the event link answers as a name the organisers listed
-  // (see the top): only a name still waiting, never with hidden answers, and
-  // only someone who isn't anyone here yet (the admin edits the entry).
+  // (see the top): only a name still waiting with nothing saved under it,
+  // never with hidden answers, and only someone who isn't anyone here yet
+  // (the admin edits the entry).
   async claim(who: Who, ev: PollEvent, pid: string, entry: Entry, replied: number): Promise<Failure | Added> {
     if (who.role !== 'visitor' || ev.settings.hidden) return FORBIDDEN;
-    const row = this.sql.exec<{ replied: number }>(`SELECT replied FROM people WHERE id = ?`, pid).toArray()[0];
+    const row = this.sql.exec<{ replied: number; answers: string; comment: string; email: string }>(`SELECT replied, answers, comment, email FROM people WHERE id = ?`, pid).toArray()[0];
     if (!row) return NO_PERSON;
-    if (row.replied) return TAKEN;
+    if (row.replied || saved(row)) return TAKEN;
     const secret = newSecret();
     this.sql.exec(
       `UPDATE people SET name = ?, comment = ?, email = ?, answers = ?, secret = ?, replied = ?, updated = ? WHERE id = ?`,

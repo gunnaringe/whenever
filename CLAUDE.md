@@ -192,7 +192,11 @@ transforming (enums, namespaces, parameter properties) is off
   everyone else a draft is just a waiting name; the view sends a waiting
   entry's answers and comment only to those who may change it (`canEdit`:
   its person, the admin, everyone with openEdit), so the form opens with
-  them. Taking back an answer is the same: untick and save. Only the admin,
+  them. A waiting name with anything saved (answers, comment or email) is
+  `draft: true` for everyone and can't be claimed (409 `taken`, `saved()` in
+  poll.ts): a claim would rotate its link and overwrite the draft. So it isn't
+  tappable and isn't in the name box; organisers use the row's pencil.
+  Taking back an answer is the same: untick and save. Only the admin,
   or its own person, deletes a waiting entry (the list is the organisers').
   With openEdit everyone gets the waiting names as rows with «Svar for»;
   without it, someone with the event link taps a name in the Svar card to

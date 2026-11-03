@@ -1777,11 +1777,12 @@ function waitingHtml(v: M.View, stored: Stored | null): string {
   // the answers (then "Svar for Kari" for all; the list stays the admin's).
   const rows = admin || (ev.settings.openEdit && !ev.settings.hidden && !ev.settings.closed);
   if (!rows) {
-    // Someone with the event link taps their name to answer as it.
+    // Someone with the event link taps their name to answer as it, unless
+    // something is saved under it (a draft: only its link goes on).
     const tap = v.role === 'visitor' && !ev.settings.hidden && M.canAdd(who, ev.settings);
     const names = list
       .map((w) =>
-        tap
+        tap && !w.draft
           ? `<button type="button" class="pn tap" data-act="edit-entry" data-pid="${w.id}" title="${esc(t('answerAs', { name: w.name }))}">${esc(w.name)}</button>`
           : `<span class="pn${mine(w.id) ? ' mine' : ''}">${esc(w.name)}${you(w.id)}</span>`,
       )
@@ -1904,8 +1905,9 @@ function renderAnswer(v: M.View, sub: string | null): void {
     : t(own ? 'addYourAnswers' : 'addAnswers');
   // A new answer can be one of the listed names still waiting: the admin
   // answers for them, someone with the event link says it's them (not
-  // with hidden answers, see poll.ts).
-  const claimable = target ? [] : v.role === 'admin' || (v.role === 'visitor' && !ev.settings.hidden) ? waitingOf(v) : [];
+  // with hidden answers, see poll.ts). Not a name with a draft: the server
+  // refuses to claim it, and the admin's pencil opens it with the draft.
+  const claimable = target ? [] : v.role === 'admin' || (v.role === 'visitor' && !ev.settings.hidden) ? waitingOf(v).filter((w) => !w.draft) : [];
   document.title = `${title} · ${ev.name}`;
   const hint: Key =
     ev.mode === 'dates'
@@ -2021,19 +2023,28 @@ function filterClaims(): void {
   fitClaims();
 }
 
-// The box's height with every name, cut at three rows unless opened: it
-// keeps that while the names are filtered.
+// The box's height with every name, cut at three rows unless opened, or
+// with only the no-match line if that is taller (a short list): it keeps
+// that while the names are filtered, so nothing under it moves.
 function lockClaims(): void {
   const box = $opt('.claim-box');
   if (!box) return;
-  const hidden = $$<HTMLButtonElement>('.claim-box .chip[hidden]');
-  for (const c of hidden) c.hidden = false;
+  const chips = $$<HTMLButtonElement>('.claim-box .chip');
+  const none = $('.claim-none');
+  const was = chips.map((c) => c.hidden);
+  const noneWas = none.hidden;
   box.style.minHeight = '';
-  box.style.minHeight = `${box.offsetHeight}px`;
+  for (const c of chips) c.hidden = false;
+  none.hidden = true;
+  const all = box.offsetHeight;
   // A list longer than three rows keeps the «Vis alle» line, also while
-  // filtered down to a few (fitClaims), so nothing under it moves.
+  // filtered down to a few (fitClaims).
   if (!box.classList.contains('open')) box.dataset.long = String(box.scrollHeight > box.clientHeight + 1);
-  for (const c of hidden) c.hidden = true;
+  for (const c of chips) c.hidden = true;
+  none.hidden = false;
+  box.style.minHeight = `${Math.max(all, box.offsetHeight)}px`;
+  chips.forEach((c, i) => (c.hidden = was[i]));
+  none.hidden = noneWas;
 }
 
 // Names below the three rows: cut off with a fade, out of reach of Tab

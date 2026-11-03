@@ -897,6 +897,25 @@ await hc.close();
   check((await kp.locator('.people h2 .count').textContent()) === '0 av 3' && (await kp.locator('.wait-names .pn').allTextContents()).some((x) => x.startsWith('Kari')) && (await kp.locator('.best-item').count()) === 0, 'a draft isn’t counted: 0 av 3, Kari still waiting, no results');
   const drafts = async (token) => (await call(ev, 'GET', undefined, '', token)).view.waiting.find((w) => w.name === 'Kari')?.answers;
   check((await drafts(null)) === undefined && JSON.stringify(await drafts(kariTok)) === JSON.stringify({ [D(0)]: 1 }) && JSON.stringify(await drafts(ev.token)) === JSON.stringify({ [D(0)]: 1 }), 'only Kari and the organisers get her draft');
+  const kariId = (await call(ev, 'GET')).view.waiting.find((w) => w.name === 'Kari').id;
+  const grab = await call(ev, 'POST', { name: 'Kari', comment: '', email: '', answers: {}, claim: kariId }, '/people', null);
+  check(grab.status === 409 && grab.error === 'taken' && (await call(ev, 'GET', undefined, '', kariTok)).view.link === 'ok' && JSON.stringify(await drafts(kariTok)) === JSON.stringify({ [D(0)]: 1 }), 'a name with a draft can’t be claimed: 409, and Kari’s link and draft stay');
+  const other = await page();
+  await other.context().setExtraHTTPHeaders({ 'x-dev-ip': '10.8.0.1' });
+  await other.setViewportSize({ width: 360, height: 760 });
+  await other.goto(`${BASE}/e/${ev.id}`);
+  await other.waitForSelector('.wait-names .pn.tap');
+  check(JSON.stringify(await other.locator('.wait-names .pn.tap').allTextContents()) === JSON.stringify(['Ola', 'Per']) && (await other.locator('.wait-names span.pn', { hasText: 'Kari' }).count()) === 1, 'to someone else, Kari is a plain waiting name they can’t tap');
+  await other.click('[data-act="answer"]');
+  await other.waitForSelector('#answer-form');
+  check(JSON.stringify(await other.locator('.claim .chip').allTextContents()) === JSON.stringify(['Ola', 'Per']), 'and not in their name box');
+  const cy = () => other.locator('#answer-form [name=comment]').evaluate((el) => Math.round(el.getBoundingClientRect().top + scrollY));
+  const cy0 = await cy();
+  await other.fill('#answer-form [name=name]', 'Zacharias');
+  const cy1 = await cy();
+  await other.fill('#answer-form [name=name]', 'pe');
+  check(cy0 === cy1 && cy1 === (await cy()) && (await other.locator('.claim-none').isHidden()), 'a one-row list keeps its height too, also with «Ingen på listen heter det» (360 px)');
+  await other.context().close();
   await kp.click('.role [data-act="answer"]');
   await kp.waitForSelector('#answer-form');
   check((await kp.locator('h1').textContent()) === 'Endre svarene dine' && (await kp.locator('#pick-sum').textContent()) === 'Du kan 1 av 3 dager' && (await kp.locator('#answer-form [name=counted]').isChecked()), 'her form opens with the draft, ticked');
@@ -1019,6 +1038,8 @@ await tie.close();
 
 // --- S) Switching between your events from the header ---------------------------------------
 const sw = await page();
+// Its own bucket of the rate limit: the sections before it fill the shared one.
+await sw.context().setExtraHTTPHeaders({ 'x-dev-ip': '10.8.0.2' });
 await sw.goto(`${BASE}/`);
 check((await sw.locator('.events-btn').count()) === 0, 'no events button before you have any events');
 const makeEvent = (p, name) =>
