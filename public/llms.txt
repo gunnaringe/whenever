@@ -51,10 +51,15 @@ View {
   count: number                     how many have answered (also when hidden)
   hidden: boolean                   true: people holds only your own entry
   adminEmails?: string[]            admin only: the organisers' addresses
+  rev: number                       goes up with every change; of two views, the higher is newer
 }
 ```
 
 `email` is only ever returned on your own entry. `link: "invalid"` means the token is wrong or was replaced: tell the person; the poll is then shown as to a visitor.
+
+### Follow a poll live
+
+To watch a poll change, instead of reading it again and again, open a WebSocket to `wss://finn-tid.apphub.casa/api/events/<id>/live` (no token in the URL). Send `{"token": "<token>"}` (or `{"token": null}`) as the first message. You get `{"type": "view", "view": View, "app": string}` straight away and after every change, as `GET` would return it for that token, and `{"type": "gone"}` if the poll is deleted (the socket then closes). Send `"ping"` now and then (the reply is `"pong"`) so it stays open; send the token again (at most every 2 s) for a fresh view. `app` is the web app's version, of no use to you.
 
 ### Keys and answers
 

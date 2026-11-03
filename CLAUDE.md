@@ -21,8 +21,10 @@ transforming (enums, namespaces, parameter properties) is off
 - `src/app/`: the frontend, bundled by esbuild into one file.
   - `app.ts`: UI, routing, the event form, overview/results, the answer
     editor. `i18n.ts`: strings (nb and en) and date formatting; `lang/`
-    the other languages' strings. `api.ts`: fetch wrapper.
-    `store.ts`: localStorage. `ui.ts`: `$`, `esc`, dialogs, toast, QR.
+    the other languages' strings. `api.ts`: fetch wrapper (and `writing()`,
+    whether a change is in flight). `live.ts`: the event page's live socket
+    (see Live updates). `store.ts`: localStorage. `ui.ts`: `$`, `esc`,
+    dialogs, toast, QR.
   - `calendar.ts`: month grids (`calendarHtml`) and drag/tap painting
     (`bindPaint`). `timegrid.ts`: the drag-to-paint time grid (`TimeGrid`).
   - `theme.ts`: the colour theme; `theme-head.ts` is its entry for the
@@ -36,7 +38,7 @@ transforming (enums, namespaces, parameter properties) is off
   preview tags and their text for AI assistants and for people without
   JavaScript (pure).
   `poll.ts`: the `Poll` Durable Object, which decides everything about who
-  may do what. `link.ts`: making and parsing link tokens. `lookup.ts`: the
+  may do what, and holds the event's live sockets. `link.ts`: making and parsing link tokens. `lookup.ts`: the
   `Lookup` Durable Object (the email index and its codes), `codes.ts` the
   limits on codes (pure), `mail.ts` the code mail and a small SMTP client.
 - `public/`: static files copied as they are: `index.html`, `privacy.html`,
@@ -201,8 +203,35 @@ transforming (enums, namespaces, parameter properties) is off
 - **Routes:** paths `/`, `/new`, `/find`, `/e/:id`, `/e/:id/:token` (SPA fallback
   serves `index.html`), plus hash sub-views `#answer`, `#answer=<pid>`,
   `#edit`. Clicks go through `data-act` delegation to the `actions` map.
-  The overview polls every 30 s and on tab focus, only while it's the
-  visible view and no dialog is open (`refreshIfIdle`).
+  The overview stays current by itself: see Live updates.
+- **Live updates:** the event page opens a WebSocket to
+  `/api/events/:id/live`, which the Worker hands to the event's `Poll`
+  object (hibernation API: `acceptWebSocket`, so idle sockets cost nothing,
+  and `ping` gets `pong` without waking it). The link goes in the first
+  message, `{"token": ...}`, never in the URL; the socket's attachment keeps
+  the credential, and every change (`update`, `add`, `edit`, `drop`, each
+  with `bump()` of the meta `rev` first) sends each socket its own view,
+  from `who()` checked again each time: hidden answers stay hidden, and a
+  replaced link gets a visitor's view with `link: "invalid"`. Deleting the
+  event (or its alarm) sends `{"type":"gone"}` and closes them. `View.rev`
+  tells which of two views is newer, since a push can arrive before the
+  reply to the change that caused it. In the app (`onLive`/`applyLive`): a
+  push waits while one of our own writes is in flight (`writing()`, then the
+  `api-idle` event); the data goes in at once, but the page is drawn again
+  only when idle (the overview, no dialog or menu open), else later
+  (`app.stale`, checked every second), keeping the scroll position and
+  focus, and changed rows get `.fresh` for a moment. Someone in a form is
+  told once (`changedMeanwhile`) if the event itself changed. Each message
+  also has `app`, the hash in the live `app-<hash>.js` (the `Poll` object
+  reads it from `index.html` via `ASSETS`); if it isn't ours, the app asks
+  `/` (never cached) which app is live now, and only if that isn't ours
+  either does a bar above the header offer a reload (`checkVersion`,
+  `newVersion`): right after a deploy the object can still run the old
+  version, since Durable Objects take new code later. `live.ts` reconnects (1, 2, 5,
+  10, then every 30 s; it gives up after five tries if it never opened) and
+  sets `<html data-live="open|closed">`. Without an open socket, the old
+  refresh still runs: every 30 s and on tab focus while idle
+  (`refreshIfIdle`).
 - **Painting:** `TimeGrid` paints a rectangle (the first cell decides
   paint or erase). A mouse paints at once. A finger scrolls the page as
   usual (`touch-action: manipulation`): a tap toggles one cell, and holding
@@ -329,7 +358,7 @@ transforming (enums, namespaces, parameter properties) is off
   (`setTheme`), so a form keeps its contents. Browsers without
   popovers (Safari 16, Firefox 124) get the dialog `menu()` instead
   (`canPopover`). Never put `data-act` on a popover's button: the click
-  delegation's `preventDefault()` stops it opening. The 30 s refresh waits
+  delegation's `preventDefault()` stops it opening. Live updates wait
   while a menu is open.
 - **CSS names:** `.page` is the container and `.bar` the header; the result
   meter is `.meter`. Don't reuse `.bar`/`.wrap`-style generic names (both
@@ -339,7 +368,8 @@ transforming (enums, namespaces, parameter properties) is off
   requests from the browser (the code mails go through Forward Email, and
   the page says so). localStorage keys start with `whenever-`.
 - **Security headers:** `public/_headers` sets a strict same-origin CSP
-  (no inline scripts) and `Referrer-Policy: no-referrer` (links carry
+  (no inline scripts; `connect-src` also names the two `wss://` hosts for
+  the live socket, for browsers whose `'self'` doesn't cover `wss:`) and `Referrer-Policy: no-referrer` (links carry
   tokens). The Worker sets `no-store`, `nosniff` and `no-referrer` on API
   responses and only accepts `application/json` bodies (415 otherwise).
 
@@ -357,7 +387,9 @@ transforming (enums, namespaces, parameter properties) is off
   `.ics` download, ties and the ranking setting, holiday calendars, the
   events menu, finding events by an email code, the language menu and
   nn/is dates, themes against a dark and a light device, link-preview tags,
-  the text for AI assistants and without JavaScript, the `llms.txt` flow). The email-code
+  the text for AI assistants and without JavaScript, the `llms.txt` flow,
+  live updates: pushes, hidden answers and replaced links on raw sockets,
+  the fallback without WebSockets, the new-version bar). The email-code
   part needs `MAIL_ECHO` (as `npm run dev` sets; with plain `wrangler dev`
   add `--var MAIL_ECHO:1`). It uses `playwright-core`, which has
   no browser: set `PWCHROME` to a Chromium or

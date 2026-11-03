@@ -88,9 +88,16 @@ export interface View {
   people: Person[];
   count: number;
   hidden: boolean;
+  // Goes up with every change to the event or its answers, so of two views
+  // the newer one is known (live updates may arrive before a reply).
+  rev: number;
   // Admin only: the organisers' addresses, which get the admin link back.
   adminEmails?: string[];
 }
+// What GET /api/events/:id/live sends (see poll.ts): the caller's view, now
+// and after every change, with the version of the app that is live; or
+// that the event is gone.
+export type LiveMessage = { type: 'view'; view: View; app: string } | { type: 'gone' };
 // POST /api/events and POST /api/events/:id/people.
 export interface Created {
   id: string;
