@@ -689,6 +689,170 @@ await hc.close();
   await ad.close();
 }
 
+// --- N) Listed names: who hasn't answered yet, apart from "can't make any" ------------------
+{
+  const ad = await page({ refused: true });
+  await ad.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE });
+  await ad.context().setExtraHTTPHeaders({ 'x-dev-ip': `10.8.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` });
+  await ad.goto(`${BASE}/`);
+  const days = [D(0), D(1), D(2)];
+  const mk = (settings) =>
+    ad.evaluate(
+      async ([days, settings]) => (await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: { name: 'Hyttetur', mode: 'dates', start: days[0], end: days[2], options: days, settings } }) })).json(),
+      [days, settings],
+    );
+  const made = await mk({ maybe: true });
+  const api = (method, body, path = '', token = made.token, id = made.id) =>
+    ad.evaluate(
+      async ([id, token, method, body, path]) => {
+        const r = await fetch(`/api/events/${id}${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+        return { status: r.status, ...(await r.json()) };
+      },
+      [id, token, method, body, path],
+    );
+  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.waitForSelector('.people [data-act="add-names"]');
+  check((await ad.locator('.people .wait-head').count()) === 0 && (await ad.locator('.people .progress').count()) === 0, 'no names listed: the Svar card is as before, with «Legg til navn»');
+  await ad.click('[data-act="add-names"]');
+  await ad.waitForSelector('#dlg[open] #names');
+  await ad.fill('#dlg #names', 'Kari\nOla\n- Per\n2. Siri\nkari');
+  await shot(ad, '60-names-dialog', false);
+  await ad.click('#dlg button[value="add"]');
+  await ad.waitForSelector('.people .wait-head');
+  check((await ad.locator('#toast').textContent()).includes('La til 4 navn'), 'four names added (bullets, numbers and a repeat cleaned away)');
+  check((await ad.locator('.people h2 .count').textContent()) === '0 av 4' && (await ad.locator('.people .progress').count()) === 1, 'the heading says 0 av 4, with a progress bar');
+  check((await ad.locator('.plist li.wait').count()) === 4 && (await ad.locator('.plist li.wait [data-act="person-link"]').count()) === 4, 'the admin sees each waiting name with its link');
+  await ad.click('[data-act="copy-reminder"]');
+  const reminder = await ad.evaluate(() => navigator.clipboard.readText());
+  check(reminder === `Kari, Ola, Per og Siri: husk å svare på «Hyttetur»! ${BASE}/e/${made.id}`, `the reminder names them, with the event link only (${reminder})`);
+  let a = (await api('GET')).view;
+  const ids = Object.fromEntries(a.waiting.map((w) => [w.name, w.id]));
+  const id = (name) => ids[name];
+  const olaOld = (await api('POST', { reset: false }, `/people/${id('Ola')}/link`)).token;
+  const kariTok = (await api('POST', { reset: false }, `/people/${id('Kari')}/link`)).token;
+  await ad.click('[data-act="add-names"]');
+  await ad.waitForSelector('#dlg[open] #names');
+  await ad.fill('#dlg #names', 'OLA\nPer');
+  await ad.click('#dlg button[value="add"]');
+  await ad.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('fra før'));
+  check((await ad.locator('#toast').textContent()) === '2 navn var der fra før.' && (await ad.locator('.plist li.wait').count()) === 4, 'names already there are skipped, ignoring case');
+
+  // Someone with the event link: the names, and "Er du en av disse?".
+  const vis = await page();
+  await vis.context().setExtraHTTPHeaders({ 'x-dev-ip': `10.8.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` });
+  await vis.goto(`${BASE}/e/${made.id}`);
+  await vis.waitForSelector('.people .wait-names');
+  check((await vis.locator('.wait-names .pn').allTextContents()).join(',') === 'Kari,Ola,Per,Siri' && (await vis.locator('[data-act="person-link"], [data-act="add-names"], [data-act="copy-reminder"]').count()) === 0, 'others see who hasn’t answered, without the admin’s buttons');
+  await vis.locator('.people').screenshot({ path: `${SHOTS}/61-names-visitor.png` });
+  await vis.click('.role [data-act="answer"]');
+  await vis.waitForSelector('#answer-form .claim');
+  check((await vis.locator('.claim legend').textContent()) === 'Er du en av disse?' && (await vis.locator('.claim .chip').count()) === 4, 'the answer form asks «Er du en av disse?» with the four names');
+  await vis.locator('#answer-form [name=name]').pressSequentially('Olav');
+  check((await vis.locator('.claim .chip[aria-pressed="true"]').count()) === 0, 'typing "Olav" passes "Ola" but picks nobody');
+  await vis.fill('#answer-form [name=name]', 'ola');
+  check((await vis.locator('.claim .chip[aria-pressed="true"]').textContent()) === 'Ola', 'typing a listed name picks it');
+  await vis.locator('#answer-form [name=name]').pressSequentially('v');
+  check((await vis.locator('.claim .chip[aria-pressed="true"]').count()) === 0, 'and typing on unpicks it');
+  await vis.fill('#answer-form [name=name]', 'ola');
+  await vis.locator('.claim .chip', { hasText: 'Siri' }).click();
+  check((await vis.inputValue('#answer-form [name=name]')) === 'Siri' && (await vis.locator('.claim .chip[aria-pressed="true"]').textContent()) === 'Siri', 'tapping another name picks that one and fills it in');
+  await vis.locator('.claim .chip', { hasText: 'Ola' }).click();
+  await day(vis, D(0)).click();
+  await shot(vis, '62-names-claim', false);
+  await vis.click('[data-act="save-answer"]');
+  await vis.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}/);
+  await vis.waitForSelector('.people h2 .count');
+  check((await vis.locator('.people h2 .count').textContent()) === '1 av 4' && (await vis.locator('.wait-names .pn').allTextContents()).join(',') === 'Kari,Per,Siri', 'Ola answered as Ola: 1 av 4, and Ola has left the waiting names');
+  check((await vis.locator('.best-item .bn').first().textContent()).startsWith('1 av 1 kan'), 'and the results count only those who answered (1 av 1 kan, not 1 av 4)');
+  a = (await api('GET')).view;
+  check(a.people.length === 1 && a.people[0].id === id('Ola') && a.count === 1 && a.waitingCount === 3, 'the answer went on Ola’s entry, not a new one');
+  check((await api('GET', undefined, '', olaOld)).view.link === 'invalid', 'and the link sent to Ola before no longer works');
+  const again = await api('POST', { name: 'Ola', answers: {}, claim: id('Ola') }, '/people', null);
+  check(again.status === 409 && again.error === 'taken', 'answering as a name that has answered: 409 taken');
+
+  // The admin answers for Siri while she answers herself: hers stay.
+  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.waitForSelector('.plist li.wait');
+  await ad.locator('.plist li.wait', { hasText: 'Siri' }).locator('[data-act="edit-entry"]').click();
+  await ad.waitForSelector('#answer-form');
+  const siriTok = (await api('POST', { reset: false }, `/people/${id('Siri')}/link`)).token;
+  await api('PUT', { name: 'Siri', comment: '', email: '', answers: { [days[2]]: 1 } }, `/people/${id('Siri')}`, siriTok);
+  await day(ad, D(0)).click();
+  await ad.click('[data-act="save-answer"]');
+  await ad.waitForSelector('.people h2 .count');
+  check((await ad.locator('#toast').textContent()).startsWith('Personen har nettopp svart selv'), 'the admin answering for Siri as she answers herself: told so');
+  a = (await api('GET')).view;
+  const siri = a.people.find((p) => p.name === 'Siri');
+  check(siri && JSON.stringify(siri.answers) === JSON.stringify({ [days[2]]: 1 }), 'and her own answers stay');
+  // Back to waiting for the rest of this section: remove her answers' entry and list her again.
+  await api('DELETE', undefined, `/people/${id('Siri')}`);
+  ids.Siri = (await api('POST', { names: ['Siri'] }, '/invite')).view.waiting.find((w) => w.name === 'Siri').id;
+
+  // The admin answers for Per with nothing marked: answered, can't make any.
+  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.waitForSelector('.plist li.wait');
+  await ad.locator('.plist li.wait', { hasText: 'Per' }).locator('[data-act="edit-entry"]').click();
+  await ad.waitForSelector('#answer-form');
+  check((await ad.locator('h1').textContent()) === 'Svar for Per' && (await ad.inputValue('#answer-form [name=name]')) === 'Per' && (await ad.locator('.claim').count()) === 0, 'the admin answers for a waiting name from its row');
+  await ad.click('[data-act="save-answer"]');
+  await ad.waitForSelector('.people .plist li:not(.wait)');
+  const per = ad.locator('.plist li:not(.wait)', { hasText: 'Per' });
+  check((await per.locator('.psum').textContent()) === 'Kan ingen av dagene' && (await ad.locator('.people h2 .count').textContent()) === '2 av 4', 'Per answered with nothing marked: «Kan ingen av dagene», 2 av 4');
+  check((await ad.locator('.plist li.wait .pinfo b').allTextContents()).join(',') === 'Kari,Siri', 'and Kari and Siri are still waiting');
+  await ad.locator('.best-item').first().click();
+  await ad.waitForSelector('#detail .dg.wait');
+  check((await ad.locator('#detail .dg.wait b').textContent()).includes('Ikke svart (2)') && (await ad.locator('#detail .dg.wait .pn').allTextContents()).join(',') === 'Kari,Siri' && (await ad.locator('#detail .dg.no .pn').allTextContents()).join(',') === 'Per', 'the details list who hasn’t answered apart from who can’t');
+  await ad.locator('.people').screenshot({ path: `${SHOTS}/63-names-admin.png` });
+  // Removing a name.
+  await ad.locator('.plist li.wait', { hasText: 'Siri' }).locator('[data-act="delete-entry"]').click();
+  await ad.waitForSelector('#dlg[open]');
+  check((await ad.locator('#dlg p').textContent()) === 'Fjerne Siri fra listen?', 'removing a name asks «Fjerne Siri fra listen?»');
+  await ad.click('#dlg button[value="yes"]');
+  await ad.waitForFunction(() => document.querySelectorAll('.plist li.wait').length === 1);
+  check((await ad.locator('.people h2 .count').textContent()) === '2 av 3', 'and the count follows: 2 av 3');
+
+  // Kari opens the link the admin sent her.
+  const kari = await page();
+  await kari.goto(`${BASE}/e/${made.id}/${kariTok}`);
+  await kari.waitForSelector('.role');
+  check((await kari.locator('.role b').first().textContent()) === 'Hei, Kari!' && (await kari.locator('.role p').textContent()) === 'Du har ikke svart ennå.' && (await kari.locator('.role [data-act="answer"]').textContent()).includes('Legg til dine svar'), 'Kari’s own link: «Du har ikke svart ennå.» and «Legg til dine svar»');
+  await kari.click('.role [data-act="answer"]');
+  await kari.waitForSelector('#answer-form');
+  check((await kari.locator('h1').textContent()) === 'Legg til dine svar' && (await kari.inputValue('#answer-form [name=name]')) === 'Kari' && (await kari.locator('.claim').count()) === 0, 'her form has her name and no list to pick from');
+  await day(kari, D(1)).click();
+  await kari.click('[data-act="save-answer"]');
+  await kari.waitForFunction(() => document.querySelector('.people h2 .count')?.textContent === '3');
+  check((await api('GET', undefined, '', kariTok)).view.link === 'ok', 'her link still works after answering');
+  check((await kari.locator('.people .progress').count()) === 0 && (await kari.locator('.wait-head').count()) === 0, 'everyone has answered: just 3, nobody waiting');
+  // The admin's «Legg til svar» offers the names too, and fills that entry.
+  await api('POST', { names: ['Tor'] }, '/invite');
+  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.waitForSelector('.plist li.wait');
+  await ad.click('.role [data-act="answer"]');
+  await ad.waitForSelector('#answer-form .claim');
+  check((await ad.locator('.claim legend').textContent()) === 'Svarer du for en av disse?', 'the admin’s «Legg til svar» asks «Svarer du for en av disse?»');
+  await ad.locator('.claim .chip', { hasText: 'Tor' }).click();
+  await day(ad, D(2)).click();
+  await ad.click('[data-act="save-answer"]');
+  await ad.waitForFunction(() => document.querySelector('.people h2 .count')?.textContent === '4');
+  a = (await api('GET')).view;
+  check((await ad.locator('#dlg[open]').count()) === 0 && a.people.some((p) => p.name === 'Tor' && p.answers[days[2]] === 1) && a.waitingCount === 0 && a.people.length === 4, 'and saving fills Tor’s entry (no new one, no link dialog)');
+
+  // Hidden answers: only the numbers, and no list to pick from.
+  const hid = await mk({ maybe: true, hidden: true });
+  await api('POST', { names: ['Liv', 'Mona'] }, '/invite', hid.token, hid.id);
+  await vis.goto(`${BASE}/e/${hid.id}`);
+  await vis.waitForSelector('.people h2 .count');
+  check((await vis.locator('.people h2 .count').textContent()) === '0 av 2' && (await vis.locator('.wait-names, .wait-head').count()) === 0 && !(await vis.content()).includes('Mona'), 'hidden answers: others see 0 av 2, but no names');
+  await vis.click('.role [data-act="answer"]');
+  await vis.waitForSelector('#answer-form');
+  check((await vis.locator('.claim').count()) === 0, 'and no «Er du en av disse?»');
+  const hv = (await api('GET', undefined, '', null, hid.id)).view;
+  const liv = (await api('GET', undefined, '', hid.token, hid.id)).view.waiting[0].id;
+  check(hv.waiting.length === 0 && hv.waitingCount === 2 && (await api('POST', { name: 'Liv', answers: {}, claim: liv }, '/people', null, hid.id)).status === 403, 'the API sends no names, and refuses a claim');
+  await Promise.all([ad.close(), vis.close(), kari.close()]);
+}
+
 // --- R) Ties beyond the first three, and the footer -----------------------------------------
 const tie = await page();
 await tie.goto(`${BASE}/`);

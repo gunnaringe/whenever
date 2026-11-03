@@ -79,14 +79,27 @@ export interface Person {
   updated: number;
   email?: string;
 }
+// Someone the organisers listed who hasn't answered yet: just a name (and
+// their own personal link, which the admin can copy).
+export interface Waiting {
+  id: string;
+  name: string;
+}
 // GET /api/events/:id and friends: the event as the caller may see it.
 export interface View {
   event: PollEvent;
   role: Role;
   me: string | null;
   link: LinkState;
+  // Those who have answered (with hidden answers, only your own).
   people: Person[];
+  // How many have answered, also when the answers are hidden.
   count: number;
+  // Listed but not answered yet: everyone for the admin, or when the answers
+  // aren't hidden; else only yourself. waitingCount is all of them. (A
+  // Poll object still running the code from before sends neither.)
+  waiting?: Waiting[];
+  waitingCount?: number;
   hidden: boolean;
   // Goes up with every change to the event or its answers, so of two views
   // the newer one is known (live updates may arrive before a reply).
@@ -520,6 +533,23 @@ export function cleanAnswers(answers: unknown, ev: Pick<PollEvent, 'options'>): 
     if (v === YES || v === MAYBE) out[k] = v;
   }
   return out;
+}
+
+// Names compare without case or extra spaces: "kari  nordmann" is Kari Nordmann.
+export const nameKey = (s: string): string => s.normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
+
+// The names the organisers list: a list, or text with one per line (or
+// separated by commas or semicolons), so a pasted list works, bullets and
+// numbers too. Cleaned, without empty ones or repeats.
+export function cleanNames(v: unknown): string[] {
+  const list = typeof v === 'string' ? v.split(/[\n,;]+/) : Array.isArray(v) ? v : [];
+  const out = new Map<string, string>();
+  for (const x of list) {
+    if (typeof x !== 'string') continue;
+    const name = cleanLine(x.replace(/^\s*(?:[-*•·–]|\d+[.)])\s+/, ''), LIMITS.person);
+    if (name && !out.has(nameKey(name))) out.set(nameKey(name), name);
+  }
+  return [...out.values()];
 }
 
 // Validates an entry (a participant's name, comment, email and answers).

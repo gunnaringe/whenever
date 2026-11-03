@@ -47,15 +47,19 @@ View {
   role: "admin" | "participant" | "visitor"
   me: string | null                 your own entry's id (personal link only; null with the admin link)
   link: "none" | "invalid" | "ok"   whether the token you sent worked
-  people: [{ id, name, comment, answers, updated, email? }]
+  people: [{ id, name, comment, answers, updated, email? }]   those who have answered
   count: number                     how many have answered (also when hidden)
-  hidden: boolean                   true: people holds only your own entry
+  waiting?: [{ id, name }]          names the organisers listed that haven't answered yet
+  waitingCount?: number             how many of those (also when hidden)
+  hidden: boolean                   true: people and waiting hold only your own entry
   adminEmails?: string[]            admin only: the organisers' addresses
   rev: number                       goes up with every change; of two views, the higher is newer
 }
 ```
 
 `email` is only ever returned on your own entry. `link: "invalid"` means the token is wrong or was replaced: tell the person; the poll is then shown as to a visitor.
+
+Answered and waiting are not the same: an entry in `people` with no answers can make none of the options; a name in `waiting` hasn't answered at all. "6 of 15 have answered" is `count` of `count + waitingCount`. Results count only `people`.
 
 ### Follow a poll live
 
@@ -86,6 +90,8 @@ POST /api/events/<id>/people
 ```
 
 With the admin link the entry gets no email; only its person can add one, with the entry's personal link.
+
+If the person is one of the names in `view.waiting` (ask them; never guess from a similar name), add `"claim": "<that id>"`: the answers go on that name instead of a new entry, and the returned token is a new personal link for it (one sent to them before stops working). 409 `taken` means it has been answered meanwhile. Not when `settings.hidden`, and not with a personal or the admin link. With a personal link whose `me` is in `waiting`, PUT that entry instead.
 
 The returned token is this person's own link, `https://finn-tid.apphub.casa/e/<id>/<token>`. Give it to them: it is the only way to change these answers later (or to find them again without the app). `email` is optional (max 254 characters): with it, the app's /find can mail them a code that brings their polls back. Name: 1 to 60 characters; comment: up to 300 (longer text is cut).
 
@@ -131,6 +137,7 @@ With the admin token:
 - `PUT /api/events/<id>` `{ "event": {...}, "emails"?: [...] }` -> `{ view }`: send the whole event back (from `view.event`) with your changes; leave `emails` out to keep the organisers' addresses, or send the whole new list. Answers to options you remove are dropped. Set `event.decided` to an option (times mode: the first slot of a window) to pick the final date or time; leave it out to unpick.
 - `DELETE /api/events/<id>` -> `{ "ok": true }`: deletes the poll for everyone.
 - `POST /api/events/<id>/people` adds an entry for anyone, an organiser too (no email); give the person its link.
+- `POST /api/events/<id>/invite` `{ "names": ["Kari", "Ola"] }` -> `{ view, added, skipped }`: list who is expected, so the poll shows who hasn't answered. Each name gets its own personal link (`/link` below) to send them. Names already there (answered or not, ignoring case) are skipped. To answer for a listed name, PUT its entry with `"waiting": true`: if they answered themselves meanwhile, you get 409 `answered` and their answers stay. DELETE removes a name from the list.
 - `POST /api/events/<id>/people/<pid>/link` `{ "reset": false }` -> `{ token }`: a participant's personal link, to send to them; `"reset": true` makes a new one and the old stops working. (A participant may do this for their own entry.)
 - `POST /api/events/<id>/admin-link` -> `{ token }`: a new admin link; the old one stops working.
 
@@ -138,10 +145,10 @@ With the admin token:
 
 Errors are `{ "error": "<code>" }` with the HTTP status:
 
-- 400: `json`, `name`, `range`, `rangeLong`, `hours`, `options`, `tooMany`, `personName`, `email`, `emails` (more than 10), `person` (what the code names is wrong)
+- 400: `json`, `name`, `range`, `rangeLong`, `hours`, `options`, `tooMany`, `personName`, `email`, `emails` (more than 10), `names` (no names), `person` (what the code names is wrong)
 - 403: `forbidden` (your link may not do this), `closed`
 - 404: `notFound` (no such poll, or it is deleted), `person`
-- 405 `method`, 409 `full` (200 people), 413 `size`, 415 `type`, 429 `rate`, 503 `busy`, 500 `server`
+- 405 `method`, 409 `full` (200 people), `tooManyNames` (names and answers over 200), `taken` (that name has answered), `answered` (they answered themselves meanwhile), 413 `size`, 415 `type`, 429 `rate`, 503 `busy`, 500 `server`
 
 ## Example
 
