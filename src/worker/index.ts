@@ -15,7 +15,8 @@
 //   POST   /api/events/:id/people            { name, email?, comment?, answers, claim? } -> { pid, token, view }
 //                                             (with the admin link: no email; claim: a listed
 //                                             name's pid, to answer as them, see poll.ts)
-//   PUT    /api/events/:id/people/:pid       entry -> { view }
+//   PUT    /api/events/:id/people/:pid       entry, waiting? -> { view } (waiting: answering
+//                                             for a listed name; 409 answered if they did meanwhile)
 //   DELETE /api/events/:id/people/:pid       -> { view }
 //   POST   /api/events/:id/people/:pid/link  { reset? } (self or admin) -> { token }
 //   POST   /api/lookup                       { email, lang } -> { ok } (a code by email, see below)

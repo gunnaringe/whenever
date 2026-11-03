@@ -362,6 +362,7 @@ const nb = {
   'err.tooMany': 'For mange mulige tider (høyst 2000). Velg færre dager eller lengre ruter.',
   'err.server': 'Noe gikk galt. Prøv igjen.',
   'err.taken': 'Noen har nettopp svart under det navnet. Velg et annet, eller skriv navnet ditt.',
+  'err.answered': 'Personen har nettopp svart selv, så svarene deres er beholdt.',
   'err.names': 'Skriv minst ett navn.',
   'err.tooManyNames': 'Det blir for mange. En avstemning kan ha høyst 200 navn og svar til sammen.',
 
@@ -746,6 +747,7 @@ const en: Record<Key, Text> = {
   'err.tooMany': 'Too many possible times (at most 2000). Pick fewer days or longer slots.',
   'err.server': 'Something went wrong. Try again.',
   'err.taken': 'Someone just answered under that name. Pick another, or type your name.',
+  'err.answered': 'They’ve just answered themselves, so their answers were kept.',
   'err.names': 'Type at least one name.',
   'err.tooManyNames': 'That’s too many. An event can have at most 200 names and answers together.',
 

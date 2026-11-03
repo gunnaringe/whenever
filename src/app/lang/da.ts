@@ -350,6 +350,7 @@ export const da: Record<Key, Text> = {
   'err.tooMany': 'For mange mulige tider (højst 2000). Vælg færre dage eller længere felter.',
   'err.server': 'Noget gik galt. Prøv igen.',
   'err.taken': 'Nogen har lige svaret under det navn. Vælg et andet, eller skriv dit navn.',
+  'err.answered': 'Personen har lige svaret selv, så deres svar er bevaret.',
   'err.names': 'Skriv mindst ét navn.',
   'err.tooManyNames': 'Det bliver for mange. En aftale kan højst have 200 navne og svar tilsammen.',
 

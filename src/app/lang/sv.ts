@@ -350,6 +350,7 @@ export const sv: Record<Key, Text> = {
   'err.tooMany': 'För många möjliga tider (högst 2000). Välj färre dagar eller längre rutor.',
   'err.server': 'Något gick fel. Försök igen.',
   'err.taken': 'Någon har precis svarat med det namnet. Välj ett annat, eller skriv ditt namn.',
+  'err.answered': 'Personen har precis svarat själv, så deras svar finns kvar.',
   'err.names': 'Skriv minst ett namn.',
   'err.tooManyNames': 'Det blir för många. En träff kan ha högst 200 namn och svar sammanlagt.',
 

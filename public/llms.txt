@@ -137,7 +137,7 @@ With the admin token:
 - `PUT /api/events/<id>` `{ "event": {...}, "emails"?: [...] }` -> `{ view }`: send the whole event back (from `view.event`) with your changes; leave `emails` out to keep the organisers' addresses, or send the whole new list. Answers to options you remove are dropped. Set `event.decided` to an option (times mode: the first slot of a window) to pick the final date or time; leave it out to unpick.
 - `DELETE /api/events/<id>` -> `{ "ok": true }`: deletes the poll for everyone.
 - `POST /api/events/<id>/people` adds an entry for anyone, an organiser too (no email); give the person its link.
-- `POST /api/events/<id>/invite` `{ "names": ["Kari", "Ola"] }` -> `{ view, added, skipped }`: list who is expected, so the poll shows who hasn't answered. Each name gets its own personal link (`/link` below) to send them. Names already there (answered or not, ignoring case) are skipped. To answer for a listed name, PUT its entry; DELETE removes it from the list.
+- `POST /api/events/<id>/invite` `{ "names": ["Kari", "Ola"] }` -> `{ view, added, skipped }`: list who is expected, so the poll shows who hasn't answered. Each name gets its own personal link (`/link` below) to send them. Names already there (answered or not, ignoring case) are skipped. To answer for a listed name, PUT its entry with `"waiting": true`: if they answered themselves meanwhile, you get 409 `answered` and their answers stay. DELETE removes a name from the list.
 - `POST /api/events/<id>/people/<pid>/link` `{ "reset": false }` -> `{ token }`: a participant's personal link, to send to them; `"reset": true` makes a new one and the old stops working. (A participant may do this for their own entry.)
 - `POST /api/events/<id>/admin-link` -> `{ token }`: a new admin link; the old one stops working.
 
@@ -148,7 +148,7 @@ Errors are `{ "error": "<code>" }` with the HTTP status:
 - 400: `json`, `name`, `range`, `rangeLong`, `hours`, `options`, `tooMany`, `personName`, `email`, `emails` (more than 10), `names` (no names), `person` (what the code names is wrong)
 - 403: `forbidden` (your link may not do this), `closed`
 - 404: `notFound` (no such poll, or it is deleted), `person`
-- 405 `method`, 409 `full` (200 people), `tooManyNames` (names and answers over 200), `taken` (that name has answered), 413 `size`, 415 `type`, 429 `rate`, 503 `busy`, 500 `server`
+- 405 `method`, 409 `full` (200 people), `tooManyNames` (names and answers over 200), `taken` (that name has answered), `answered` (they answered themselves meanwhile), 413 `size`, 415 `type`, 429 `rate`, 503 `busy`, 500 `server`
 
 ## Example
 

@@ -747,8 +747,13 @@ await hc.close();
   await vis.click('.role [data-act="answer"]');
   await vis.waitForSelector('#answer-form .claim');
   check((await vis.locator('.claim legend').textContent()) === 'Er du en av disse?' && (await vis.locator('.claim .chip').count()) === 4, 'the answer form asks «Er du en av disse?» with the four names');
+  await vis.locator('#answer-form [name=name]').pressSequentially('Olav');
+  check((await vis.locator('.claim .chip[aria-pressed="true"]').count()) === 0, 'typing "Olav" passes "Ola" but picks nobody');
   await vis.fill('#answer-form [name=name]', 'ola');
   check((await vis.locator('.claim .chip[aria-pressed="true"]').textContent()) === 'Ola', 'typing a listed name picks it');
+  await vis.locator('#answer-form [name=name]').pressSequentially('v');
+  check((await vis.locator('.claim .chip[aria-pressed="true"]').count()) === 0, 'and typing on unpicks it');
+  await vis.fill('#answer-form [name=name]', 'ola');
   await vis.locator('.claim .chip', { hasText: 'Siri' }).click();
   check((await vis.inputValue('#answer-form [name=name]')) === 'Siri' && (await vis.locator('.claim .chip[aria-pressed="true"]').textContent()) === 'Siri', 'tapping another name picks that one and fills it in');
   await vis.locator('.claim .chip', { hasText: 'Ola' }).click();
@@ -764,6 +769,24 @@ await hc.close();
   check((await api('GET', undefined, '', olaOld)).view.link === 'invalid', 'and the link sent to Ola before no longer works');
   const again = await api('POST', { name: 'Ola', answers: {}, claim: id('Ola') }, '/people', null);
   check(again.status === 409 && again.error === 'taken', 'answering as a name that has answered: 409 taken');
+
+  // The admin answers for Siri while she answers herself: hers stay.
+  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.waitForSelector('.plist li.wait');
+  await ad.locator('.plist li.wait', { hasText: 'Siri' }).locator('[data-act="edit-entry"]').click();
+  await ad.waitForSelector('#answer-form');
+  const siriTok = (await api('POST', { reset: false }, `/people/${id('Siri')}/link`)).token;
+  await api('PUT', { name: 'Siri', comment: '', email: '', answers: { [days[2]]: 1 } }, `/people/${id('Siri')}`, siriTok);
+  await day(ad, D(0)).click();
+  await ad.click('[data-act="save-answer"]');
+  await ad.waitForSelector('.people h2 .count');
+  check((await ad.locator('#toast').textContent()).startsWith('Personen har nettopp svart selv'), 'the admin answering for Siri as she answers herself: told so');
+  a = (await api('GET')).view;
+  const siri = a.people.find((p) => p.name === 'Siri');
+  check(siri && JSON.stringify(siri.answers) === JSON.stringify({ [days[2]]: 1 }), 'and her own answers stay');
+  // Back to waiting for the rest of this section: remove her answers' entry and list her again.
+  await api('DELETE', undefined, `/people/${id('Siri')}`);
+  ids.Siri = (await api('POST', { names: ['Siri'] }, '/invite')).view.waiting.find((w) => w.name === 'Siri').id;
 
   // The admin answers for Per with nothing marked: answered, can't make any.
   await ad.goto(`${BASE}/e/${made.id}/${made.token}`);

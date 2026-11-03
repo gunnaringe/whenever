@@ -48,8 +48,13 @@ interface Draft extends M.DayWindow {
 // The answer editor's state while it is open.
 interface AnswerDraft {
   pid: string | null;
-  // A new answer as one of the listed names still waiting (its id).
+  // A new answer as one of the listed names still waiting (its id), and
+  // whether typing the name picked it (then typing on can unpick it).
   claim: string | null;
+  claimTyped: boolean;
+  // Opened on a listed name still waiting: saving mustn't overwrite the
+  // answers if they answer themselves meanwhile (poll.ts).
+  waiting: boolean;
   own: boolean;
   name: string;
   comment: string;
@@ -1838,6 +1843,8 @@ function renderAnswer(v: M.View, sub: string | null): void {
     app.answer = {
       pid: target?.id ?? null,
       claim: null,
+      claimTyped: false,
+      waiting: Boolean(target?.waiting),
       own,
       name: target?.name ?? '',
       comment: target?.comment ?? '',
@@ -1909,10 +1916,11 @@ function renderAnswer(v: M.View, sub: string | null): void {
       a[n] = el.value;
       a.dirty = true;
     }
-    // Typing a listed name picks it.
-    if (n === 'name' && !a.claim) {
+    // Typing a listed name picks it, and typing on ("Ola" to "Olav")
+    // unpicks it again. A name tapped stays picked ("Kari N.").
+    if (n === 'name' && (!a.claim || a.claimTyped)) {
       const w = claimable.find((x) => M.nameKey(x.name) === M.nameKey(el.value));
-      if (w) setClaim(w.id);
+      if ((w?.id ?? null) !== a.claim) setClaim(w?.id ?? null, true);
     }
   });
   form.addEventListener('submit', (e) => {
@@ -1932,9 +1940,10 @@ function claimHtml(list: M.Waiting[], admin: boolean, on: string | null): string
 }
 
 // Pick a listed name to answer as (again: unpick), and fill in the name.
-function setClaim(pid: string | null): void {
+function setClaim(pid: string | null, typed = false): void {
   const a = answer();
   a.claim = pid;
+  a.claimTyped = typed && pid !== null;
   a.dirty = true;
   const w = pid ? waitingOf(current()).find((x) => x.id === pid) : null;
   const input = $opt<HTMLInputElement>('#answer-form [name="name"]');
@@ -2095,6 +2104,7 @@ async function saveAnswer(): Promise<void> {
   // The admin answers for a listed name by changing its entry.
   const pid = a.pid ?? (v.role === 'admin' ? a.claim : null);
   if (a.claim && !pid) Object.assign(body, { claim: a.claim });
+  if (pid && (a.waiting || pid === a.claim)) Object.assign(body, { waiting: true });
   setBusy(true);
   try {
     if (pid) {
@@ -2119,6 +2129,18 @@ async function saveAnswer(): Promise<void> {
     }
   } catch (e) {
     toast(errText(e));
+    // They answered themselves while the admin was answering for them:
+    // their answers stay, and so does the page with them.
+    if (e instanceof ApiError && e.code === 'answered') {
+      app.answer = null;
+      try {
+        setView((await api<{ view: M.View }>('GET', `/events/${id}`, { token })).view);
+      } catch {
+        // The live update brings it.
+      }
+      closeSub();
+      return;
+    }
     // Someone else answered as that name meanwhile: show what's left.
     if (e instanceof ApiError && (e.code === 'taken' || e.code === 'person') && a.claim) {
       a.claim = null;

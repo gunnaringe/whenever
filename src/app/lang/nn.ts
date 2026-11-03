@@ -350,6 +350,7 @@ export const nn: Record<Key, Text> = {
   'err.tooMany': 'For mange moglege tider (høgst 2000). Vel færre dagar eller lengre ruter.',
   'err.server': 'Noko gjekk gale. Prøv igjen.',
   'err.taken': 'Nokon har nett svart under det namnet. Vel eit anna, eller skriv namnet ditt.',
+  'err.answered': 'Personen har nett svart sjølv, så svara deira står som dei er.',
   'err.names': 'Skriv minst eitt namn.',
   'err.tooManyNames': 'Det blir for mange. Ei avrøysting kan ha høgst 200 namn og svar til saman.',
 

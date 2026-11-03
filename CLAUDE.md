@@ -179,7 +179,9 @@ transforming (enums, namespaces, parameter properties) is off
   working and the event link never hands out another's link; 409 `taken`
   if it was answered meanwhile. Not with hidden answers, not for a
   participant or the admin (the admin answers for a name by editing its
-  row). The app reads `waiting`/`waitingCount` with defaults, since a Poll
+  row, with `waiting: true`, so 409 `answered` if the person answered
+  themself meanwhile, and their answers stay). Typing a listed name picks
+  it and typing on unpicks it ("Ola" → "Olav"); a tapped name stays. The app reads `waiting`/`waitingCount` with defaults, since a Poll
   object can still run the code from before right after a deploy. «Kopier
   påminnelse» copies the waiting names with the event link for a group
   chat.

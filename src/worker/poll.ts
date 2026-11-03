@@ -72,6 +72,7 @@ const deleteAt = (ev: PollEvent) => Math.max(expiresAt(ev), Date.now() + MIN_LIF
 const lookup = (env: Env) => env.LOOKUP.getByName('lookup');
 const visitor = (link: LinkState): Who => ({ role: 'visitor', me: null, link });
 const TAKEN: Failure = { error: 'taken', status: 409 };
+const ANSWERED: Failure = { error: 'answered', status: 409 };
 
 // A live socket's state (serializeAttachment): the link it sent, if it has
 // sent one yet, and when, for the 2 s limit.
@@ -403,12 +404,15 @@ export class Poll extends DurableObject<Env> {
     if (!this.exists()) return NOT_FOUND;
     const who = this.who(cred);
     const ev = this.event();
-    const row = this.sql.exec<{ email: string }>(`SELECT email FROM people WHERE id = ?`, pid).toArray()[0];
+    const row = this.sql.exec<{ email: string; replied: number }>(`SELECT email, replied FROM people WHERE id = ?`, pid).toArray()[0];
     if (!row) return NO_PERSON;
     if (!canEdit(who, ev.settings, pid)) return FORBIDDEN;
     // Only the person themself sees or changes their email.
     const own = who.me === pid;
     const o = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+    // Someone answering for a listed name (waiting: true) never overwrites
+    // what that person has answered themself meanwhile.
+    if (o.waiting === true && row.replied && !own) return ANSWERED;
     const r = sanitizeEntry({ ...o, email: own ? o.email ?? '' : undefined }, ev);
     if (!r.ok) return { error: r.error, status: 400 };
     // Saving answers, even with nothing marked (see the top).
