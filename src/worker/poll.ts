@@ -19,6 +19,15 @@
 // Methods return data, or { error, status } for the Worker to send.
 // Storage is wiped by an alarm 30 days after the event's last date.
 //
+// Live updates: GET /api/events/:id/live is a WebSocket to this object
+// (fetch()), held with the hibernation API, so an idle one costs nothing and
+// stays open across deploys. The page sends its link as the first message,
+// {"token": "<token>" | null}, never in the URL, and again whenever it wants
+// a fresh view (at most every 2 s). After every change each socket gets its
+// own view (who(), checked again each time, so a replaced link gets no more
+// than a visitor), and the app's version, so an open page knows when a new
+// one is live. "ping" gets "pong" without waking the object.
+//
 // The email index (lookup.ts) learns which addresses this event has after
 // every change to them, and that they are gone when the event is. That call
 // comes last, after the event's own writes, and a failure never fails the
@@ -27,8 +36,8 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { LIMITS, sanitizeEntry, cleanAnswers, canAdd, canEdit, expiresAt } from '../shared/model.ts';
-import type { Added, Created, LinkState, Person, PollEvent, View, Who } from '../shared/model.ts';
-import { newPid, newSecret, token, same } from './link.ts';
+import type { Added, Created, LinkState, LiveMessage, Person, PollEvent, View, Who } from '../shared/model.ts';
+import { newPid, newSecret, token, same, parse } from './link.ts';
 import type { Credential } from './link.ts';
 import type { EventPreview } from './preview.ts';
 
@@ -48,6 +57,29 @@ const deleteAt = (ev: PollEvent) => Math.max(expiresAt(ev), Date.now() + MIN_LIF
 const lookup = (env: Env) => env.LOOKUP.getByName('lookup');
 const visitor = (link: LinkState): Who => ({ role: 'visitor', me: null, link });
 
+// A live socket's state (serializeAttachment): the link it sent, if it has
+// sent one yet, and when, for the 2 s limit.
+interface Live {
+  hello: boolean;
+  cred: Cred;
+  at: number;
+}
+const HELLO_EVERY = 2000;
+
+// The version of the app that is live: the hash in index.html's script name
+// (scripts/build.mjs). Read once per isolate; a deploy brings a new one.
+let appVersion: Promise<string> | null = null;
+function liveApp(env: Env): Promise<string> {
+  appVersion ??= env.ASSETS.fetch('https://assets.local/')
+    .then((r) => r.text())
+    .then((html) => /\/app-([A-Za-z0-9]+)\.js/.exec(html)?.[1] ?? '')
+    .catch(() => {
+      appVersion = null;
+      return '';
+    });
+  return appVersion;
+}
+
 type PersonRow = {
   id: string;
   name: string;
@@ -63,6 +95,7 @@ export class Poll extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
   }
 
   tables() {
@@ -138,7 +171,7 @@ export class Poll extends DurableObject<Env> {
       if (r.id === who.me) p.email = r.email;
       people.push(p);
     }
-    const out: View = { event: ev, role: who.role, me: who.me, link: who.link, people, count: rows.length, hidden };
+    const out: View = { event: ev, role: who.role, me: who.me, link: who.link, people, count: rows.length, hidden, rev: Number(this.getMeta('rev') ?? 0) };
     if (who.role === 'admin') out.adminEmails = this.adminEmails();
     return out;
   }
@@ -230,8 +263,10 @@ export class Poll extends DurableObject<Env> {
       if (a !== r.answers) this.sql.exec(`UPDATE people SET answers = ? WHERE id = ?`, a, r.id);
     }
     await this.ctx.storage.setAlarm(deleteAt(event));
+    this.bump();
     const out = { view: this.view(who) };
     await this.reindex();
+    await this.push();
     return out;
   }
 
@@ -240,6 +275,7 @@ export class Poll extends DurableObject<Env> {
     if (this.who(cred).role !== 'admin') return FORBIDDEN;
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
+    this.gone();
     await this.unindex();
     return { ok: true };
   }
@@ -266,8 +302,10 @@ export class Poll extends DurableObject<Env> {
     );
     // An admin adding an entry stays admin; anyone else is now that participant.
     const viewer: Who = who.role === 'admin' ? who : { role: 'participant', me: pid, link: 'ok' };
+    this.bump();
     const out = { pid, token: token(pid, secret), view: this.view(viewer) };
     if (r.entry.email) await this.reindex();
+    await this.push();
     return out;
   }
 
@@ -285,8 +323,10 @@ export class Poll extends DurableObject<Env> {
     if (!r.ok) return { error: r.error, status: 400 };
     this.sql.exec(`UPDATE people SET name = ?, comment = ?, answers = ?, updated = ? WHERE id = ?`, r.entry.name, r.entry.comment, JSON.stringify(r.entry.answers), Date.now(), pid);
     if (own) this.sql.exec(`UPDATE people SET email = ? WHERE id = ?`, r.entry.email ?? '', pid);
+    this.bump();
     const out = { view: this.view(who) };
     if (own) await this.reindex();
+    await this.push();
     return out;
   }
 
@@ -300,8 +340,10 @@ export class Poll extends DurableObject<Env> {
     this.sql.exec(`DELETE FROM people WHERE id = ?`, pid);
     // A participant who deleted their own entry has no link left; the admin stays admin.
     const viewer = who.role === 'admin' ? this.admin() : who.me === pid ? visitor('none') : who;
+    this.bump();
     const out = { view: this.view(viewer) };
     if (row.email) await this.reindex();
+    await this.push();
     return out;
   }
 
@@ -330,6 +372,75 @@ export class Poll extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     await this.ctx.storage.deleteAll();
+    this.gone();
     await this.unindex();
+  }
+
+  // --- Live updates (see the top) ----------------------------------------------------
+
+  bump(): void {
+    this.setMeta('rev', Number(this.getMeta('rev') ?? 0) + 1);
+  }
+
+  override async fetch(req: Request): Promise<Response> {
+    if ((req.headers.get('upgrade') ?? '').toLowerCase() !== 'websocket') return Response.json({ error: 'upgrade' }, { status: 426 });
+    if (!this.exists()) return Response.json({ error: 'notFound' }, { status: 404 });
+    const [client, server] = Object.values(new WebSocketPair());
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ hello: false, cred: null, at: 0 } satisfies Live);
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    const live = ws.deserializeAttachment() as Live | null;
+    const now = Date.now();
+    if (typeof message !== 'string' || message.length > 200 || !live || now - live.at < HELLO_EVERY) return;
+    let tok: unknown;
+    try {
+      tok = (JSON.parse(message) as { token?: unknown }).token;
+    } catch {
+      return;
+    }
+    const cred: Cred = tok === null || tok === undefined ? null : (parse(tok) ?? { bad: true });
+    ws.serializeAttachment({ hello: true, cred, at: now } satisfies Live);
+    if (!this.exists()) return this.gone();
+    ws.send(JSON.stringify({ type: 'view', view: this.view(this.who(cred)), app: await liveApp(this.env) } satisfies LiveMessage));
+  }
+
+  // After a change: every socket that has said hello gets its own view.
+  // Sockets with the same role, entry and link state get the same text.
+  async push(): Promise<void> {
+    const sockets = this.ctx.getWebSockets();
+    if (!sockets.length) return;
+    const app = await liveApp(this.env);
+    const sent = new Map<string, string>();
+    for (const ws of sockets) {
+      const live = ws.deserializeAttachment() as Live | null;
+      if (!live?.hello) continue;
+      const who = this.who(live.cred);
+      const key = `${who.role} ${who.me} ${who.link}`;
+      let text = sent.get(key);
+      if (text === undefined) {
+        text = JSON.stringify({ type: 'view', view: this.view(who), app } satisfies LiveMessage);
+        sent.set(key, text);
+      }
+      try {
+        ws.send(text);
+      } catch {
+        // Closing already; the page reconnects or falls back.
+      }
+    }
+  }
+
+  // The event is deleted: tell every socket, and close it.
+  gone(): void {
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.send(JSON.stringify({ type: 'gone' } satisfies LiveMessage));
+        ws.close(1000, 'gone');
+      } catch {
+        // Already closed.
+      }
+    }
   }
 }

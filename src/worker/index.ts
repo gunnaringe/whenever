@@ -10,6 +10,7 @@
 //   PUT    /api/events/:id                   { event, emails? } (admin) -> { view }
 //   DELETE /api/events/:id                   (admin) -> { ok }
 //   POST   /api/events/:id/admin-link        (admin) new admin link -> { token }
+//   GET    /api/events/:id/live              WebSocket: live views (poll.ts)
 //   POST   /api/events/:id/people            { name, email?, comment?, answers } -> { pid, token, view }
 //                                             (with the admin link: no email)
 //   PUT    /api/events/:id/people/:pid       entry -> { view }
@@ -242,7 +243,7 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
     throw new HttpError(503, 'busy');
   }
 
-  const m = pathname.match(/^\/api\/events\/([^/]+)(?:\/(admin-link|people)(?:\/([^/]+)(\/link)?)?)?$/);
+  const m = pathname.match(/^\/api\/events\/([^/]+)(?:\/(admin-link|live|people)(?:\/([^/]+)(\/link)?)?)?$/);
   if (!m || !ID_RE.test(m[1])) throw new HttpError(404, 'notFound');
   const [, id, sub, pid, linkPath] = m;
   if (pid !== undefined && !PID_RE.test(pid)) throw new HttpError(404, 'person');
@@ -257,6 +258,11 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
     }
     if (method === 'DELETE') return send(await poll.destroy(cred));
     throw new HttpError(405, 'method');
+  }
+
+  if (sub === 'live') {
+    if (method !== 'GET' || pid) throw new HttpError(405, 'method');
+    return poll.fetch(req);
   }
 
   if (sub === 'admin-link') {

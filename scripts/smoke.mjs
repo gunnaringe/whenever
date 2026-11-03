@@ -893,6 +893,154 @@ await fu.waitForSelector('#toast:not([hidden])');
 check((await fu.locator('#toast').textContent()).includes('feil eller utløpt'), 'and any code there is just "wrong or expired"');
 await fu.close();
 
+// --- W) Live updates: what others do shows up without a reload -------------------------------
+{
+  const days = [D(0), D(1), D(2)];
+  const ip = devIp();
+  const api = (path, method, body, token) =>
+    fetch(`${BASE}/api/events${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', 'x-dev-ip': ip, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: body && JSON.stringify(body),
+    }).then((r) => r.json());
+  const ev = { name: 'Live', mode: 'dates', start: days[0], end: days[2], options: days };
+  const made = await api('', 'POST', { event: ev, emails: [] });
+  const row = (p, name) => p.locator(`.plist li:has-text("${name}")`);
+  const ad = await page();
+  await ad.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
+  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.waitForSelector('html[data-live="open"]');
+  await ad.evaluate(() => (window.__same = 1));
+  const kari = await api(`/${made.id}/people`, 'POST', { name: 'Kari', comment: '', answers: { [days[0]]: 1, [days[1]]: 1 } });
+  await row(ad, 'Kari').waitFor({ timeout: 5000 });
+  check(await ad.evaluate(() => window.__same === 1), "someone's answers show up on the organiser's page by themselves, without a reload");
+  check((await row(ad, 'Kari').getAttribute('class'))?.includes('fresh'), 'and the new row is marked for a moment');
+  await ad.evaluate(() => window.scrollTo(0, 260));
+  const y = await ad.evaluate(() => window.scrollY);
+  await api(`/${made.id}/people`, 'POST', { name: 'Ola', comment: '', answers: { [days[1]]: 1 } });
+  await row(ad, 'Ola').waitFor({ timeout: 5000 });
+  check(y > 0 && (await ad.evaluate(() => window.scrollY)) === y, `and the page stays where it was scrolled to (${y})`);
+  await ad.locator('.plist').screenshot({ path: `${SHOTS}/42-live-fresh.png` });
+  // A menu open: the page waits, then catches up once it closes.
+  await ad.click('[data-act="admin-more"]');
+  await api(`/${made.id}/people`, 'POST', { name: 'Per', comment: '', answers: { [days[2]]: 2 } });
+  await ad.waitForTimeout(1500);
+  check((await row(ad, 'Per').count()) === 0, 'with a menu open, the page is not drawn again under it');
+  await ad.keyboard.press('Escape');
+  await row(ad, 'Per').waitFor({ timeout: 3000 });
+  check(true, 'and catches up once it is closed');
+  // In a form: the answers stay as typed; a change to the event itself is said once.
+  const kp = await page();
+  await kp.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
+  await kp.goto(`${BASE}/e/${made.id}/${kari.token}#answer`);
+  await kp.waitForSelector('html[data-live="open"]');
+  await kp.waitForSelector('#pick-area');
+  await api(`/${made.id}`, 'PUT', { event: { ...ev, name: 'Live 2' } }, made.token);
+  await kp.waitForSelector('#toast:not([hidden])', { timeout: 5000 });
+  check((await kp.locator('#toast').textContent()).includes('endret nettopp'), 'someone answering is told once that the event just changed');
+  check((await kp.locator('#pick-area').count()) === 1, 'and stays in the form');
+  await kp.close();
+
+  // Hidden answers: each socket gets its own view, checked again every time.
+  const hid = await api('', 'POST', { event: { ...ev, name: 'Hemmelig', settings: { hidden: true } }, emails: [] });
+  const hk = await api(`/${hid.id}/people`, 'POST', { name: 'Kari', comment: '', answers: { [days[0]]: 1 } });
+  const sock = async (id, token) => {
+    const ws = new WebSocket(`${BASE.replace(/^http/, 'ws')}/api/events/${id}/live`);
+    const got = [];
+    ws.onmessage = (e) => got.push(e.data);
+    ws.closed = new Promise((r) => ws.addEventListener('close', (e) => r(e)));
+    await new Promise((r, j) => ((ws.onopen = r), (ws.onerror = j)));
+    ws.send(JSON.stringify({ token }));
+    await waitFor(() => got.length > 0);
+    return { ws, got, last: () => JSON.parse(got.at(-1)) };
+  };
+  const waitFor = async (ok, ms = 5000) => {
+    for (const end = Date.now() + ms; !ok() && Date.now() < end; ) await new Promise((r) => setTimeout(r, 50));
+    return ok();
+  };
+  const sa = await sock(hid.id, hid.token);
+  const sk = await sock(hid.id, hk.token);
+  const sv = await sock(hid.id, null);
+  check(sa.last().type === 'view' && sa.last().view.role === 'admin' && sk.last().view.role === 'participant' && sv.last().view.role === 'visitor', 'live: the first message says who, and the view comes back for that link');
+  check(/^[A-Za-z0-9]+$/.test(sa.last().app), `with the live app version (${sa.last().app})`);
+  const n = [sa, sk, sv].map((s) => s.got.length);
+  await api(`/${hid.id}/people`, 'POST', { name: 'Ola', comment: '', answers: { [days[1]]: 1 } });
+  check(await waitFor(() => sa.got.length > n[0] && sk.got.length > n[1] && sv.got.length > n[2]), 'a change goes to every socket');
+  check(sa.last().view.people.length === 2 && sa.last().view.rev > 0, 'the organiser gets everyone, and a newer rev');
+  check(sk.last().view.people.length === 1 && sk.last().view.count === 2 && !sk.got.at(-1).includes('Ola'), 'in a hidden poll, a participant gets only their own answers');
+  check(sv.last().view.people.length === 0 && !sv.got.at(-1).includes('Kari'), 'and a visitor nobody’s');
+  // The organiser makes a new link for Kari: her old one gets no more of her view.
+  await api(`/${hid.id}/people/${hk.pid}/link`, 'POST', { reset: true }, hid.token);
+  const m = sk.got.length;
+  await api(`/${hid.id}/people`, 'POST', { name: 'Per', comment: '', answers: {} });
+  check(await waitFor(() => sk.got.length > m), 'the old link still gets a message');
+  check(sk.last().view.role === 'visitor' && sk.last().view.link === 'invalid' && sk.last().view.people.length === 0, 'but as a visitor with an invalid link');
+  // Too often, too long, or not JSON: ignored, and the socket stays.
+  sv.ws.send(JSON.stringify({ token: null }));
+  sv.ws.send('x'.repeat(500));
+  sv.ws.send('not json');
+  sv.ws.send('ping');
+  const pong = await waitFor(() => sv.got.at(-1) === 'pong');
+  check(pong && sv.ws.readyState === WebSocket.OPEN, 'junk is ignored, and "ping" gets "pong"');
+  await api(`/${hid.id}`, 'DELETE', undefined, hid.token);
+  const closed = await Promise.all([sa, sk, sv].map((s) => s.ws.closed));
+  check([sa, sk, sv].every((s) => s.got.at(-1) === '{"type":"gone"}') && closed.every((e) => e.code === 1000 && e.reason === 'gone'), 'deleting the poll tells every socket, and closes it');
+  const late = new WebSocket(`${BASE.replace(/^http/, 'ws')}/api/events/${hid.id}/live`);
+  check(await new Promise((r) => ((late.onopen = () => r(false)), (late.onerror = () => r(true)))), 'and a new socket to it is refused');
+
+  // No live socket (blocked or failing): the 30 s refresh and tab focus still work.
+  const fb = await page();
+  await fb.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
+  await fb.addInitScript(() => {
+    window.WebSocket = class extends EventTarget {
+      static OPEN = 1;
+      readyState = 0;
+      constructor() {
+        super();
+        setTimeout(() => {
+          this.readyState = 3;
+          this.onerror?.(new Event('error'));
+          this.onclose?.(new CloseEvent('close', { code: 1006 }));
+        }, 20);
+      }
+      send() {}
+      close() {}
+    };
+  });
+  await fb.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await fb.waitForSelector('.plist');
+  await fb.waitForTimeout(200);
+  check((await fb.evaluate(() => document.documentElement.dataset.live)) === 'closed', 'without WebSockets the page still works');
+  await api(`/${made.id}/people`, 'POST', { name: 'Siv', comment: '', answers: { [days[0]]: 2 } });
+  await fb.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await row(fb, 'Siv').waitFor({ timeout: 5000 });
+  check(true, 'and catches up when the tab is shown again');
+  await fb.close();
+
+  // A new version is live: a notice with a button to reload.
+  const old = await page();
+  await old.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
+  await old.routeWebSocket(/\/live$/, (ws) => {
+    const server = ws.connectToServer();
+    server.onMessage((msg) => ws.send(typeof msg === 'string' ? msg.replace(/"app":"[^"]*"/, '"app":"OLDER"') : msg));
+  });
+  await old.goto(`${BASE}/e/${made.id}/${made.token}`);
+  const notice = old.locator('#update');
+  await notice.waitFor({ timeout: 5000 });
+  check((await notice.textContent()).includes('En ny versjon er klar.') && (await notice.locator('[data-act="reload"]').isVisible()), 'an app older than the live one says so, with a button to reload');
+  await shot(old, '43-live-new-version', false);
+  await old.evaluate(() => (window.__same = 1));
+  await Promise.all([old.waitForEvent('load'), old.click('#update [data-act="reload"]')]);
+  check(await old.evaluate(() => window.__same === undefined), 'and the button reloads the page');
+  await old.close();
+
+  // The poll is deleted elsewhere: the open page says so.
+  await api(`/${made.id}`, 'DELETE', undefined, made.token);
+  await ad.waitForSelector('h1:has-text("Fant ikke")', { timeout: 5000 });
+  check((await ad.evaluate(() => document.documentElement.dataset.live)) === 'closed', 'a page on a poll deleted elsewhere shows "not found" and stops');
+  await ad.close();
+}
+
 // --- L) Languages: a menu under the language code ----------------------------------------
 const lg = await page();
 await lg.goto(`${BASE}/`);
