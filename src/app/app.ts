@@ -180,8 +180,6 @@ const linkUrl = (id: string, token: string | null) => `${location.origin}/e/${id
 // The names the organisers listed that haven't answered (none from a Poll
 // object still on the code from before them).
 const waitingOf = (v: M.View): M.Waiting[] => v.waiting ?? [];
-// "6 av 15" counts everyone listed or answered, also hidden ones.
-const expected = (v: M.View): number => v.count + (v.waitingCount ?? 0);
 
 // An entry by id: one who answered, or a listed name still waiting (as an
 // entry with no answers).
@@ -1537,7 +1535,7 @@ function bestHtml(v: M.View): string {
 function resultsHtml(v: M.View): string {
   const ev = v.event;
   const title = `<h2>${esc(t('resultsTitle'))}</h2>`;
-  if (v.hidden) return `<section class="card results">${title}<p class="muted">${esc(t('hiddenInfo', { n: v.count }))}</p></section>`;
+  if (v.hidden) return `<section class="card results">${title}<p class="muted">${esc(t('hiddenInfo'))}</p></section>`;
   const tabs: Tab[] = ev.mode === 'dates' ? ['cal', 'list', 'table'] : ['grid', 'list'];
   if (!app.tab || !tabs.includes(app.tab)) app.tab = tabs[0];
   return `<section class="card results">
@@ -1751,14 +1749,17 @@ function peopleHtml(v: M.View, stored: Stored | null): string {
       </li>`;
     })
     .join('');
-  const total = expected(v);
-  const listed = total > v.count;
-  const pct = total ? (100 * v.count) / total : 0;
+  // "6 av 15": everyone listed or answered. With hidden answers only the
+  // admin gets the numbers (poll.ts), so the others see none.
+  const n = v.count;
+  const total = (n ?? 0) + (v.waitingCount ?? 0);
+  const listed = n !== undefined && total > n;
+  const pct = total ? (100 * (n ?? 0)) / total : 0;
   return `<section class="card people">
-    <h2>${esc(t('responses'))} <span class="count">${listed ? esc(t('nOfTotal', { n: v.count, m: total })) : v.count}</span></h2>
-    ${listed ? `<div class="progress" role="img" aria-label="${esc(t('answeredOf', { n: v.count, m: total }))}"><i style="width:${pct.toFixed(1)}%"></i></div>` : ''}
+    <h2>${esc(t('responses'))}${n === undefined ? '' : ` <span class="count">${listed ? esc(t('nOfTotal', { n, m: total })) : n}</span>`}</h2>
+    ${listed ? `<div class="progress" role="img" aria-label="${esc(t('answeredOf', { n, m: total }))}"><i style="width:${pct.toFixed(1)}%"></i></div>` : ''}
     ${v.hidden ? `<p class="muted small">${esc(t('hiddenPeople'))}</p>` : ''}
-    ${rows ? `<ul class="plist">${rows}</ul>` : `<p class="muted">${esc(t('noAnswersYet'))}</p>`}
+    ${rows ? `<ul class="plist">${rows}</ul>` : v.hidden ? '' : `<p class="muted">${esc(t('noAnswersYet'))}</p>`}
     ${waitingHtml(v, stored)}
   </section>`;
 }
