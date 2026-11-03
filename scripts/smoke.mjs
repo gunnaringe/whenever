@@ -1017,13 +1017,31 @@ await fu.close();
   check(true, 'and catches up when the tab is shown again');
   await fb.close();
 
-  // A new version is live: a notice with a button to reload.
+  // A new version is live: a bar with a button to reload. The socket names
+  // another version, and the page itself (/, never cached) confirms it.
+  const olderSocket = (p) =>
+    p.routeWebSocket(/\/live$/, (ws) => {
+      const server = ws.connectToServer();
+      server.onMessage((msg) => ws.send(typeof msg === 'string' ? msg.replace(/"app":"[^"]*"/, '"app":"OLDER"') : msg));
+    });
+  const asked = (p) => p.waitForResponse((r) => new URL(r.url()).pathname === '/' && r.request().resourceType() === 'fetch');
+  // Right after a deploy the Poll object may still name the old version: the page says ours is current, so no bar.
+  const fresh = await page();
+  await fresh.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
+  await olderSocket(fresh);
+  const freshAsked = asked(fresh);
+  await fresh.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await freshAsked;
+  await fresh.waitForTimeout(300);
+  check((await fresh.locator('#update').count()) === 0, 'a socket naming another version alone shows no bar, while the page itself serves ours');
+  await fresh.close();
   const old = await page();
   await old.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
-  await old.routeWebSocket(/\/live$/, (ws) => {
-    const server = ws.connectToServer();
-    server.onMessage((msg) => ws.send(typeof msg === 'string' ? msg.replace(/"app":"[^"]*"/, '"app":"OLDER"') : msg));
-  });
+  await olderSocket(old);
+  await old.route(
+    (u) => new URL(u).pathname === '/',
+    (r) => (r.request().resourceType() === 'fetch' ? r.fulfill({ contentType: 'text/html', body: '<script type="module" src="/app-NEWER123.js"></script>' }) : r.continue()),
+  );
   await old.goto(`${BASE}/e/${made.id}/${made.token}`);
   const notice = old.locator('#update');
   await notice.waitFor({ timeout: 5000 });

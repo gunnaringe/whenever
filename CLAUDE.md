@@ -223,8 +223,11 @@ transforming (enums, namespaces, parameter properties) is off
   focus, and changed rows get `.fresh` for a moment. Someone in a form is
   told once (`changedMeanwhile`) if the event itself changed. Each message
   also has `app`, the hash in the live `app-<hash>.js` (the `Poll` object
-  reads it from `index.html` via `ASSETS`); if it isn't ours, a bar above
-  the header offers a reload (`newVersion`). `live.ts` reconnects (1, 2, 5,
+  reads it from `index.html` via `ASSETS`); if it isn't ours, the app asks
+  `/` (never cached) which app is live now, and only if that isn't ours
+  either does a bar above the header offer a reload (`checkVersion`,
+  `newVersion`): right after a deploy the object can still run the old
+  version, since Durable Objects take new code later. `live.ts` reconnects (1, 2, 5,
   10, then every 30 s; it gives up after five tries if it never opened) and
   sets `<html data-live="open|closed">`. Without an open socket, the old
   refresh still runs: every 30 s and on tab focus while idle

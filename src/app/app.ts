@@ -2420,7 +2420,7 @@ const idle = () => app.route?.page === 'event' && subView().kind === 'overview' 
 
 // A message on the event's live socket (live.ts). Only the latest counts.
 function onLive(m: M.LiveMessage, key: string): void {
-  if (m.type === 'view' && m.app && APP && m.app !== APP) newVersion();
+  if (m.type === 'view' && m.app && APP && m.app !== APP) void checkVersion(m.app);
   app.liveMsg = { m, key };
   applyLive();
 }
@@ -2484,7 +2484,25 @@ setInterval(() => {
   if (app.stale && idle()) redraw(null);
 }, 1000);
 
-// A new version of the app is live: say so once, with a button to reload.
+// The event's Poll object runs a different app version than ours. Right
+// after a deploy it can still be the old one (Durable Objects take new code
+// later), so ask the page itself which app is live now (the HTML is never
+// cached) and only offer a reload if that one isn't ours either. Once per
+// version the socket names (again after a failed check).
+let versionAsked = '';
+async function checkVersion(other: string): Promise<void> {
+  if (versionAsked === other || $opt('#update')) return;
+  versionAsked = other;
+  try {
+    const html = await (await fetch('/', { cache: 'no-store' })).text();
+    const now = /\/app-([A-Za-z0-9]+)\.js/.exec(html)?.[1];
+    if (now && now !== APP) newVersion();
+  } catch {
+    versionAsked = '';
+  }
+}
+
+// A new version of the app is live: say so once, above the header, with a button to reload.
 function newVersion(): void {
   if ($opt('#update')) return;
   const el = document.createElement('div');
