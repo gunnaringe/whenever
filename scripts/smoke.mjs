@@ -1116,8 +1116,10 @@ await hc.close();
   const { newNames, claims, rename, decide, details, ...old } = ev0.view.event.settings;
   const put = await call(ev0, 'PUT', { event: { ...ev0.view.event, name: 'Gammel klient 2', settings: { ...old } } });
   check(put.status === 200 && !put.view.event.settings.newNames && put.view.event.settings.decide && put.view.event.settings.details, 'the admin’s PUT without the new settings keeps them');
-  const hid = await call(ev0, 'PUT', { event: { ...put.view.event, settings: { ...put.view.event.settings, hidden: true, openEdit: true } } });
-  check(hid.view.event.settings.hidden && !hid.view.event.settings.decide && !hid.view.event.settings.openEdit && !hid.view.event.settings.claims, 'with hidden answers, picking, open editing and claims go off');
+  const hid = await call(ev0, 'PUT', { event: { ...put.view.event, settings: { ...put.view.event.settings, hidden: true } } });
+  check(hid.view.event.settings.hidden && (await call(ev0, 'POST', { decided: days[0] }, '/decide', null)).status === 403, 'with hidden answers, nobody else picks (the setting stays for later)');
+  const unhid = await call(ev0, 'PUT', { event: { ...hid.view.event, settings: { ...hid.view.event.settings, hidden: false } } });
+  check(unhid.view.event.settings.decide && (await call(ev0, 'POST', { decided: days[0] }, '/decide', null)).status === 200, 'and un-hiding brings it back');
 
   // Only the listed names answer (newNames off).
   const lo = await mk('Bare lista', { newNames: false });
@@ -1207,6 +1209,7 @@ await hc.close();
   const dv = (await call(dc, 'GET')).view;
   check(dv.event.decided === days[1] && !dv.event.settings.closed && (await dp.locator('.role [data-act="answer"]').count()) === 1, 'a visitor picks the date, and the poll stays open');
   check((await call(dc, 'POST', { decided: 'x' }, '/decide', null)).error === 'decided', 'something not an option gets 400 decided');
+  check((await call(dc, 'POST', { decide: days[0] }, '/decide', null)).error === 'decided' && (await call(dc, 'GET')).view.event.decided === days[1], 'a body without «decided» too, and the pick stays');
   check((await call(dc, 'POST', { decided: null }, '/decide', null)).view.event.decided === undefined, 'and anyone can unpick it');
   check((await call(plain, 'POST', { decided: days[0] }, '/decide', null)).status === 403, 'without decide, a visitor can’t pick');
   await call(dc, 'PUT', { event: { ...dv.event, settings: { ...dv.event.settings, closed: true } } });

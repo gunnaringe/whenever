@@ -977,7 +977,7 @@ function bindForm(): void {
       // «se svarene» is `hidden`, ticked when it is off.
       d.settings[key] = key === 'hidden' ? !el.checked : el.checked;
       // The ones that hang on it: unticked and greyed while it is off, and
-      // back as they were when it is on again (the server drops them).
+      // back as they were when it is on again (they stay stored, unused).
       for (const k of Object.keys(d.settings) as (keyof M.Settings)[]) {
         const box = form.querySelector<HTMLInputElement>(`[name="s-${k}"]`);
         if (!box || k === key) continue;
@@ -1450,9 +1450,9 @@ function headHtml(v: M.View): string {
   if (ev.location) meta.push([icon('pin'), ev.location]);
   const s = ev.settings;
   if (s.hidden) meta.push([icon('eye-off'), t('metaHidden')]);
-  if (s.openEdit) meta.push([icon('users'), t('metaOpenEdit')]);
+  if (s.openEdit && !s.hidden) meta.push([icon('users'), t('metaOpenEdit')]);
   if (!s.newNames) meta.push([icon('users'), t('metaListOnly')]);
-  if (s.decide && !s.closed) meta.push([icon('check'), t('metaDecide')]);
+  if (s.decide && !s.hidden && !s.closed) meta.push([icon('check'), t('metaDecide')]);
   // The admin changes it all in the event form.
   const details = v.role !== 'admin' && M.canChangeDetails(v, s);
   return `<section class="card head">
@@ -1810,7 +1810,7 @@ function waitingHtml(v: M.View, stored: Stored | null): string {
   const head = `<h3 class="wait-head">${esc(t('notAnswered'))} <span class="count">${list.length}</span></h3>`;
   // Rows with buttons: the admin's, and everyone's when anyone may change
   // the answers (then "Svar for Kari" for all; the list stays the admin's).
-  const rows = admin || (ev.settings.openEdit && !ev.settings.hidden && !ev.settings.closed);
+  const rows = M.canEdit(who, ev.settings, null);
   if (!rows) {
     // Someone with the event link taps their name to answer as it.
     const tap = M.canClaim(who, ev.settings);

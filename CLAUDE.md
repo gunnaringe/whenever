@@ -148,9 +148,10 @@ transforming (enums, namespaces, parameter properties) is off
   alike: whoever has the event link gets a personal one by answering, so
   splitting the two would hold for nobody. `closed` stops all of it, and
   `hidden` everything that needs the others' answers (`openEdit`, `claims`,
-  `decide`; `settingsOf` turns them off, and the form greys them out). The
-  rules are the `can*` functions in `model.ts`, used by both the app and the
-  `Poll` object; don't test settings by hand elsewhere.
+  `decide`: they stay stored, so un-hiding brings them back, but the `can*`
+  functions ignore them, and the form greys them out). The rules are the
+  `can*` functions in `model.ts`, used by both the app and the `Poll`
+  object: decide who may do what with them, not by reading settings.
   - `hidden`: «se svarene», ticked when off: the others' answers, names
     and how many (see Listed names).
   - `newNames`: answer under a new name; off, only listed names answer
@@ -219,7 +220,7 @@ transforming (enums, namespaces, parameter properties) is off
   entry is an entry, and a draft shows only as a waiting name. The view
   sends a waiting entry's answers and comment to whoever may change it
   (`canEdit`: its person, the admin, everyone with openEdit) or answer as
-  it (a claim: any visitor, unless hidden or closed), so the form opens
+  it (`canClaim`: any visitor, with `claims`, unless hidden or closed), so the form opens
   with them: tapping a name, or picking it in the name box while the form
   is empty, puts its draft in (`setClaim`, `loaded`; picking another takes
   it out again if unchanged), so nobody saves over a draft unseen.
@@ -227,7 +228,7 @@ transforming (enums, namespaces, parameter properties) is off
   or its own person, deletes a waiting entry (the list is the organisers').
   With openEdit everyone gets the waiting names as rows with «Svar for»;
   without it, someone with the event link taps a name in the Svar card to
-  answer as it (`#answer=<pid>` on a name they can't change is a claim).
+  answer as it (with `claims`) (`#answer=<pid>` on a name they can't change is a claim).
   The form's name box (`claimHtml`) sits under the name field: at most three
   rows (`.claim-box`, cut-off names `inert`, «Vis alle»), filtered as you
   type (`filterClaims`: the start of any word) at a fixed height

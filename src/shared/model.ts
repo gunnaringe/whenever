@@ -599,8 +599,9 @@ export function sanitizeEntry(input: unknown, ev: Pick<PollEvent, 'options'>): {
 }
 
 // Settings as stored or sent: every one there, a missing or odd one from
-// DEFAULT_SETTINGS (or `base`), and what needs others' answers is off when
-// they are hidden.
+// `base` (the stored ones, on a change) or else DEFAULT_SETTINGS. What needs
+// the others' answers stays as set while they are hidden: the can*
+// functions ignore it then, and un-hiding brings it back.
 export function settingsOf(input: unknown, base: Settings = DEFAULT_SETTINGS): Settings {
   const s = record(input);
   const out: Settings = { ...DEFAULT_SETTINGS };
@@ -608,7 +609,6 @@ export function settingsOf(input: unknown, base: Settings = DEFAULT_SETTINGS): S
     const v = typeof s[k] === 'boolean' ? s[k] : base[k];
     if (typeof v === 'boolean') out[k] = v;
   }
-  if (out.hidden) Object.assign(out, { openEdit: false, claims: false, decide: false });
   return out;
 }
 

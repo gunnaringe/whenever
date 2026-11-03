@@ -123,9 +123,9 @@ Who may change an entry: its own person, the admin, and (when `settings.openEdit
 
 ### Permissions
 
-The admin link may do everything. Everyone else (public or personal link: anyone with the public link gets a personal one by answering) may do what `event.settings` allow, nothing at all when `closed`, and nothing that needs others' answers (`openEdit`, `claims`, `decide`) when `hidden`. With those settings:
+The admin link may do everything. Everyone else (public or personal link: anyone with the public link gets a personal one by answering) may do what `event.settings` allow, nothing at all when `closed`, and nothing that needs others' answers (`openEdit`, `claims`, `decide`, whatever they say) when `hidden`. With those settings:
 
-- `decide`: `POST /api/events/<id>/decide` `{ "decided": "<key>" }` picks the final date or time (times mode: the first slot of a window), `{ "decided": null }` unpicks it -> `{ view }`. Unlike the admin's pick, it leaves the poll open. Ask the person first: everyone sees it.
+- `decide`: `POST /api/events/<id>/decide` `{ "decided": "<key>" }` picks the final date or time (times mode: the first slot of a window), `{ "decided": null }` unpicks it (without `decided`: 400) -> `{ view }`. Unlike the admin's pick, it leaves the poll open. Ask the person first: everyone sees it.
 - `details`: `PUT /api/events/<id>/details` `{ "name", "description", "location" }` (all three, as for PUT on an entry) -> `{ view }`. Nothing else about the poll changes.
 
 ## Organise (admin link)

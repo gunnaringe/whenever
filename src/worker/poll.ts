@@ -19,8 +19,8 @@
 // nobody can count the answers as they come in. Someone answering with the event link can say which listed
 // name they are (`claim` in add()): that entry gets their answers, and they
 // get its link, the same one the organisers can send (a link sent before
-// keeps working). Not once it is answered, and not when the answers are
-// hidden. Its email never goes with it: the claim's own (or none) replaces
+// keeps working). Only with the `claims` setting, not once it is answered,
+// and not when the answers are hidden. Its email never goes with it: the claim's own (or none) replaces
 // it, so nobody sees another's email from the event link alone.
 //
 // Drafts: saving with `draft: true` keeps the answers but leaves (or puts)
@@ -28,8 +28,8 @@
 // is no third state: an entry is an entry, and a draft is only what the form
 // shows when it is opened again. So the view sends a waiting entry's answers
 // to whoever may change it (canEdit: its person, the admin, everyone with
-// openEdit) or answer as it (a claim: anyone with the event link, unless
-// hidden or closed), and never shows them anywhere else.
+// openEdit) or answer as it (canClaim: anyone with the event link, with
+// `claims`, unless hidden or closed), and never shows them anywhere else.
 // Only the admin, or its own person, removes a waiting entry: the list is the
 // organisers'.
 //

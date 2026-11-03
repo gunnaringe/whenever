@@ -281,7 +281,10 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
 
   if (sub === 'decide') {
     if (method !== 'POST' || pid) throw new HttpError(405, 'method');
-    return send(await poll.decide(cred, field(await readJson(req), 'decided') ?? null));
+    // Only an explicit null unpicks: a body without it is a mistake.
+    const decided = field(await readJson(req), 'decided');
+    if (decided === undefined) throw new HttpError(400, 'decided');
+    return send(await poll.decide(cred, decided));
   }
 
   if (sub === 'details') {
