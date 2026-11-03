@@ -1,9 +1,13 @@
 // Draws the link-preview cards public/og-nb.png and public/og-en.png
-// (1200×630, what Messenger, Signal, Slack and the like show for a link).
-// Run again after changing the name, the tagline or the icon, and commit the
-// PNGs. Needs a Chromium for playwright-core, like the smoke test:
+// (1200×630, what Messenger, Signal, Slack and the like show for a link),
+// and the icon as pictures for those that can't use an SVG: iMessage, Slack,
+// Telegram and the like show the site's icon from public/apple-touch-icon.png
+// (180×180, square: iOS rounds the corners itself) or public/favicon.ico
+// (16, 32 and 48 px). Both sit at the root, where they look without reading
+// the page. Run again after changing the name, the tagline or the icon, and
+// commit the pictures. Needs a Chromium for playwright-core, like the smoke test:
 //   PWCHROME=/path/to/chrome-headless-shell node scripts/og-image.mjs
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
 const root = new URL('..', import.meta.url);
@@ -64,4 +68,39 @@ for (const [lang, card] of Object.entries(CARDS)) {
   await page.screenshot({ path: out.pathname, type: 'png' });
   console.log(`og-${lang}.png ${Math.round(statSync(out).size / 1024)} KB`);
 }
+
+// The icon at `size` px as a PNG, on a transparent background.
+const draw = async (svg, size) => {
+  const p = await browser.newPage({ viewport: { width: size, height: size } });
+  await p.setContent(`<style>html, body { margin: 0; background: transparent; } svg { display: block; width: ${size}px; height: ${size}px; }</style>${svg}`);
+  const png = await p.screenshot({ type: 'png', omitBackground: true });
+  await p.close();
+  return png;
+};
+
+// Square, without the rounded corners: they would show up black on iOS.
+const square = icon.replace(/rx="\d+"/, '');
+writeFileSync(new URL('public/apple-touch-icon.png', root), await draw(square, 180));
+console.log('apple-touch-icon.png');
+
+// An .ico holding PNGs: a 6-byte header, a 16-byte entry per picture, then
+// the pictures.
+const sizes = [16, 32, 48];
+const pngs = await Promise.all(sizes.map((n) => draw(icon, n)));
+const head = Buffer.alloc(6 + 16 * sizes.length);
+head.writeUInt16LE(1, 2);
+head.writeUInt16LE(sizes.length, 4);
+let at = head.length;
+sizes.forEach((n, i) => {
+  const e = 6 + 16 * i;
+  head.writeUInt8(n, e);
+  head.writeUInt8(n, e + 1);
+  head.writeUInt16LE(1, e + 4);
+  head.writeUInt16LE(32, e + 6);
+  head.writeUInt32LE(pngs[i].length, e + 8);
+  head.writeUInt32LE(at, e + 12);
+  at += pngs[i].length;
+});
+writeFileSync(new URL('public/favicon.ico', root), Buffer.concat([head, ...pngs]));
+console.log('favicon.ico');
 await browser.close();

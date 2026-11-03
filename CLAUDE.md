@@ -43,9 +43,13 @@ transforming (enums, namespaces, parameter properties) is off
   limits on codes (pure), `mail.ts` the code mail and a small SMTP client.
 - `public/`: static files copied as they are: `index.html`, `privacy.html`,
   `_headers`, `llms.txt` (the API guide for AI assistants, see below),
-  fonts, icons, and the link-preview cards `og-nb.png` /
-  `og-en.png` (drawn by `scripts/og-image.mjs`; run it again after changing
-  the name, tagline or icon, and commit the PNGs).
+  `robots.txt`, fonts, icons, the link-preview cards `og-nb.png` /
+  `og-en.png`, and the icon as pictures for apps that can't use the SVG
+  (`apple-touch-icon.png`, `favicon.ico`; at the root, where link previews
+  look for them). The pictures are drawn by `scripts/og-image.mjs`: run it
+  again after changing the name, tagline or icon, and commit them. Any other
+  unknown path gets `index.html` (the assets' single-page fallback), so a
+  missing file there shows up as the app, not as a 404.
 - `scripts/build.mjs` writes `dist/` (what the Worker serves): `public/`
   plus `app-<hash>.js`, `styles-<hash>.css` and `theme-<hash>.js` (an
   iife, built separately), minified with sourcemaps. The pages refer to
