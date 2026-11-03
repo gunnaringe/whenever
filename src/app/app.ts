@@ -23,7 +23,7 @@ import type { Snap } from './history.ts';
 type Route = { page: 'home' } | { page: 'new' } | { page: 'find' } | { page: 'missing' } | { page: 'event'; id: string; token: string | null };
 type Sub = { kind: 'overview' } | { kind: 'edit' } | { kind: 'answer'; pid: string | null };
 type Tab = 'cal' | 'list' | 'table' | 'grid';
-type Flash = { kind: 'created' } | { kind: 'savedNew'; name: string };
+type Flash = { kind: 'created' } | { kind: 'savedNew'; name: string; draft?: boolean };
 
 // The event form's state while it is open.
 interface Draft extends M.DayWindow {
@@ -55,6 +55,9 @@ interface AnswerDraft {
   // Opened on a listed name still waiting: saving mustn't overwrite the
   // answers if they answer themselves meanwhile (poll.ts).
   waiting: boolean;
+  // «Vis som besvart»: off saves a draft (not counted). On whenever the
+  // form opens, so Lagre always counts unless someone untick it.
+  counted: boolean;
   own: boolean;
   name: string;
   comment: string;
@@ -85,6 +88,8 @@ const app: {
   busy: boolean;
   // The best list shows every option tied for first, not just SHOW_BEST.
   bestOpen: boolean;
+  // The Svar card shows every waiting name, not just WAIT_SHOWN.
+  waitOpen: boolean;
   // An unsaved form left with the browser's back button, given back when
   // its page is opened again.
   kept: { where: string; draft: Draft | null; answer: AnswerDraft | null } | null;
@@ -115,6 +120,7 @@ const app: {
   renders: 0,
   busy: false,
   bestOpen: false,
+  waitOpen: false,
   kept: null,
   liveMsg: null,
   stale: false,
@@ -182,8 +188,10 @@ function entryOf(v: M.View, pid: string | null): Entry | undefined {
   const p = v.people.find((x) => x.id === pid);
   if (p) return p;
   const w = waitingOf(v).find((x) => x.id === pid);
-  return w && { id: w.id, name: w.name, comment: '', answers: {}, updated: 0, waiting: true };
+  return w && { id: w.id, name: w.name, comment: w.comment ?? '', answers: w.answers ?? {}, updated: 0, waiting: true, ...(w.email === undefined ? {} : { email: w.email }) };
 }
+// A waiting entry with a draft (only those who may change it get one).
+const hasDraft = (e: Entry | undefined): boolean => Boolean(e?.waiting && (Object.keys(e.answers).length || e.comment));
 
 // A new event's holiday calendar: where the browser's clock is, else its
 // languages, else none (a foreign calendar would be worse than none).
@@ -1386,7 +1394,7 @@ function flashHtml(): string {
   if (f.kind === 'savedNew') {
     const { id, token } = here();
     return `<section class="card notice ok">
-      <h2>${icon('check')}${esc(t('savedNewTitle', { name: f.name }))}</h2>
+      <h2>${icon('check')}${esc(t(f.draft ? 'savedDraftTitle' : 'savedNewTitle', { name: f.name }))}</h2>
       <p>${esc(t('savedNewText'))}</p>
       ${linkBox(linkUrl(id, token), { share: true, label: t('yourLink') })}
       <p class="muted small">${esc(t('savedNewHint'))}</p>
@@ -1450,11 +1458,12 @@ function actionsHtml(v: M.View): string {
   }
   if (v.role === 'participant') {
     const me = entryOf(v, v.me);
-    const hint = me?.waiting ? t('youNotAnswered') : app.flash?.kind === 'savedNew' ? '' : t('personalHint');
+    const draft = hasDraft(me);
+    const hint = me?.waiting ? t(draft ? 'youHaveDraft' : 'youNotAnswered') : app.flash?.kind === 'savedNew' ? '' : t('personalHint');
     return `<section class="card role">
       <div class="role-text"><div class="role-head"><b>${esc(t('hiName', { name: me?.name ?? '' }))}</b><button type="button" class="linkish small leave" data-act="leave">${icon('logout')}${esc(t('leave'))}</button></div>${hint ? `<p class="muted">${esc(hint)}</p>` : ''}</div>
       <div class="row wrap">
-        ${M.canEdit(who, ev.settings, v.me) ? `<button type="button" class="btn primary" data-act="answer">${icon(me?.waiting ? 'plus' : 'edit')}${esc(t(me?.waiting ? 'addYourAnswers' : 'editYourAnswers'))}</button>` : ''}
+        ${M.canEdit(who, ev.settings, v.me) ? `<button type="button" class="btn primary" data-act="answer">${icon(me?.waiting && !draft ? 'plus' : 'edit')}${esc(t(me?.waiting && !draft ? 'addYourAnswers' : 'editYourAnswers'))}</button>` : ''}
         <button type="button" class="btn" data-act="copy" data-url="${esc(linkUrl(id, token))}">${icon('copy')}${esc(t('copyMyLink'))}</button>
         ${shareBtn}
         <button type="button" class="btn" data-act="me-more" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('dots')}</button>
@@ -1759,26 +1768,50 @@ function waitingHtml(v: M.View, stored: Stored | null): string {
   const admin = v.role === 'admin';
   const addBtn = admin ? `<button type="button" class="btn small" data-act="add-names">${icon('plus')}${esc(t('addNames'))}</button>` : '';
   if (!list.length || (v.hidden && !admin)) return addBtn ? `<div class="row wrap people-tools">${addBtn}</div>` : '';
+  const ev = v.event;
+  const who = { role: v.role, me: v.me };
   const mine = (id: string) => id === v.me || id === stored?.pid;
+  const you = (id: string) => (mine(id) ? ` <span class="tag">${esc(t('you'))}</span>` : '');
   const head = `<h3 class="wait-head">${esc(t('notAnswered'))} <span class="count">${list.length}</span></h3>`;
-  if (!admin) return `${head}<div class="wait-names">${list.map((w) => `<span class="pn${mine(w.id) ? ' mine' : ''}">${esc(w.name)}${mine(w.id) ? ` <span class="tag">${esc(t('you'))}</span>` : ''}</span>`).join('')}</div>`;
+  // Rows with buttons: the admin's, and everyone's when anyone may change
+  // the answers (then "Svar for Kari" for all; the list stays the admin's).
+  const rows = admin || (ev.settings.openEdit && !ev.settings.hidden && !ev.settings.closed);
+  if (!rows) {
+    // Someone with the event link taps their name to answer as it.
+    const tap = v.role === 'visitor' && !ev.settings.hidden && M.canAdd(who, ev.settings);
+    const names = list
+      .map((w) =>
+        tap
+          ? `<button type="button" class="pn tap" data-act="edit-entry" data-pid="${w.id}" title="${esc(t('answerAs', { name: w.name }))}">${esc(w.name)}</button>`
+          : `<span class="pn${mine(w.id) ? ' mine' : ''}">${esc(w.name)}${you(w.id)}</span>`,
+      )
+      .join('');
+    return `${head}<div class="wait-names">${names}</div>`;
+  }
   const btn = (act: string, ic: string, label: string, pid: string) => `<button type="button" class="icon-btn" data-act="${act}" data-pid="${pid}" title="${esc(label)}" aria-label="${esc(label)}">${icon(ic)}</button>`;
-  const rows = list
+  // A long list shows the first WAIT_SHOWN.
+  const shown = app.waitOpen ? list : list.slice(0, WAIT_SHOWN);
+  const items = shown
     .map(
-      (w) => `<li class="wait" data-pid="${w.id}">
+      (w) => `<li class="wait${mine(w.id) ? ' mine' : ''}" data-pid="${w.id}">
         <span class="avatar" style="--hue:${hue(w.name)}" aria-hidden="true">${esc(initials(w.name))}</span>
-        <div class="pinfo"><b>${esc(w.name)}</b><span class="psum">${esc(t('notAnswered'))}</span></div>
+        <div class="pinfo"><b>${esc(w.name)}${you(w.id)}</b><span class="psum">${esc(t('notAnswered'))}</span></div>
         <div class="pact">
-          ${btn('person-link', 'link', t('copyPersonLink', { name: w.name }), w.id)}
-          ${btn('edit-entry', 'edit', t('answerFor', { name: w.name }), w.id)}
-          ${btn('delete-entry', 'trash', t('removeName', { name: w.name }), w.id)}
+          ${admin ? btn('person-link', 'link', t('copyPersonLink', { name: w.name }), w.id) : ''}
+          ${M.canEdit(who, ev.settings, w.id) ? btn('edit-entry', 'edit', t(w.id === v.me ? 'editYourAnswers' : 'answerFor', { name: w.name }), w.id) : ''}
+          ${admin || w.id === v.me ? btn('delete-entry', 'trash', admin ? t('removeName', { name: w.name }) : t('deleteMine'), w.id) : ''}
         </div>
       </li>`,
     )
     .join('');
-  return `${head}<ul class="plist">${rows}</ul>
-    <div class="row wrap people-tools">${addBtn}<button type="button" class="btn small" data-act="copy-reminder">${icon('copy')}${esc(t('copyReminder'))}</button></div>`;
+  const more =
+    list.length > WAIT_SHOWN
+      ? `<p class="best-more wait-more"><button type="button" class="linkish small" data-act="wait-more" aria-expanded="${app.waitOpen}">${esc(app.waitOpen ? t('showFewer') : t('showAllNames', { n: list.length }))}<span class="chev" aria-hidden="true">${app.waitOpen ? '▴' : '▾'}</span></button></p>`
+      : '';
+  const tools = admin ? `<div class="row wrap people-tools">${addBtn}<button type="button" class="btn small" data-act="copy-reminder">${icon('copy')}${esc(t('copyReminder'))}</button></div>` : '';
+  return `${head}<ul class="plist">${items}</ul>${more}${tools}`;
 }
+const WAIT_SHOWN = 10;
 
 // The organisers list who they expect: names, one per line.
 async function addNames(): Promise<void> {
@@ -1828,11 +1861,15 @@ function renderAnswer(v: M.View, sub: string | null): void {
   // 'new': the admin adds answers for someone else.
   // ('new' is from before: the admin's "for someone else".)
   const pid = sub === 'new' ? null : sub;
-  const target = entryOf(v, pid ?? v.me);
-  if (pid && !target) {
+  const found = entryOf(v, pid ?? v.me);
+  if (pid && !found) {
     toast(t('err.person'));
     return closeSub();
   }
+  // A waiting name tapped in the Svar card by someone with the event link:
+  // a new answer as that name, unless they may change its entry anyway.
+  const tapped = pid && found?.waiting && v.role === 'visitor' && !ev.settings.hidden && !M.canEdit(who, ev.settings, pid) ? found : undefined;
+  const target = tapped ? undefined : found;
   if (target ? !M.canEdit(who, ev.settings, target.id) : !M.canAdd(who, ev.settings)) {
     toast(t(ev.settings.closed ? 'err.closed' : 'err.forbidden'));
     return closeSub();
@@ -1842,11 +1879,14 @@ function renderAnswer(v: M.View, sub: string | null): void {
   if (!app.answer) {
     app.answer = {
       pid: target?.id ?? null,
-      claim: null,
+      claim: tapped?.id ?? null,
       claimTyped: false,
+      // Never answered: someone answering for them mustn't overwrite what
+      // they answer meanwhile (a draft of theirs is theirs to see).
       waiting: Boolean(target?.waiting),
+      counted: true,
       own,
-      name: target?.name ?? '',
+      name: target?.name ?? tapped?.name ?? '',
       comment: target?.comment ?? '',
       email: target?.email ?? '',
       answers: { ...(target?.answers ?? {}) },
@@ -1856,9 +1896,10 @@ function renderAnswer(v: M.View, sub: string | null): void {
     };
   }
   const a = answer();
+  const fresh = target?.waiting && !hasDraft(target);
   const title = target
     ? own
-      ? t(target.waiting ? 'addYourAnswers' : 'editYourAnswers')
+      ? t(fresh ? 'addYourAnswers' : 'editYourAnswers')
       : t(target.waiting ? 'answerFor' : 'editAnswersOf', { name: target.name })
     : t(own ? 'addYourAnswers' : 'addAnswers');
   // A new answer can be one of the listed names still waiting: the admin
@@ -1891,8 +1932,8 @@ function renderAnswer(v: M.View, sub: string | null): void {
     </section>
     <section class="card">
       <form id="answer-form" novalidate>
-        ${claimable.length ? claimHtml(claimable, v.role === 'admin', a.claim) : ''}
         ${field('name', `${t(own ? 'yourName' : 'personName')} *`, `<input name="name" required maxlength="${M.LIMITS.person}" value="${esc(a.name)}"${own ? ' autocomplete="name"' : ' autocomplete="off"'}>`)}
+        ${claimable.length ? claimHtml(claimable, v.role === 'admin', a.claim) : ''}
         ${field('comment', t('commentOptional'), `<input name="comment" maxlength="${M.LIMITS.comment}" value="${esc(a.comment)}" placeholder="${esc(t('commentPh'))}">`)}
         ${
           a.own
@@ -1902,6 +1943,11 @@ function renderAnswer(v: M.View, sub: string | null): void {
               </details>`
             : ''
         }
+        <label class="check counted">
+          <input type="checkbox" name="counted" ${a.counted ? 'checked' : ''}>
+          <span><b>${esc(t('showAnswered'))}</b></span>
+        </label>
+        <p id="draft-note" class="muted small" ${a.counted ? 'hidden' : ''}>${esc(t(own ? 'draftNoteOwn' : 'draftNote'))}</p>
       </form>
     </section>
     <div class="savebar">
@@ -1916,28 +1962,106 @@ function renderAnswer(v: M.View, sub: string | null): void {
       a[n] = el.value;
       a.dirty = true;
     }
+    if (n === 'counted') {
+      a.counted = el.checked;
+      a.dirty = true;
+      $('#draft-note').hidden = a.counted;
+    }
     // Typing a listed name picks it, and typing on ("Ola" to "Olav")
     // unpicks it again. A name tapped stays picked ("Kari N.").
     if (n === 'name' && (!a.claim || a.claimTyped)) {
       const w = claimable.find((x) => M.nameKey(x.name) === M.nameKey(el.value));
       if ((w?.id ?? null) !== a.claim) setClaim(w?.id ?? null, true);
     }
+    if (n === 'name') filterClaims();
   });
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     saveAnswer();
   });
   mountPicker(v);
+  if (claimable.length) {
+    lockClaims();
+    filterClaims();
+  }
 }
 
-// "Er du en av disse?": the listed names still waiting, to answer as one.
+// "Er du en av disse?": the listed names still waiting, to answer as one,
+// under the name field. At most three rows (a fade and «Vis alle» for the
+// rest); typing filters them (filterClaims) in a box that never shrinks
+// meanwhile (lockClaims), so nothing under it moves.
 function claimHtml(list: M.Waiting[], admin: boolean, on: string | null): string {
   return `<fieldset class="claim">
     <legend>${esc(t(admin ? 'claimAdmin' : 'claimQ'))}</legend>
-    <div class="chip-row">${list.map((w) => `<button type="button" class="chip${w.id === on ? ' on' : ''}" data-act="claim" data-pid="${w.id}" aria-pressed="${w.id === on}">${esc(w.name)}</button>`).join('')}</div>
+    <div class="claim-box">
+      <div class="chip-row">${list.map((w) => `<button type="button" class="chip${w.id === on ? ' on' : ''}" data-act="claim" data-pid="${w.id}" aria-pressed="${w.id === on}">${esc(w.name)}</button>`).join('')}</div>
+      <p class="claim-none muted small" hidden>${esc(t('claimNone'))}</p>
+    </div>
+    <p class="best-more claim-more" hidden><button type="button" class="linkish small" data-act="claim-more" aria-expanded="false"></button></p>
+    <p id="claim-status" class="vh" aria-live="polite"></p>
     <p class="muted small">${esc(t(admin ? 'claimAdminHint' : 'claimHint'))}</p>
   </fieldset>`;
 }
+
+// Show the names that fit what is typed: the start of any word, without
+// case ("ka" finds Kari and Anne Karlsen). The picked one always shows.
+function filterClaims(): void {
+  const box = $opt('.claim-box');
+  if (!box) return;
+  const a = answer();
+  const q = M.nameKey(a.name);
+  let n = 0;
+  for (const c of $$<HTMLButtonElement>('.claim-box .chip')) {
+    const show = !q || c.dataset.pid === a.claim || ` ${M.nameKey(c.textContent ?? '')}`.includes(` ${q}`);
+    c.hidden = !show;
+    if (show) n += 1;
+  }
+  $('.claim-none').hidden = n > 0;
+  $('#claim-status').textContent = q ? (n ? t('claimMatches', { n }) : t('claimNone')) : '';
+  fitClaims();
+}
+
+// The box's height with every name, cut at three rows unless opened: it
+// keeps that while the names are filtered.
+function lockClaims(): void {
+  const box = $opt('.claim-box');
+  if (!box) return;
+  const hidden = $$<HTMLButtonElement>('.claim-box .chip[hidden]');
+  for (const c of hidden) c.hidden = false;
+  box.style.minHeight = '';
+  box.style.minHeight = `${box.offsetHeight}px`;
+  // A list longer than three rows keeps the «Vis alle» line, also while
+  // filtered down to a few (fitClaims), so nothing under it moves.
+  if (!box.classList.contains('open')) box.dataset.long = String(box.scrollHeight > box.clientHeight + 1);
+  for (const c of hidden) c.hidden = true;
+}
+
+// Names below the three rows: cut off with a fade, out of reach of Tab
+// until «Vis alle» opens the box.
+function fitClaims(): void {
+  const box = $opt('.claim-box');
+  if (!box) return;
+  const open = box.classList.contains('open');
+  const chips = $$<HTMLButtonElement>('.claim-box .chip');
+  let cut = 0;
+  for (const c of chips) {
+    const out = !open && !c.hidden && c.offsetTop + c.offsetHeight > box.clientHeight + 1;
+    c.inert = out;
+    if (out) cut += 1;
+  }
+  box.classList.toggle('cut', cut > 0);
+  const more = $('.claim-more');
+  more.hidden = box.dataset.long !== 'true';
+  const b = $('button', more);
+  b.style.visibility = open || cut ? '' : 'hidden';
+  b.textContent = open ? t('showFewer') : t('showAllNames', { n: chips.length });
+  b.setAttribute('aria-expanded', String(open));
+}
+window.addEventListener('resize', () => {
+  if (!$opt('.claim-box')) return;
+  lockClaims();
+  fitClaims();
+});
 
 // Pick a listed name to answer as (again: unpick), and fill in the name.
 function setClaim(pid: string | null, typed = false): void {
@@ -1955,6 +2079,7 @@ function setClaim(pid: string | null, typed = false): void {
     b.classList.toggle('on', b.dataset.pid === pid);
     b.setAttribute('aria-pressed', String(b.dataset.pid === pid));
   }
+  filterClaims();
 }
 
 function pickerToolbar(v: M.View): string {
@@ -2105,13 +2230,14 @@ async function saveAnswer(): Promise<void> {
   const pid = a.pid ?? (v.role === 'admin' ? a.claim : null);
   if (a.claim && !pid) Object.assign(body, { claim: a.claim });
   if (pid && (a.waiting || pid === a.claim)) Object.assign(body, { waiting: true });
+  if (!a.counted) Object.assign(body, { draft: true });
   setBusy(true);
   try {
     if (pid) {
       const { view } = await api<{ view: M.View }>('PUT', `/events/${id}/people/${pid}`, { token, body });
       setView(view);
       app.answer = null;
-      toast(t('saved'));
+      toast(t(a.counted ? 'saved' : 'draftSaved'));
       closeSub();
     } else {
       const r = await api<M.Added>('POST', `/events/${id}/people`, { token, body });
@@ -2122,7 +2248,7 @@ async function saveAnswer(): Promise<void> {
         linkDialog(t('personLinkTitle', { name }), t('addedByAdminText'), linkUrl(id, r.token));
       } else {
         store.put(id, { name: v.event.name, me: r.token, pid: r.pid });
-        app.flash = { kind: 'savedNew', name };
+        app.flash = { kind: 'savedNew', name, draft: !a.counted };
         setView(r.view, id, r.token);
         go(`/e/${id}/${r.token}`, true);
       }
@@ -2458,6 +2584,15 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   'add-names': () => addNames(),
   'copy-reminder': () => copyReminder(),
   claim: (b) => setClaim(answer().claim === b.dataset.pid ? null : data(b, 'pid')),
+  'claim-more': () => {
+    $('.claim-box').classList.toggle('open');
+    lockClaims();
+    fitClaims();
+  },
+  'wait-more': () => {
+    app.waitOpen = !app.waitOpen;
+    render();
+  },
   'toggle-closed': () => toggleClosed(),
   'admin-more': () => adminMore(),
   'me-more': () => meMore(),

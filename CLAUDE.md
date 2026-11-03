@@ -185,6 +185,22 @@ transforming (enums, namespaces, parameter properties) is off
   object can still run the code from before right after a deploy. «Kopier
   påminnelse» copies the waiting names with the event link for a group
   chat.
+- **Drafts («Vis som besvart»):** the answer form has that checkbox above
+  Lagre, ticked whenever the form opens. Unticked, Lagre sends `draft: true`:
+  the answers are kept with `replied = 0`, so the entry is (or goes back)
+  under «Har ikke svart ennå» and nothing counts it. No third state: to
+  everyone else a draft is just a waiting name; the view sends a waiting
+  entry's answers and comment only to those who may change it (`canEdit`:
+  its person, the admin, everyone with openEdit), so the form opens with
+  them. Taking back an answer is the same: untick and save. Only the admin,
+  or its own person, deletes a waiting entry (the list is the organisers').
+  With openEdit everyone gets the waiting names as rows with «Svar for»;
+  without it, someone with the event link taps a name in the Svar card to
+  answer as it (`#answer=<pid>` on a name they can't change is a claim).
+  The form's name box (`claimHtml`) sits under the name field: at most three
+  rows (`.claim-box`, cut-off names `inert`, «Vis alle»), filtered as you
+  type (`filterClaims`: the start of any word) at a fixed height
+  (`lockClaims`). The Svar card shows the first `WAIT_SHOWN` waiting rows.
 - **Email codes (`/find`):** an address entered on events gets a 6-digit
   code by email, and the code adds those events' links to the device. The
   mail (multipart text + HTML, inline styles, no remote images) also has a
@@ -410,7 +426,11 @@ transforming (enums, namespaces, parameter properties) is off
   end-to-end check (dates and times events, chips, drag and touch painting,
   undo and redo in the picker, several participants, permissions, link reset, picking the date and the
   `.ics` download, ties and the ranking setting, listed names (adding,
-  answering as one, answering for one, hidden answers), holiday calendars, the
+  answering as one, answering for one, hidden answers), drafts (who sees
+  them, counting, taking an answer back), tapping a waiting name, answering
+  for others with openEdit, the name box with 40 names (cut, filtering
+  without moving anything), the long waiting list, the «Vis som besvart»
+  row at 360 px in all six languages, holiday calendars, the
   events menu, finding events by an email code, the language menu and
   nn/is dates, themes against a dark and a light device, link-preview tags,
   the text for AI assistants and without JavaScript, the `llms.txt` flow,

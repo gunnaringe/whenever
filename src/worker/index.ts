@@ -12,10 +12,11 @@
 //   POST   /api/events/:id/admin-link        (admin) new admin link -> { token }
 //   GET    /api/events/:id/live              WebSocket: live views (poll.ts)
 //   POST   /api/events/:id/invite            { names } (admin) list who is expected -> { view, added, skipped }
-//   POST   /api/events/:id/people            { name, email?, comment?, answers, claim? } -> { pid, token, view }
+//   POST   /api/events/:id/people            { name, email?, comment?, answers, claim?, draft? } -> { pid, token, view }
 //                                             (with the admin link: no email; claim: a listed
 //                                             name's pid, to answer as them, see poll.ts)
-//   PUT    /api/events/:id/people/:pid       entry, waiting? -> { view } (waiting: answering
+//   PUT    /api/events/:id/people/:pid       entry, waiting?, draft? -> { view } (draft: kept, not
+//                                             counted, see poll.ts; waiting: answering
 //                                             for a listed name; 409 answered if they did meanwhile)
 //   DELETE /api/events/:id/people/:pid       -> { view }
 //   POST   /api/events/:id/people/:pid/link  { reset? } (self or admin) -> { token }
