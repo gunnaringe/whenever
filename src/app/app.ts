@@ -242,7 +242,8 @@ function eventPath(id: string, token: string | null, sub = ''): string {
 }
 
 // A link from before, /e/<id>/<token>: the same page with the token in the
-// hash, in place of this history entry.
+// hash, in place of this history entry. Remove (with the token group in
+// ROUTE_RE) once the events from before are gone: see CLAUDE.md, Links.
 function moveToken(): void {
   const m = location.pathname.replace(/\/+$/, '').match(ROUTE_RE);
   if (m?.[2]) history.replaceState(history.state, '', eventPath(m[1], m[2], location.hash.slice(1).replace(HASH_TOKEN_RE, '')));

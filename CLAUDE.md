@@ -78,7 +78,14 @@ transforming (enums, namespaces, parameter properties) is off
   crawlers); only the app sends it, to the API. Links from before,
   `/e/<eventId>/<token>`, keep working: `moveToken()` moves the token into
   the hash at once (`replaceState`), and `page()` ignores the path's last
-  part. Build event addresses with `eventPath()`/`subUrl()`, never from
+  part. That support can go once every event made before this change
+  (November 2026) is deleted. The app's calendar reaches 12 months ahead, so
+  that is 2028-01-01, unless one of them got later dates since (an edit, or
+  the API, which has no such limit); an old link to it would then show «Fant
+  ikke siden». To remove it: `moveToken()` and the token group in `ROUTE_RE`
+  (`app.ts`), the old-link checks in smoke sections X and P, and the old-link
+  sentences in `llms.txt`, the agent text (`preview.ts`), the privacy page
+  and the comments in `link.ts` and `index.ts`. Build event addresses with `eventPath()`/`subUrl()`, never from
   `location.pathname`, which has no token. The token (`src/worker/link.ts`, patterns `TOKEN`/`TOKEN_RE` in
   `model.ts`) is a 16-hex selector (the participant id, or the event's
   `adminId`) followed by a 22-char random secret (128 bits): 38 chars, no
