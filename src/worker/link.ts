@@ -1,5 +1,6 @@
-// Admin and personal links. A link is /e/<eventId>/<token>, and the token is
-// two fixed-length parts, back to back (38 characters):
+// Admin and personal links. A link is /e/<eventId>#<token> (links from before
+// are /e/<eventId>/<token>, which the app still opens), and the token is two
+// fixed-length parts, back to back (38 characters):
 //
 //   selector  16 hex: a participant id, or the event's admin id
 //   secret    22 base64url: 16 random bytes stored with that row

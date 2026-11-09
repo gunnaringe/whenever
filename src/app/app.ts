@@ -1,8 +1,13 @@
 // Whenever / Finn tid: the UI. Plain ES modules, no framework. Each view is an
 // HTML string painted into #app; clicks are delegated through data-act.
 //
-// Routes (path): /  ·  /new  ·  /e/<id>  ·  /e/<id>/<token>
-// Sub-views of an event (hash): #answer, #answer=<pid>, #edit
+// Routes (path): /  ·  /new  ·  /find  ·  /e/<id>
+// An admin or personal link has its token in the hash, /e/<id>#<token>, so
+// the browser never sends it with the page (the app sends it to the API as
+// the Bearer header). Sub-views of an event follow it after an &:
+// #<token>&edit, #<token>&answer=<pid>; on the event link just #edit,
+// #answer, #answer=<pid>. Links from before, /e/<id>/<token>, still open:
+// the app moves the token into the hash at once (moveToken).
 
 import * as M from '../shared/model.ts';
 import { t, tx, holidayNames, getLang, setLang, isLang, LANGS, LANG_NAMES, fmtDate, fmtRange, monthName, slotLabel, windowLabel, weekdayShort, weekdayLong, durationLabel, cap, joinAnd } from './i18n.ts';
@@ -175,7 +180,7 @@ const control = <T = HTMLInputElement>(form: HTMLFormElement, name: string): T =
 const touch = () => matchMedia('(pointer: coarse)').matches;
 
 const eventUrl = (id: string) => `${location.origin}/e/${id}`;
-const linkUrl = (id: string, token: string | null) => `${location.origin}/e/${id}/${token}`;
+const linkUrl = (id: string, token: string | null) => `${location.origin}${eventPath(id, token)}`;
 
 // The names the organisers listed that haven't answered (none from a Poll
 // object still on the code from before them).
@@ -226,6 +231,22 @@ function errText(e: unknown): string {
 
 const ROUTE_RE = new RegExp(`^/e/([A-Za-z0-9]{12})(?:/(${M.TOKEN}))?$`);
 const ANSWER_RE = new RegExp(`^answer=(${M.PID})$`);
+// The token at the start of the hash, and the & after it.
+const HASH_TOKEN_RE = new RegExp(`^(${M.TOKEN})(?:&|$)`);
+
+// An event page's address: the token (if any) and then the sub-view ('' =
+// the overview) in the hash.
+function eventPath(id: string, token: string | null, sub = ''): string {
+  const h = [token, sub].filter(Boolean).join('&');
+  return `/e/${id}${h ? `#${h}` : ''}`;
+}
+
+// A link from before, /e/<id>/<token>: the same page with the token in the
+// hash, in place of this history entry.
+function moveToken(): void {
+  const m = location.pathname.replace(/\/+$/, '').match(ROUTE_RE);
+  if (m?.[2]) history.replaceState(history.state, '', eventPath(m[1], m[2], location.hash.slice(1).replace(HASH_TOKEN_RE, '')));
+}
 
 function parseRoute(): Route {
   const p = location.pathname.replace(/\/+$/, '') || '/';
@@ -233,12 +254,24 @@ function parseRoute(): Route {
   if (p === '/new') return { page: 'new' };
   if (p === '/find') return { page: 'find' };
   const m = p.match(ROUTE_RE);
-  if (m) return { page: 'event', id: m[1], token: m[2] ?? null };
+  if (m) return { page: 'event', id: m[1], token: m[2] ?? HASH_TOKEN_RE.exec(location.hash.slice(1))?.[1] ?? null };
   return { page: 'missing' };
 }
 
+// The hash without the token: which sub-view of the event is open.
+function subHash(): string {
+  return location.hash.slice(1).replace(HASH_TOKEN_RE, '');
+}
+
+// This event page's address with another sub-view ('' = the overview),
+// keeping the token.
+function subUrl(sub: string): string {
+  const r = app.route;
+  return r?.page === 'event' ? eventPath(r.id, r.token, sub) : `${location.pathname}${sub ? `#${sub}` : ''}`;
+}
+
 function subView(): Sub {
-  const h = location.hash.slice(1);
+  const h = subHash();
   if (h === 'edit') return { kind: 'edit' };
   if (h === 'answer') return { kind: 'answer', pid: null };
   // From before: the admin's "for someone else", now the same as #answer.
@@ -255,7 +288,7 @@ function go(url: string, replace = false): void {
 }
 
 function openSub(hash: string): void {
-  history.pushState(null, '', `${location.pathname}#${hash}`);
+  history.pushState(null, '', subUrl(hash));
   app.pushedSub = true;
   render();
 }
@@ -265,7 +298,7 @@ function closeSub(): void {
     app.pushedSub = false;
     history.back();
   } else {
-    history.replaceState(null, '', location.pathname);
+    history.replaceState(null, '', subUrl(''));
     render();
   }
 }
@@ -316,7 +349,7 @@ function eventItems(): DropItem[] {
   const cur = app.route?.page === 'event' ? app.route.id : null;
   const all = store.events();
   const items: DropItem[] = all.slice(0, EVENTS_SHOWN).map((e) => ({
-    href: `/e/${e.id}${e.admin ? `/${e.admin}` : e.me ? `/${e.me}` : ''}`,
+    href: eventPath(e.id, e.admin || e.me || null),
     label: e.name || '–',
     hint: [e.admin ? t('tagAdmin') : '', e.me ? t('tagAnswered') : ''].filter(Boolean).join(' · ') || undefined,
     on: e.id === cur,
@@ -380,6 +413,7 @@ function setBusy(on: boolean): void {
 
 async function render(): Promise<void> {
   const n = ++app.renders;
+  moveToken();
   const r = parseRoute();
   const s = subView();
   app.route = r;
@@ -475,9 +509,9 @@ function renderHome(): void {
   const mine = store.events();
   const row = (e: Stored & { id: string }) => {
     const links = [];
-    if (e.admin) links.push(`<a class="btn small" href="/e/${e.id}/${e.admin}" data-link>${esc(t('openAdmin'))}</a>`);
-    if (e.me) links.push(`<a class="btn small" href="/e/${e.id}/${e.me}" data-link>${esc(t('openMine'))}</a>`);
-    if (!links.length) links.push(`<a class="btn small" href="/e/${e.id}" data-link>${esc(t('open'))}</a>`);
+    if (e.admin) links.push(`<a class="btn small" href="${eventPath(e.id, e.admin)}" data-link>${esc(t('openAdmin'))}</a>`);
+    if (e.me) links.push(`<a class="btn small" href="${eventPath(e.id, e.me)}" data-link>${esc(t('openMine'))}</a>`);
+    if (!links.length) links.push(`<a class="btn small" href="${eventPath(e.id, null)}" data-link>${esc(t('open'))}</a>`);
     return `<li>
       <div class="mine-name"><b>${esc(e.name || '–')}</b>
         <span class="tags">${e.admin ? `<span class="tag">${esc(t('tagAdmin'))}</span>` : ''}${e.me ? `<span class="tag">${esc(t('tagAnswered'))}</span>` : ''}</span></div>
@@ -869,7 +903,7 @@ function renderForm(v: M.View | null): void {
   };
   paint(`
     <form id="ev-form" class="stack" novalidate>
-      ${editing ? `<a class="back" href="${esc(location.pathname)}" data-act="close-sub">${icon('back')}${esc(t('back'))}</a>` : ''}
+      ${editing ? `<a class="back" href="${esc(subUrl(''))}" data-act="close-sub">${icon('back')}${esc(t('back'))}</a>` : ''}
       <h1>${esc(t(editing ? 'editEvent' : 'newEvent'))}</h1>
       <section class="card">
         <h2>${esc(t('aboutEvent'))}</h2>
@@ -1331,7 +1365,7 @@ async function submitForm(): Promise<void> {
       d.dirty = false;
       app.flash = { kind: 'created' };
       setView(res.view, res.id, res.token);
-      go(`/e/${res.id}/${res.token}`, true);
+      go(eventPath(res.id, res.token), true);
     }
   } catch (e) {
     fail(errText(e));
@@ -1430,8 +1464,8 @@ function noticesHtml(v: M.View, stored: Stored | null): string {
   if (v.link === 'invalid') out.push(`<section class="card notice warn"><p>${esc(t('linkInvalid'))}</p></section>`);
   if (v.role === 'visitor' && stored && (stored.admin || stored.me)) {
     const btns: string[] = [];
-    if (stored.admin && stored.admin !== token) btns.push(`<a class="btn small" href="/e/${id}/${stored.admin}" data-link>${esc(t('openAdmin'))}</a>`);
-    if (stored.me && stored.me !== token) btns.push(`<a class="btn small" href="/e/${id}/${stored.me}" data-link>${esc(t('openMine'))}</a>`);
+    if (stored.admin && stored.admin !== token) btns.push(`<a class="btn small" href="${eventPath(id, stored.admin)}" data-link>${esc(t('openAdmin'))}</a>`);
+    if (stored.me && stored.me !== token) btns.push(`<a class="btn small" href="${eventPath(id, stored.me)}" data-link>${esc(t('openMine'))}</a>`);
     if (btns.length) out.push(`<section class="card notice info"><p>${esc(t(stored.admin ? 'storedAdmin' : 'storedMine'))}</p><div class="row wrap">${btns.join('')}</div></section>`);
   }
   if (v.event.settings.closed) out.push(`<section class="card notice">${icon('lock')}<p>${esc(t(v.role === 'admin' ? 'closedAdmin' : 'closedInfo'))}</p></section>`);
@@ -2007,7 +2041,7 @@ function renderAnswer(v: M.View, sub: string | null): void {
           ? 'answerTimesHintMaybe'
           : 'answerTimesHint';
   paint(`
-    <a class="back" href="${esc(location.pathname)}" data-act="cancel-answer">${icon('back')}${esc(t('back'))}</a>
+    <a class="back" href="${esc(subUrl(''))}" data-act="cancel-answer">${icon('back')}${esc(t('back'))}</a>
     <h1>${esc(title)}</h1>
     <p class="muted sub">${esc(ev.name)}</p>
     <section class="card picker">
@@ -2391,7 +2425,7 @@ async function saveAnswer(): Promise<void> {
         store.put(id, { name: v.event.name, me: r.token, pid: r.pid });
         app.flash = { kind: 'savedNew', name, draft: !a.counted };
         setView(r.view, id, r.token);
-        go(`/e/${id}/${r.token}`, true);
+        go(eventPath(id, r.token), true);
       }
     }
   } catch (e) {
@@ -2448,7 +2482,7 @@ async function deleteEntry(pid: string): Promise<void> {
     toast(t('deleted'));
     if (own && v.role !== 'admin') {
       setView(view, id, null);
-      go(`/e/${id}`, true);
+      go(eventPath(id, null), true);
     } else {
       setView(view);
       render();
@@ -2530,7 +2564,7 @@ async function swapLink(path: string, body: unknown, patch: (token: string) => P
     const r = await api<{ token: string }>('POST', path, { token, body });
     store.put(id, patch(r.token));
     app.viewKey = `${id}/${r.token}`;
-    history.replaceState(null, '', `/e/${id}/${r.token}`);
+    history.replaceState(null, '', eventPath(id, r.token));
     render();
     linkDialog(title, text, linkUrl(id, r.token));
   } catch (e) {
@@ -2900,7 +2934,7 @@ function applyLive(): void {
     live.follow(null);
     app.view = null;
     app.viewKey = null;
-    if (subView().kind !== 'overview') history.replaceState(null, '', location.pathname);
+    if (subView().kind !== 'overview') history.replaceState(null, '', subUrl(''));
     $opt<HTMLDialogElement>('dialog[open]')?.close('');
     return renderLoadError(new ApiError(404, 'notFound'));
   }

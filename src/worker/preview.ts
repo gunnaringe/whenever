@@ -101,7 +101,7 @@ export function pageText(host: string, origin: string, id: string, ev: EventPrev
       `<h1>${name}</h1>` +
       `<p>A poll on Finn tid (Whenever) for finding the ${ev.mode === 'times' ? 'time' : 'day'} that suits most people.${closed} This page is the app and needs JavaScript.</p>` +
       `<p>The same poll as JSON: ${a(json)}</p>` +
-      `<p>A link of the form /e/${id}/&lt;token&gt; carries a personal or admin token in its last part. Send it as the header "Authorization: Bearer &lt;token&gt;" to see and change what that link may. How to read, answer and organise polls with the API: ${a(llms)}</p>`,
+      `<p>A link of the form /e/${id}#&lt;token&gt; carries a personal or admin token after the # (38 characters; an &amp; after them starts the app's own view; links from before have it as the path's last part, /e/${id}/&lt;token&gt;). Send it as the header "Authorization: Bearer &lt;token&gt;" to see and change what that link may. How to read, answer and organise polls with the API: ${a(llms)}</p>`,
     noscript: `<p class="page"><strong>${name}</strong><br>${lang === 'en' ? 'Whenever needs JavaScript to show the poll.' : 'Finn tid trenger JavaScript for å vise avstemningen.'}</p>`,
   };
 }
