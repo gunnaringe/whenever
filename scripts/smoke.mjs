@@ -756,6 +756,13 @@ await hc.close();
   await lp.reload();
   await lp.waitForSelector('.role');
   check(await isAdmin(), 'and reloading stays admin');
+  // The admin link pasted into a tab on the event link only changes the hash: no load.
+  await lp.goto(`${BASE}/e/${made.id}`);
+  await lp.waitForSelector('.plist, .role');
+  check(!(await isAdmin()), 'the event link is no admin');
+  await lp.goto(adminUrl);
+  await lp.waitForFunction(() => document.querySelector('.role [data-act="edit-event"]'));
+  check(await isAdmin(), 'and the admin link opened in the same tab makes it the admin page');
   const pages = sent.filter((u) => u === `/e/${made.id}`).length;
   const calls = sent.filter((u) => u.startsWith(`/api/events/${made.id}`)).length;
   check(pages >= 3 && calls >= 1 && !sent.some((u) => u.includes(made.token) || u.includes(made.token.slice(16))), `no page, API call or socket sent the token in its address (${pages} pages, ${calls} API calls and sockets)`);
