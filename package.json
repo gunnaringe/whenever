@@ -13,8 +13,8 @@
   "devDependencies": {
     "@types/node": "^26.6.6",
     "esbuild": "^0.28.2",
-    "playwright-core": "^1.64.0",
+    "playwright-core": "^1.65.0",
     "typescript": "^7.0.2",
-    "wrangler": "^4.149.0"
+    "wrangler": "^4.158.0"
   }
 }
