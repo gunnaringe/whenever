@@ -72,8 +72,21 @@ transforming (enums, namespaces, parameter properties) is off
   (`expiresAt`, `deleteAt`); `RETENTION_DAYS` is what the UI and privacy page
   say.
 - **Links are random secrets stored with the event.** `/e/<eventId>` is
-  the public event link; `/e/<eventId>/<token>` is an admin or personal
-  link. The token (`src/worker/link.ts`, patterns `TOKEN`/`TOKEN_RE` in
+  the public event link; `/e/<eventId>#<token>` is an admin or personal
+  link. The token is in the hash so the browser never sends it with the page
+  (not to Cloudflare's request logs and analytics, proxies or preview
+  crawlers); only the app sends it, to the API. Links from before,
+  `/e/<eventId>/<token>`, keep working: `moveToken()` moves the token into
+  the hash at once (`replaceState`), and `page()` ignores the path's last
+  part. That support can go once every event made before this change
+  (November 2026) is deleted. The app's calendar reaches 12 months ahead, so
+  that is 2028-01-01, unless one of them got later dates since (an edit, or
+  the API, which has no such limit); an old link to it would then show «Fant
+  ikke siden». To remove it: `moveToken()` and the token group in `ROUTE_RE`
+  (`app.ts`), the old-link checks in smoke sections X and P, and the old-link
+  sentences in `llms.txt`, the agent text (`preview.ts`), the privacy page
+  and the comments in `link.ts` and `index.ts`. Build event addresses with `eventPath()`/`subUrl()`, never from
+  `location.pathname`, which has no token. The token (`src/worker/link.ts`, patterns `TOKEN`/`TOKEN_RE` in
   `model.ts`) is a 16-hex selector (the participant id, or the event's
   `adminId`) followed by a 22-char random secret (128 bits): 38 chars, no
   separator. The Poll object finds the row by selector and compares the
@@ -277,9 +290,10 @@ transforming (enums, namespaces, parameter properties) is off
     use up the shared 120 a minute).
     wrangler dev rewrites the URL and `Host` to the route's host, so a
     hostname check can't tell dev from production.
-- **Routes:** paths `/`, `/new`, `/find`, `/e/:id`, `/e/:id/:token` (SPA fallback
-  serves `index.html`), plus hash sub-views `#answer`, `#answer=<pid>`,
-  `#edit`. Clicks go through `data-act` delegation to the `actions` map.
+- **Routes:** paths `/`, `/new`, `/find`, `/e/:id` (and `/e/:id/:token`
+  from before; SPA fallback serves `index.html`). The hash holds the token
+  (if any), then after an `&` the sub-view: `#answer`, `#answer=<pid>`,
+  `#edit`, e.g. `#<token>&edit` (`HASH_TOKEN_RE`, `subHash()`). Clicks go through `data-act` delegation to the `actions` map.
   The overview stays current by itself: see Live updates.
 - **Live updates:** the event page opens a WebSocket to
   `/api/events/:id/live`, which the Worker hands to the event's `Poll`
@@ -404,7 +418,7 @@ transforming (enums, namespaces, parameter properties) is off
   A failed lookup must never fail the page. The image is
   `https://<host>/og-<lang>.png` (1200×630, under 300 KB, https always:
   Signal drops http images). Never put the request URL in a tag (no
-  `og:url`): links carry tokens. `index.html` keeps nb tags as the static
+  `og:url`): links from before carry tokens in the path. `index.html` keeps nb tags as the static
   fallback. `HTMLRewriter` escapes only `"` in attributes, so `withMeta`
   escapes `&` itself; the smoke test reads the tags back with an HTML
   parser. Pages go out with `no-cache` and no ETag, so an event's new name

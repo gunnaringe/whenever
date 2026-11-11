@@ -316,8 +316,9 @@ async function route(req: Request, env: Env & Vars, ctx: ExecutionContext): Prom
 // link preview tags and the page's text filled in. An event link gets the
 // event's name (and in the text where its JSON is), unless
 // this IP is over the rate limit. Never fails because of the preview: a
-// failed lookup just gives the plain tags. Nothing here logs the URL, which
-// can carry a token.
+// failed lookup just gives the plain tags. Nothing here logs the URL: links
+// keep their token after the # (never sent), but links from before carry it
+// in the path, /e/<id>/<token>, and still come here.
 async function page(req: Request, env: Env): Promise<Response> {
   // Always the whole page: a 304 against an older copy would keep its tags.
   const headers = new Headers(req.headers);

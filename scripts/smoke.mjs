@@ -10,6 +10,11 @@ import { chromium, firefox } from 'playwright-core';
 import { holidaysIn } from '../src/shared/model.ts';
 
 const BASE = process.env.BASE ?? 'http://127.0.0.1:8787';
+// An admin or personal link is /e/<id>#<token>: the token's pattern, a whole
+// link, and the token in a page's address (before any &sub-view).
+const TOK = '[0-9a-f]{16}[A-Za-z0-9_-]{22}';
+const LINK_RE = new RegExp(`/e/[A-Za-z0-9]{12}#${TOK}$`);
+const tokenOf = (url) => new URL(url).hash.slice(1).split('&')[0];
 const SHOTS = process.env.SHOTS ?? '/tmp/whenever-shots';
 mkdirSync(SHOTS, { recursive: true });
 
@@ -194,9 +199,9 @@ await admin.locator('[name=s-maybe]').check();
 check(await maybeCounts.isEnabled(), '"maybe counts" is enabled again with maybe answers');
 await shot(admin, '02-new-event');
 await admin.click('button[type=submit]');
-await admin.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/);
+await admin.waitForURL(LINK_RE);
 const adminUrl = admin.url();
-const eventUrl = adminUrl.replace(/\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/, '');
+const eventUrl = adminUrl.replace(/#.*$/, '');
 check(await admin.locator('.notice.ok').isVisible(), 'created notice shown');
 check((await admin.locator('.share input').first().inputValue()) === eventUrl, 'share box has the event link');
 await shot(admin, '03-created');
@@ -229,7 +234,7 @@ await day(kari, D(25)).click(); // twice = maybe
 check(await day(kari, D(25)).evaluate((b) => b.classList.contains('a2')), 'second tap is "maybe"');
 await shot(kari, '04-answer-dates');
 await kari.click('[data-act="save-answer"]');
-await kari.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/);
+await kari.waitForURL(LINK_RE);
 const kariUrl = kari.url();
 check(kariUrl !== adminUrl && kariUrl.startsWith(eventUrl), 'Kari got her own link');
 check(await kari.locator('.notice.ok .linkbox input').inputValue().then((v) => v === kariUrl), 'personal link shown after saving');
@@ -244,7 +249,7 @@ await ola.click('[data-act="ans-view"][data-v="list"]');
 for (const n of [11, 12]) await ola.click(`[data-act="ans-set"][data-k="${D(n)}"][data-val="1"]`);
 await ola.click(`[data-act="ans-set"][data-k="${D(18)}"][data-val="2"]`);
 await ola.click('[data-act="save-answer"]');
-await ola.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/);
+await ola.waitForURL(LINK_RE);
 
 // --- C) Results --------------------------------------------------------------------------
 await admin.reload();
@@ -301,6 +306,9 @@ await kari2.waitForSelector('#dlg .linkbox');
 const kariNew = await kari2.locator('#dlg .linkbox input').inputValue();
 check(kariNew !== kariUrl && kari2.url() === kariNew, 'new personal link replaces the old one');
 await kari2.click('#dlg button[value=""]');
+// Opened afresh: Kari's tab is on that link already, and going to the same
+// address only changes the hash, which loads nothing.
+await kari.goto(`${BASE}/`);
 await kari.goto(kariUrl);
 await kari.waitForSelector('.notice.warn');
 check(await kari.locator('.notice.warn').isVisible(), 'old personal link says it no longer works');
@@ -336,8 +344,8 @@ const afterErase = await boss.locator('#f-grid .tg-cell.v1').count();
 check(afterErase === 5 * 16 + 4 - 4, `drag from a marked cell erases (${afterErase})`);
 await shot(boss, '09-new-times');
 await boss.click('button[type=submit]');
-await boss.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/);
-const timesUrl = boss.url().replace(/\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/, '');
+await boss.waitForURL(LINK_RE);
+const timesUrl = boss.url().replace(/#.*$/, '');
 
 for (const [name, from, to, maybeFrom, maybeTo] of [
   ['Anne', D(1, '09:00'), D(3, '11:30'), null, null],
@@ -360,7 +368,7 @@ for (const [name, from, to, maybeFrom, maybeTo] of [
   }
   if (name === 'Per') await shot(pp, '10-answer-times');
   await pp.click('[data-act="save-answer"]');
-  await pp.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}[A-Za-z0-9_-]{22}$/);
+  await pp.waitForURL(LINK_RE);
 }
 await boss.reload();
 await boss.waitForSelector('.best-item');
@@ -429,7 +437,7 @@ async function rankedEvent(maybeCounts) {
         ['Per', { [d1]: 2, [d2]: 2, [d3]: 2 }],
       ];
       for (const [name, answers] of people) await api(`/events/${r.id}/people`, { name, answers });
-      return `/e/${r.id}/${r.token}`;
+      return `/e/${r.id}#${r.token}`;
     },
     [[0, 1, 2, 3, 4, 5].map((n) => D(n)), maybeCounts],
   );
@@ -562,7 +570,7 @@ await hc.close();
     const r = await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: { name: 'Teammøte', mode: 'dates', start: days[0], end: days[2], options: days }, emails: [] }) });
     return r.json();
   }, days);
-  const adminUrl = `${BASE}/e/${made.id}/${made.token}`;
+  const adminUrl = `${BASE}/e/${made.id}#${made.token}`;
   await ad.goto(adminUrl);
   await ad.waitForSelector('.role');
   check((await ad.locator('.role [data-act="answer"]').textContent()).includes('Legg til svar') && (await ad.locator('.role [data-act="answer-other"], [data-act="mark-own"]').count()) === 0, 'the admin has one "Legg til svar"');
@@ -665,14 +673,14 @@ await hc.close();
   check(tooMany.status === 400 && tooMany.error === 'emails', 'more than 10 addresses is refused');
   check((await api('PUT', { pid: null }, '/own')).status === 404, 'PUT /own is gone');
   // Deleting someone's answers keeps the admin link.
-  const adminPath = new URL(ad.url()).pathname;
+  const adminAt = ad.url();
   await ad.reload();
   await ad.waitForSelector('.plist');
   await ad.locator('.people').screenshot({ path: `${SHOTS}/31-admin-people.png` });
   await ad.locator('.plist li', { hasText: 'Ola Admin' }).locator('[data-act="delete-entry"]').click();
   await ad.click('#dlg button[value="yes"]');
   await ad.waitForSelector('.plist li:has-text("Ola Admin")', { state: 'detached' });
-  check(new URL(ad.url()).pathname === adminPath, 'deleting answers keeps you on the admin link');
+  check(ad.url() === adminAt, 'deleting answers keeps you on the admin link');
   // Signing out: the link once more, then the event is gone from this device.
   await ad.click('.role [data-act="leave"]');
   await ad.waitForSelector('#dlg[open]');
@@ -680,7 +688,7 @@ await hc.close();
   check((await ad.locator('#dlg').textContent()).includes('kode til e-postadressen'), 'and that an email code can bring it back');
   await ad.locator('#dlg').screenshot({ path: `${SHOTS}/35-leave.png` });
   await ad.click('#dlg button[value=""]');
-  check(new URL(ad.url()).pathname === adminPath, 'cancelling stays');
+  check(ad.url() === adminAt, 'cancelling stays');
   await ad.click('.role [data-act="leave"]');
   await ad.click('#dlg button[value="yes"]');
   await ad.waitForURL(`${BASE}/`);
@@ -690,6 +698,75 @@ await hc.close();
   await ad.waitForTimeout(300);
   check(!ad.url().includes(made.token), 'Back no longer leads to the admin link');
   await ad.close();
+}
+
+// --- X) Link tokens stay in the hash: never sent with a page, kept by the sub-views ---------
+{
+  const lp = await page();
+  await lp.context().setExtraHTTPHeaders({ 'x-dev-ip': `10.8.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` });
+  await lp.goto(`${BASE}/`);
+  const days = [D(0), D(1), D(2)];
+  const made = await lp.evaluate(async (days) => {
+    const r = await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: { name: 'Lenkeprøve', mode: 'dates', start: days[0], end: days[2], options: days }, emails: [] }) });
+    return r.json();
+  }, days);
+  const adminUrl = `${BASE}/e/${made.id}#${made.token}`;
+  const isAdmin = async () => (await lp.locator('.role [data-act="edit-event"]').count()) === 1;
+  // Links from before, with the token in the path, still open: the token moves into the hash.
+  await lp.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await lp.waitForSelector('.role');
+  check(lp.url() === adminUrl && (await isAdmin()), 'a link from before opens as the admin link, with the token moved into the hash');
+  await lp.goto(`${BASE}/e/${made.id}/${made.token}#answer`);
+  await lp.waitForSelector('#answer-form');
+  check(lp.url() === `${adminUrl}&answer`, 'and one with a sub-view keeps it after the token');
+  // From here on, what goes over the wire: each request's path and query (a
+  // browser never sends the hash) and the live socket's address.
+  const sent = [];
+  lp.on('request', (r) => {
+    const u = new URL(r.url());
+    sent.push(u.pathname + u.search);
+  });
+  lp.on('websocket', (ws) => {
+    const u = new URL(ws.url());
+    sent.push(u.pathname + u.search);
+  });
+  await lp.goto(`${BASE}/`);
+  check((await lp.locator(`.mine a[href^="/e/${made.id}"]`).first().getAttribute('href')) === `/e/${made.id}#${made.token}`, 'the home page links your events with the token in the hash');
+  await lp.goto(adminUrl);
+  await lp.waitForSelector('.role');
+  await lp.click('.role [data-act="edit-event"]');
+  await lp.waitForSelector('#ev-form');
+  check(lp.url() === `${adminUrl}&edit`, 'editing the event is #<token>&edit');
+  await lp.click('#ev-form a.back');
+  await lp.waitForSelector('.role');
+  check(lp.url() === adminUrl && (await isAdmin()), 'Back from editing keeps the admin link');
+  await lp.click('.role [data-act="answer"]');
+  await lp.waitForSelector('#answer-form');
+  check(lp.url() === `${adminUrl}&answer`, 'adding answers is #<token>&answer');
+  await lp.click('a.back[data-act="cancel-answer"]');
+  await lp.waitForSelector('.role');
+  check(lp.url() === adminUrl && (await isAdmin()), 'and Back from there keeps it too');
+  // Opened straight from the address, with no history entry to go back to.
+  await lp.goto(`${BASE}/`);
+  await lp.goto(`${adminUrl}&edit`);
+  await lp.waitForSelector('#ev-form');
+  await lp.click('#ev-form a.back');
+  await lp.waitForSelector('.role');
+  check(lp.url() === adminUrl && (await isAdmin()), 'an edit opened from the address goes back to the admin link');
+  await lp.reload();
+  await lp.waitForSelector('.role');
+  check(await isAdmin(), 'and reloading stays admin');
+  // The admin link pasted into a tab on the event link only changes the hash: no load.
+  await lp.goto(`${BASE}/e/${made.id}`);
+  await lp.waitForSelector('.plist, .role');
+  check(!(await isAdmin()), 'the event link is no admin');
+  await lp.goto(adminUrl);
+  await lp.waitForFunction(() => document.querySelector('.role [data-act="edit-event"]'));
+  check(await isAdmin(), 'and the admin link opened in the same tab makes it the admin page');
+  const pages = sent.filter((u) => u === `/e/${made.id}`).length;
+  const calls = sent.filter((u) => u.startsWith(`/api/events/${made.id}`)).length;
+  check(pages >= 3 && calls >= 1 && !sent.some((u) => u.includes(made.token) || u.includes(made.token.slice(16))), `no page, API call or socket sent the token in its address (${pages} pages, ${calls} API calls and sockets)`);
+  await lp.close();
 }
 
 // --- N) Listed names: who hasn't answered yet, apart from "can't make any" ------------------
@@ -713,7 +790,7 @@ await hc.close();
       },
       [id, token, method, body, path],
     );
-  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.goto(`${BASE}/e/${made.id}#${made.token}`);
   await ad.waitForSelector('.people [data-act="add-names"]');
   check((await ad.locator('.people .wait-head').count()) === 0 && (await ad.locator('.people .progress').count()) === 0, 'no names listed: the Svar card is as before, with «Legg til navn»');
   await ad.click('[data-act="add-names"]');
@@ -766,18 +843,18 @@ await hc.close();
   await day(vis, D(0)).click();
   await shot(vis, '62-names-claim', false);
   await vis.click('[data-act="save-answer"]');
-  await vis.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}/);
+  await vis.waitForURL(/\/e\/[A-Za-z0-9]{12}#[0-9a-f]{16}/);
   await vis.waitForSelector('.people h2 .count');
   check((await vis.locator('.people h2 .count').textContent()) === '1 av 4' && (await vis.locator('.wait-names .pn').allTextContents()).join(',') === 'Kari,Per,Siri', 'Ola answered as Ola: 1 av 4, and Ola has left the waiting names');
   check((await vis.locator('.best-item .bn').first().textContent()).startsWith('1 av 1 kan'), 'and the results count only those who answered (1 av 1 kan, not 1 av 4)');
   a = (await api('GET')).view;
   check(a.people.length === 1 && a.people[0].id === id('Ola') && a.count === 1 && a.waitingCount === 3, 'the answer went on Ola’s entry, not a new one');
-  check((await api('GET', undefined, '', olaOld)).view.link === 'ok' && vis.url().split('/').pop() === olaOld, 'and Ola got the link sent to him before, which still works');
+  check((await api('GET', undefined, '', olaOld)).view.link === 'ok' && tokenOf(vis.url()) === olaOld, 'and Ola got the link sent to him before, which still works');
   const again = await api('POST', { name: 'Ola', answers: {}, claim: id('Ola') }, '/people', null);
   check(again.status === 409 && again.error === 'taken', 'answering as a name that has answered: 409 taken');
 
   // The admin answers for Siri while she answers herself: hers stay.
-  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.goto(`${BASE}/e/${made.id}#${made.token}`);
   await ad.waitForSelector('.plist li.wait');
   await ad.locator('.plist li.wait', { hasText: 'Siri' }).locator('[data-act="edit-entry"]').click();
   await ad.waitForSelector('#answer-form');
@@ -795,7 +872,7 @@ await hc.close();
   ids.Siri = (await api('POST', { names: ['Siri'] }, '/invite')).view.waiting.find((w) => w.name === 'Siri').id;
 
   // The admin answers for Per with nothing marked: answered, can't make any.
-  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.goto(`${BASE}/e/${made.id}#${made.token}`);
   await ad.waitForSelector('.plist li.wait');
   await ad.locator('.plist li.wait', { hasText: 'Per' }).locator('[data-act="edit-entry"]').click();
   await ad.waitForSelector('#answer-form');
@@ -819,7 +896,7 @@ await hc.close();
 
   // Kari opens the link the admin sent her.
   const kari = await page();
-  await kari.goto(`${BASE}/e/${made.id}/${kariTok}`);
+  await kari.goto(`${BASE}/e/${made.id}#${kariTok}`);
   await kari.waitForSelector('.role');
   check((await kari.locator('.role b').first().textContent()) === 'Hei, Kari!' && (await kari.locator('.role p').textContent()) === 'Du har ikke svart ennå.' && (await kari.locator('.role [data-act="answer"]').textContent()).includes('Legg til dine svar'), 'Kari’s own link: «Du har ikke svart ennå.» and «Legg til dine svar»');
   await kari.click('.role [data-act="answer"]');
@@ -832,7 +909,7 @@ await hc.close();
   check((await kari.locator('.people .progress').count()) === 0 && (await kari.locator('.wait-head').count()) === 0, 'everyone has answered: just 3, nobody waiting');
   // The admin's «Legg til svar» offers the names too, and fills that entry.
   await api('POST', { names: ['Tor'] }, '/invite');
-  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.goto(`${BASE}/e/${made.id}#${made.token}`);
   await ad.waitForSelector('.plist li.wait');
   await ad.click('.role [data-act="answer"]');
   await ad.waitForSelector('#answer-form .claim');
@@ -895,9 +972,9 @@ await hc.close();
   await kp.locator('#answer-form [name=counted]').uncheck();
   check((await kp.locator('#draft-note').isVisible()) && (await kp.locator('#draft-note').textContent()).startsWith('Lagres som utkast: du står under «Har ikke svart ennå»'), 'unticked, it says the answers are saved as a draft');
   await kp.click('[data-act="save-answer"]');
-  await kp.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}/);
+  await kp.waitForURL(/\/e\/[A-Za-z0-9]{12}#[0-9a-f]{16}/);
   await kp.waitForSelector('.notice.ok h2');
-  const kariTok = kp.url().split('/').pop();
+  const kariTok = tokenOf(kp.url());
   check((await kp.locator('.notice.ok h2').textContent()) === 'Utkastet ditt er lagret, Kari.' && (await kp.locator('.role p').textContent()) === 'Du har et utkast som ikke telles med ennå.', 'saved as a draft: «Utkastet ditt er lagret», and the role card says so');
   check((await kp.locator('.people h2 .count').textContent()) === '0 av 3' && (await kp.locator('.wait-names .pn').allTextContents()).some((x) => x.startsWith('Kari')) && (await kp.locator('.best-item').count()) === 0, 'a draft isn’t counted: 0 av 3, Kari still waiting, no results');
   const drafts = async (token) => (await call(ev, 'GET', undefined, '', token)).view.waiting.find((w) => w.name === 'Kari')?.answers;
@@ -970,11 +1047,11 @@ await hc.close();
   await other.fill('#answer-form [name=name]', 'Kari');
   check((await comment()) === 'Usikker', 'typing «Kari» puts her draft back');
   await other.click('[data-act="save-answer"]');
-  await other.waitForURL(/\/e\/[A-Za-z0-9]{12}\/[0-9a-f]{16}/);
+  await other.waitForURL(/\/e\/[A-Za-z0-9]{12}#[0-9a-f]{16}/);
   await other.waitForSelector('.people h2 .count');
   const kariNow = (await call(ev, 'GET', undefined, '', kariTok)).view;
   const kariRow = kariNow.people.find((x) => x.id === kariId);
-  check(other.url().split('/').pop() === kariTok && kariNow.link === 'ok' && (await call(ev, 'POST', { reset: false }, `/people/${kariId}/link`)).token === kariTok, 'answering as Kari gives her own link, which still works for her (the same as the organisers’ copy)');
+  check(tokenOf(other.url()) === kariTok && kariNow.link === 'ok' && (await call(ev, 'POST', { reset: false }, `/people/${kariId}/link`)).token === kariTok, 'answering as Kari gives her own link, which still works for her (the same as the organisers’ copy)');
   check(kariRow?.comment === 'Usikker' && JSON.stringify(kariRow.answers) === JSON.stringify({ [D(0)]: 1 }) && kariRow.email === '' && (await other.locator('.people h2 .count').textContent()) === '2 av 3', 'her draft was saved as the answer, counted, and her email replaced (none given)');
   await other.context().close();
 
@@ -1030,7 +1107,7 @@ await hc.close();
   check((await inert()) === 0 && (await boxH()) > h0 * 3 && (await mp.locator('.claim-more button').textContent()) === 'Vis færre', '«Vis alle» opens the box');
   await shot(mp, '66-names-box', false);
   // The admin's Svar card: the first ten, then «Vis alle».
-  await ad.goto(`${BASE}/e/${many.id}/${many.token}`);
+  await ad.goto(`${BASE}/e/${many.id}#${many.token}`);
   await ad.waitForSelector('.plist li.wait');
   check((await ad.locator('.plist li.wait').count()) === 10 && (await ad.locator('[data-act="wait-more"]').textContent()).startsWith('Vis alle (40)'), 'the admin sees the first 10 waiting names, then «Vis alle (40)»');
   await ad.click('[data-act="wait-more"]');
@@ -1142,7 +1219,7 @@ await hc.close();
   await vp.fill('#answer-form [name=name]', '');
   await vp.locator('.claim .chip', { hasText: 'Per' }).click();
   await vp.click('[data-act="save-answer"]');
-  await vp.waitForURL(new RegExp(`/e/${lo.id}/${per}`));
+  await vp.waitForURL(new RegExp(`/e/${lo.id}#${per}`));
   check(true, 'picking Per answers as Per');
   const lo2 = await mk('Bare lenker', { newNames: false, claims: false });
   await call(lo2, 'POST', { names: ['Kari'] }, '/invite');
@@ -1183,8 +1260,8 @@ await hc.close();
   await rp.locator('.claim .chip', { hasText: 'Kari' }).click();
   await day(rp, D(1)).click();
   await rp.click('[data-act="save-answer"]');
-  await rp.waitForURL(new RegExp(`/e/${rn.id}/${rnK}`));
-  const rkTok = rp.url().split('/').pop();
+  await rp.waitForURL(new RegExp(`/e/${rn.id}#${rnK}`));
+  const rkTok = tokenOf(rp.url());
   check((await call(rn, 'PUT', { name: 'Kari N', comment: '', email: '', answers: {} }, `/people/${rnK}`, rkTok)).error === 'rename', 'Kari can’t rename herself (403 rename)');
   const same = await call(rn, 'PUT', { name: ' kari ', comment: 'Ok', email: '', answers: {} }, `/people/${rnK}`, rkTok);
   check(same.status === 200 && same.view.people.find((p) => p.id === rnK).name === 'Kari', 'the same name in other case and spaces is fine, and stays as listed');
@@ -1232,7 +1309,7 @@ await hc.close();
   check(dt2.event.name === 'X' && !dt2.event.settings.closed && dt2.event.options.length === 3, 'and nothing else, whatever is sent');
   check((await call(dt, 'PUT', { name: ' ', description: '', location: '' }, '/details', null)).error === 'name', 'a poll needs a name');
   check((await call(plain, 'PUT', { name: 'Y', description: '', location: '' }, '/details', null)).status === 403, 'without details, a visitor can’t');
-  await ad.goto(`${BASE}/e/${dt.id}/${dt.token}`);
+  await ad.goto(`${BASE}/e/${dt.id}#${dt.token}`);
   await ad.waitForSelector('.head h1');
   check((await ad.locator('.head [data-act="edit-details"]').count()) === 0, 'the admin changes it in the event form instead');
   errors.splice(0); // the 4xx above are on purpose
@@ -1246,7 +1323,7 @@ const tieLink = await tie.evaluate(async (days) => {
   const j = (method, url, body, token) => fetch(url, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) }).then((r) => r.json());
   const ev = await j('POST', '/api/events', { event: { name: 'Seks like dager', mode: 'dates', start: days[0], end: days[5], options: days }, email: '' });
   await j('POST', `/api/events/${ev.id}/people`, { name: 'Ola', answers: Object.fromEntries(days.map((d) => [d, 1])) });
-  return `/e/${ev.id}/${ev.token}`;
+  return `/e/${ev.id}#${ev.token}`;
 }, [D(0), D(1), D(2), D(3), D(4), D(7)]);
 await tie.goto(BASE + tieLink);
 await tie.waitForSelector('.best-item');
@@ -1277,7 +1354,7 @@ const makeEvent = (p, name) =>
         const res = await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: { name, mode: 'dates', start: d, end: d, options: [d] }, email: '' }) });
         if (res.status !== 429) {
           const r = await res.json();
-          return `/e/${r.id}/${r.token}`;
+          return `/e/${r.id}#${r.token}`;
         }
         await new Promise((ok) => setTimeout(ok, 3000));
       }
@@ -1458,7 +1535,7 @@ await fu.close();
   const row = (p, name) => p.locator(`.plist li:has-text("${name}")`);
   const ad = await page();
   await ad.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
-  await ad.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await ad.goto(`${BASE}/e/${made.id}#${made.token}`);
   await ad.waitForSelector('html[data-live="open"]');
   await ad.evaluate(() => (window.__same = 1));
   const kari = await api(`/${made.id}/people`, 'POST', { name: 'Kari', comment: '', answers: { [days[0]]: 1, [days[1]]: 1 } });
@@ -1482,7 +1559,7 @@ await fu.close();
   // In a form: the answers stay as typed; a change to the event itself is said once.
   const kp = await page();
   await kp.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
-  await kp.goto(`${BASE}/e/${made.id}/${kari.token}#answer`);
+  await kp.goto(`${BASE}/e/${made.id}#${kari.token}&answer`);
   await kp.waitForSelector('html[data-live="open"]');
   await kp.waitForSelector('#pick-area');
   await api(`/${made.id}`, 'PUT', { event: { ...ev, name: 'Live 2' } }, made.token);
@@ -1560,7 +1637,7 @@ await fu.close();
       close() {}
     };
   });
-  await fb.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await fb.goto(`${BASE}/e/${made.id}#${made.token}`);
   await fb.waitForSelector('.plist');
   await fb.waitForTimeout(200);
   check((await fb.evaluate(() => document.documentElement.dataset.live)) === 'closed', 'without WebSockets the page still works');
@@ -1583,7 +1660,7 @@ await fu.close();
   await fresh.context().setExtraHTTPHeaders({ 'x-dev-ip': devIp() });
   await olderSocket(fresh);
   const freshAsked = asked(fresh);
-  await fresh.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await fresh.goto(`${BASE}/e/${made.id}#${made.token}`);
   await freshAsked;
   await fresh.waitForTimeout(300);
   check((await fresh.locator('#update').count()) === 0, 'a socket naming another version alone shows no bar, while the page itself serves ours');
@@ -1595,7 +1672,7 @@ await fu.close();
     (u) => new URL(u).pathname === '/',
     (r) => (r.request().resourceType() === 'fetch' ? r.fulfill({ contentType: 'text/html', body: '<script type="module" src="/app-NEWER123.js"></script>' }) : r.continue()),
   );
-  await old.goto(`${BASE}/e/${made.id}/${made.token}`);
+  await old.goto(`${BASE}/e/${made.id}#${made.token}`);
   const notice = old.locator('#update');
   await notice.waitFor({ timeout: 5000 });
   check((await notice.textContent()).includes('En ny versjon er klar.') && (await notice.locator('[data-act="reload"]').isVisible()), 'an app older than the live one says so, with a button to reload');
@@ -1763,8 +1840,10 @@ check(true, 'auto follows the device switching to dark');
   check(pub.desc === 'Kryss av for dagene som passer for deg. Middag og quiz. Svar innen fredag!', `then what to do, and the description (${pub.desc})`);
   check(pub.image === 'https://finn-tid.apphub.casa/og-nb.png' && pub.width === '1200', 'and the card image, absolute and https');
   check(pub.url === null, 'with no og:url');
+  // An admin link's token is after the #, so a preview never gets it; a link
+  // from before has it in the path.
   const adm = await read(`/e/${ev.id}/${ev.token}`, 'WhatsApp/2');
-  check(adm.ogTitle === name && !adm.html.includes(ev.token), 'an admin link previews the same, and the token is nowhere in the page');
+  check(adm.ogTitle === name && !adm.html.includes(ev.token), 'an admin link from before (token in the path) previews the same, and the token is nowhere in the page');
   check(adm.r.headers.get('referrer-policy') === 'no-referrer' && (adm.r.headers.get('content-security-policy') ?? '').includes("script-src 'self'"), 'the pages keep their security headers');
   check(adm.r.headers.get('etag') === null && adm.r.headers.get('cache-control') === 'no-cache', 'and are never answered from an old copy');
   const gone = await read('/e/AAAAAAAAAAAA', 'Mozilla/5.0');

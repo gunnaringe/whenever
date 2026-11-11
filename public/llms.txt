@@ -5,7 +5,8 @@
 ## Links
 
 - `https://finn-tid.apphub.casa/e/<id>` is a poll's public link: anyone with it can see the poll and add their answers.
-- `/e/<id>/<token>` is a personal link (one participant's) or the admin link (the organiser's). The last part is a secret token. Send it as the header `Authorization: Bearer <token>`, never in a query string. The view's `role` says which kind it is.
+- `/e/<id>#<token>` is a personal link (one participant's) or the admin link (the organiser's). The part after `#` is a secret token. Browsers and fetch tools never send that part, so take it from the link text. Send it as the header `Authorization: Bearer <token>`, never in a query string. The view's `role` says which kind it is.
+- After the token, an `&` starts the app's own view (`#<token>&edit`, `#<token>&answer`): it isn't part of the token. Links from before have the token as the path's last part, `/e/<id>/<token>`; they still work, and the token is the same.
 - The id is 12 letters and digits; a token is 38 characters (A-Z, a-z, 0-9, `_`, `-`).
 
 Tokens are secrets: the admin link can change or delete the whole poll, so never give it to participants. A personal link only changes its own answers. The admin link is no person: several organisers may share it. It adds and changes anyone's answers (an organiser's own too), but never sees or sets an entry's email.
@@ -105,7 +106,7 @@ Add `"draft": true` (here or on PUT) only when the person says they aren't sure 
 
 If the person is one of the names in `view.waiting` (ask them; never guess from a similar name), add `"claim": "<that id>"`: the answers go on that name instead of a new entry, replacing any draft there (its `answers` and `comment` in `waiting`: show them to the person and start from them). The returned token is that name's personal link, the same one the organisers can send (it keeps working). The name's email is replaced by the one you send, or none. 409 `taken` means it has been answered meanwhile. Only with `settings.claims` (not when `hidden` or `closed`), and not with a personal or the admin link. Without `settings.newNames` this is the only way to answer with the public link: a POST without `claim` gets 403 `listOnly`. With a personal link whose `me` is in `waiting`, PUT that entry instead.
 
-The returned token is this person's own link, `https://finn-tid.apphub.casa/e/<id>/<token>`. Give it to them: it is the only way to change these answers later (or to find them again without the app). `email` is optional (max 254 characters): with it, the app's /find can mail them a code that brings their polls back. Name: 1 to 60 characters; comment: up to 300 (longer text is cut).
+The returned token is this person's own link, `https://finn-tid.apphub.casa/e/<id>#<token>`. Give it to them: it is the only way to change these answers later (or to find them again without the app). `email` is optional (max 254 characters): with it, the app's /find can mail them a code that brings their polls back. Name: 1 to 60 characters; comment: up to 300 (longer text is cut).
 
 To change an entry (with a personal link: your own, `view.me`):
 
@@ -146,7 +147,7 @@ POST /api/events
 -> { "id", "token", "view" }
 ```
 
-- Admin link: `https://finn-tid.apphub.casa/e/<id>/<token>`; share the public link `https://finn-tid.apphub.casa/e/<id>`. Use `https://whenever.apphub.casa/...` for English.
+- Admin link: `https://finn-tid.apphub.casa/e/<id>#<token>`; share the public link `https://finn-tid.apphub.casa/e/<id>`. Use `https://whenever.apphub.casa/...` for English.
 - `emails` (optional, at most 10): the organisers' addresses. The app's /find can mail each of them the admin link again. Every organiser with the admin link sees them.
 - name: 1 to 100 characters, description up to 2000, location up to 200 (longer text is cut). `end` >= `start`, at most 366 days (times mode: 62). 1 to 2000 options; ones outside the range are dropped. Unset settings are `maybe: true`, the others `false`.
 - times mode also takes `slot` (15, 30 or 60; default 30), `dayStart` and `dayEnd` (minutes after midnight, multiples of `slot`), `duration` (minutes, rounded up to a multiple of `slot`) and `tz` (default "Europe/Oslo"). Options are slot starts from `dayStart` to before `dayEnd`, e.g. `"2026-12-04T18:00"`.
