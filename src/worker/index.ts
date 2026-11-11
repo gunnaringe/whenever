@@ -49,7 +49,8 @@ import { SMTP_HOST, SMTP_PORT, MAILABLE_RE, isMailLang, codeMail, linkHost, send
 import type { Mail } from './mail.ts';
 import { pageMeta, pageText } from './preview.ts';
 import type { EventPreview, PageMeta, PageText } from './preview.ts';
-import { sanitizeEvent, cleanEmail, cleanEmails } from '../shared/model.ts';
+import { sanitizeEvent, latestEnd, cleanEmail, cleanEmails } from '../shared/model.ts';
+import { HSTS, plainHttp, readCapped } from './guard.ts';
 
 export { Poll, Lookup };
 
@@ -59,7 +60,7 @@ type Vars = { SMTP_USER?: string; SMTP_PASS?: string; MAIL_ECHO?: string };
 const ID_RE = /^[A-Za-z0-9]{12}$/;
 const ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const MAX_BODY = 256 * 1024;
-const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' };
+const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'strict-transport-security': HSTS };
 
 const json = (data: unknown, status = 200): Response => Response.json(data, { status, headers: HEADERS });
 
@@ -93,9 +94,8 @@ async function limited(req: Request, env: Env & Vars): Promise<boolean> {
 // JSON only: a cross-site form or simple fetch can't send it without a preflight.
 async function readJson(req: Request): Promise<unknown> {
   if (!(req.headers.get('content-type') ?? '').startsWith('application/json')) throw new HttpError(415, 'type');
-  if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY) throw new HttpError(413, 'size');
-  const text = await req.text();
-  if (text.length > MAX_BODY) throw new HttpError(413, 'size');
+  const text = await readCapped(req, MAX_BODY);
+  if (text === null) throw new HttpError(413, 'size');
   try {
     return JSON.parse(text);
   } catch {
@@ -115,8 +115,10 @@ const send = (r: object): Response => (failed(r) ? json({ error: r.error }, r.st
 // body.k, or undefined when the body isn't an object.
 const field = (body: unknown, k: string): unknown => (body && typeof body === 'object' ? (body as Record<string, unknown>)[k] : undefined);
 
+// An event about to be stored: its last day is at most two years ahead, so
+// that every event is deleted one day (latestEnd).
 function event(body: unknown) {
-  const r = sanitizeEvent(field(body, 'event'));
+  const r = sanitizeEvent(field(body, 'event'), latestEnd());
   if (!r.ok) throw new HttpError(400, r.error);
   return r.event;
 }
@@ -367,7 +369,16 @@ function withMeta(res: Response, meta: PageMeta, text: PageText): Response {
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    if (!new URL(req.url).pathname.startsWith('/api/')) return page(req, env);
+    const url = new URL(req.url);
+    const api = url.pathname.startsWith('/api/');
+    // Never in the clear: a page goes to its https address, and the API
+    // (which gets link tokens) refuses. Nothing here logs the URL.
+    if (plainHttp(url, req.headers.get('cf-connecting-ip'))) {
+      if (api) return json({ error: 'https' }, 403);
+      url.protocol = 'https:';
+      return new Response(null, { status: 301, headers: { location: url.href } });
+    }
+    if (!api) return page(req, env);
     try {
       if (await limited(req, env)) return json({ error: 'rate' }, 429);
       return await route(req, env, ctx);

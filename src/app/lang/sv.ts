@@ -378,6 +378,8 @@ export const sv: Record<Key, Text> = {
   'err.range': 'Ogiltiga datum.',
   'err.rangeLong': 'Det kan vara högst ett år från första till sista dagen.',
   'err.rangeLongTimes': 'Med klockslag kan det vara högst 62 dagar från första till sista dagen.',
+  'err.tooFar': 'Sista dagen kan vara högst två år fram i tiden.',
+  'err.https': 'Använd https:// i adressen.',
   'err.hours': 'Välj ett giltigt tidsintervall.',
   'err.options': 'Välj minst en möjlig dag eller tid.',
   'err.tooMany': 'För många möjliga tider (högst 2000). Välj färre dagar eller längre rutor.',

@@ -380,6 +380,8 @@ export const is: Record<Key, Text> = {
   'err.range': 'Ógildar dagsetningar.',
   'err.rangeLong': 'Það má vera í mesta lagi eitt ár frá fyrsta til síðasta dags.',
   'err.rangeLongTimes': 'Með tímum má vera í mesta lagi 62 dagar frá fyrsta til síðasta dags.',
+  'err.tooFar': 'Síðasti dagurinn má vera í mesta lagi tvö ár fram í tímann.',
+  'err.https': 'Notaðu https:// í slóðinni.',
   'err.hours': 'Veldu gilt tímabil.',
   'err.options': 'Veldu að minnsta kosti einn mögulegan dag eða tíma.',
   'err.tooMany': 'Of margir mögulegir tímar (mest 2000). Veldu færri daga eða lengri reiti.',
