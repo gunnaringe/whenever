@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { History, HISTORY_MAX, sameSnap } from '../src/app/history.ts';
 import type { Snap } from '../src/app/history.ts';
 
-const s = (dates: string[], times: string[] = [], pattern: number[] | null = null): Snap => ({ dates, times, pattern });
+const s = (dates: string[], times: string[] = []): Snap => ({ dates, times });
 const A = s([]);
 const B = s(['2026-11-02']);
 const C = s(['2026-11-02', '2026-11-03']);
@@ -46,9 +46,8 @@ test('undo first keeps a change that was never committed', () => {
   assert.deepEqual(h.forward(B), C);
 });
 
-test('the pattern counts, and null differs from empty', () => {
-  assert.equal(sameSnap(s([], [], null), s([], [], [])), false);
-  assert.equal(sameSnap(s([], [], [540]), s([], [], [540])), true);
+test('the times count', () => {
+  assert.equal(sameSnap(s([], ['2026-11-02T09:00']), s([], ['2026-11-02T09:00'])), true);
   assert.equal(sameSnap(s([], ['2026-11-02T09:00']), s([], [])), false);
 });
 

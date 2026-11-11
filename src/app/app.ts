@@ -23,7 +23,7 @@ import { go, openSub, closeSub } from './route.ts';
 import { pickEvent, menuOpen } from './shell.ts';
 import { render } from './render.ts';
 import { find, renderFind, askCode, useLink } from './home.ts';
-import { type Preset, addEmail, removeEmail, selectDates, changed, refreshDays, scopeDays, groupDays, type Period, periodDays, refreshTimes, applyPreset, selectGroup, commit, travel } from './form.ts';
+import { type Preset, addEmail, removeEmail, selectDates, changed, refreshDays, scopeDays, groupDays, type Period, periodDays, refreshTimes, applyPreset, repeatWeek, selectGroup, commit, travel } from './form.ts';
 import { bestHtml, updateDetail, addNames, editDetails, copyReminder } from './overview.ts';
 import { lockClaims, fitClaims, setClaim, pickerToolbar, setAns, updatePickSum, saveAnswer } from './answer.ts';
 import { deleteEntry, personLink, decide, downloadIcs, toggleClosed, adminMore, leave, meMore, pickTheme, setTheme, switchLang } from './actions.ts';
@@ -113,6 +113,7 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
     selectGroup([0, 1, 2, 3, 4, 5, 6].map((i) => M.addDays(data(b, 'mon'), i)).filter((x) => scope.has(x)));
   },
   preset: (b) => applyPreset(data(b, 'p') as Preset),
+  'repeat-week': () => repeatWeek(),
   undo: (b) => travel(true, b),
   redo: (b) => travel(false, b),
 

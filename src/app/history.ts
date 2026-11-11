@@ -9,14 +9,13 @@
 export interface Snap {
   dates: string[];
   times: string[];
-  pattern: number[] | null;
 }
 
 export const HISTORY_MAX = 50;
 
 export function sameSnap(a: Snap, b: Snap): boolean {
   const eq = <T>(x: readonly T[], y: readonly T[]) => x.length === y.length && x.every((v, i) => v === y[i]);
-  return eq(a.dates, b.dates) && eq(a.times, b.times) && (a.pattern === null || b.pattern === null ? a.pattern === b.pattern : eq(a.pattern, b.pattern));
+  return eq(a.dates, b.dates) && eq(a.times, b.times);
 }
 
 export class History {

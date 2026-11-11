@@ -26,7 +26,6 @@ export interface Draft extends M.DayWindow {
   emails: string[]; // the organisers' addresses, one per field (at least one, maybe empty)
   dates: Set<string>;
   times: Set<string>;
-  pattern: Set<number> | null; // times a newly added day gets (null = all)
   until: string; // the calendar shows months up to this day
   decided: string | null; // kept when the event is edited, if it still fits
   dirty: boolean; // changed since it was opened or saved

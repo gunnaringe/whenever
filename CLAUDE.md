@@ -113,7 +113,25 @@ transforming (enums, namespaces, parameter properties) is off
   `options` is the allowed set; answers map key → 1 (yes) or 2 (maybe), and
   `cleanAnswers` drops keys that aren't options. Editing an event prunes
   answers to removed options (the form warns first).
-- **Picking days: there is no date range in the form.** The organiser
+- **Picking times (times mode): a week calendar, straight away.** The form's
+  «Mulige tider» card is a `TimeGrid` with every week from this one to a year
+  ahead (`gridDays`, `nav: 'steps'`: earlier/later buttons, and a chip for
+  each page with times). The organiser paints any slot on any day from
+  today; there are no days to pick first and no month calendar
+  (`#days-card` is hidden). `Draft.times` is all there is: a day is offered
+  when it has times (`timeDays`), and `Draft.dates` is only the days mode's
+  pick. Switching to times gives the days picked 9 to 17; switching back
+  picks the days that have times. A day gone by is hatched and can only
+  lose the times it has (`allowed`). «Timer som vises» (`dayStart`/`dayEnd`)
+  is which hours the grid shows; narrowing it drops the times outside.
+  Shortcuts, so the plain case stays quick: the presets fill the week (or
+  two) shown from today on (`applyPreset`: working hours on its weekdays,
+  the others on every day); «Én uke til med samme tider» copies the last
+  week with times to the week after and shows it (`repeatWeek`); a day's
+  menu has the whole day, working hours, the same times Monday to Friday
+  that week, the same on every day with times, and clear. Holidays get a
+  dot on the day's name (`dayNote`).
+- **Picking days (days mode): there is no date range in the form.** The organiser
   picks days in a calendar that shows from today to `Draft.until` (at
   least six weeks ahead, to a month's end; "Show next month" adds one, up
   to `MAX_MONTHS`). Past days can only be unpicked (when editing). The
@@ -360,24 +378,26 @@ transforming (enums, namespaces, parameter properties) is off
   days are buttons; the time grid takes arrow keys + Space.
 - **Time grid pages** are ISO weeks (`weekPages`), two side by side when
   the grid is at least `WIDE` px, picked with week buttons (a dot = something
-  marked there). The day names are sticky; in paint mode they open the
-  whole-day menu. The event form warns when participants would page
-  through more than three weeks.
+  marked there), or in the event form with earlier/later buttons (`nav:
+  'steps'`; the grid remembers the page's first day, `anchor`, so the same
+  week stays in view when the pages change). The day names are sticky; in
+  paint mode they open the whole-day menu. The event form warns when
+  participants would page through more than three weeks.
 - **Undo and redo in the picker** (`history.ts`, pure and tested): the
-  draft's `hist` keeps snapshots of `dates`, `times` and `pattern` (sorted
+  draft's `hist` keeps snapshots of `dates` and `times` (sorted
   copies, never the live Sets). Every change to them ends with `commit()`:
   a calendar stroke in `bindPaint`'s `done`, a time-grid stroke in
-  `onPaint`, the chips, periods, "Ingen", presets and the day menu. A
+  `onPaint`, the chips, periods, "Ingen", presets, the day menu and
+  «Én uke til». A
   change that touches them without a `commit()` merges into the next step.
   Switching mode or the day's hours resets the history (both rework the
-  times). Undo/Redo buttons sit by the count line and the presets;
+  times). Undo/Redo buttons sit by each mode's count line;
   Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl+Y work outside the form's fields.
   "Ingen", a period, clearing times and removing a day show a toast with
   an Undo button (`toast(msg, action)`). The history goes with the draft
   (save, cancel, leaving) and survives a language switch.
-- **New-event defaults:** nothing picked. In times mode a picked day gets
-  9 to 17 (`Draft.pattern`; the presets and "copy to all days" change it).
-  Switching mode keeps the picked days.
+- **New-event defaults:** nothing picked, in either mode. Switching mode
+  keeps the days (see Picking times).
 - **Unsaved changes:** `Draft.dirty` / `AnswerDraft.dirty`. In-app links,
   Back and Cancel ask (`leaveOk`), closing the tab triggers
   `beforeunload`, and the browser's back button keeps the form in memory

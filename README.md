@@ -6,9 +6,11 @@ and everyone marks when they can. At
 [whenever.apphub.casa](https://whenever.apphub.casa) (en).
 
 - **Dates or times.** Tap possible days in a calendar (drag, Shift-click or
-  hold and drag for a range), or days plus times of day. Quick buttons (next 2 or 4 weeks, next month, weekdays, weekends,
+  hold and drag for a range). Quick buttons (next 2 or 4 weeks, next month, weekdays, weekends,
   holidays, single weekdays, week numbers) only change the selection, so any
-  single day can still be added or removed afterwards.
+  single day can still be added or removed afterwards. For times of day, mark
+  them straight in a week calendar, any times on any days, the same way
+  participants answer; shortcuts fill working hours or repeat a week.
 - **Public holidays** of Norway, Sweden or Denmark (or none), per event,
   are marked in the calendar, including Christmas Eve and New Year's Eve.
   A new event guesses the country from the browser's time zone.
