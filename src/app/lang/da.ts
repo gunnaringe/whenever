@@ -378,6 +378,8 @@ export const da: Record<Key, Text> = {
   'err.range': 'Ugyldige datoer.',
   'err.rangeLong': 'Der kan højst være ét år fra første til sidste dag.',
   'err.rangeLongTimes': 'Med klokkeslæt kan der højst være 62 dage fra første til sidste dag.',
+  'err.tooFar': 'Sidste dag kan højst være to år frem i tiden.',
+  'err.https': 'Brug https:// i adressen.',
   'err.hours': 'Vælg et gyldigt tidsrum.',
   'err.options': 'Vælg mindst én mulig dag eller tid.',
   'err.tooMany': 'For mange mulige tider (højst 2000). Vælg færre dage eller længere felter.',

@@ -129,6 +129,21 @@ const datesEvent = {
   options: ['2026-11-13', '2026-11-06', '2026-11-06', '2026-12-01', 'junk'],
 };
 
+test('an event the server stores ends at most two years ahead', () => {
+  const now = Date.UTC(2026, 10, 11, 15);
+  const latest = M.latestEnd(now);
+  assert.equal(latest, '2028-11-11');
+  const far = { ...datesEvent, start: '2028-11-01', end: '2028-11-12', options: ['2028-11-05'] };
+  assert.equal(M.sanitizeEvent(far, latest).ok, false);
+  assert.equal((M.sanitizeEvent(far, latest) as { error: string }).error, 'tooFar');
+  assert.equal(M.sanitizeEvent({ ...far, end: '2028-11-11' }, latest).ok, true, 'the last allowed day');
+  assert.equal(M.sanitizeEvent({ ...datesEvent, start: '9998-01-01', end: '9998-01-02', options: ['9998-01-01'] }, latest).ok, false);
+  // Without it (the form's own check, and a change of only the texts) any day goes.
+  assert.equal(M.sanitizeEvent(far).ok, true);
+  // A past event is fine: it is deleted soon enough.
+  assert.equal(M.sanitizeEvent({ ...datesEvent, start: '2020-01-01', end: '2020-01-02', options: ['2020-01-01'] }, latest).ok, true);
+});
+
 test('sanitizeEvent: dates mode', () => {
   const r = M.sanitizeEvent(datesEvent);
   assert.ok(r.ok);

@@ -149,7 +149,7 @@ POST /api/events
 
 - Admin link: `https://finn-tid.apphub.casa/e/<id>#<token>`; share the public link `https://finn-tid.apphub.casa/e/<id>`. Use `https://whenever.apphub.casa/...` for English.
 - `emails` (optional, at most 10): the organisers' addresses. The app's /find can mail each of them the admin link again. Every organiser with the admin link sees them.
-- name: 1 to 100 characters, description up to 2000, location up to 200 (longer text is cut). `end` >= `start`, at most 366 days (times mode: 62). 1 to 2000 options; ones outside the range are dropped. Unset settings are `maybe: true`, the others `false`.
+- name: 1 to 100 characters, description up to 2000, location up to 200 (longer text is cut). `end` >= `start`, at most 366 days (times mode: 62), and `end` at most two years ahead. 1 to 2000 options; ones outside the range are dropped. Unset settings are `maybe: true`, the others `false`.
 - times mode also takes `slot` (15, 30 or 60; default 30), `dayStart` and `dayEnd` (minutes after midnight, multiples of `slot`), `duration` (minutes, rounded up to a multiple of `slot`) and `tz` (default "Europe/Oslo"). Options are slot starts from `dayStart` to before `dayEnd`, e.g. `"2026-12-04T18:00"`.
 
 With the admin token:
@@ -165,8 +165,8 @@ With the admin token:
 
 Errors are `{ "error": "<code>" }` with the HTTP status:
 
-- 400: `json`, `name`, `range`, `rangeLong`, `hours`, `options`, `tooMany`, `personName`, `email`, `emails` (more than 10), `names` (no names), `person` (what the code names is wrong), `decided` (not an option to pick)
-- 403: `forbidden` (your link may not do this), `closed`, `listOnly` (only the listed names may answer), `rename` (the name may not change)
+- 400: `json`, `name`, `range`, `rangeLong`, `tooFar` (the last day is more than two years ahead), `hours`, `options`, `tooMany`, `personName`, `email`, `emails` (more than 10), `names` (no names), `person` (what the code names is wrong), `decided` (not an option to pick)
+- 403: `https` (the API only answers over https), `forbidden` (your link may not do this), `closed`, `listOnly` (only the listed names may answer), `rename` (the name may not change)
 - 404: `notFound` (no such poll, or it is deleted), `person`
 - 405 `method`, 409 `full` (200 people), `tooManyNames` (names and answers over 200), `taken` (that name has answered), `answered` (they answered themselves meanwhile), 413 `size`, 415 `type`, 429 `rate`, 503 `busy`, 500 `server`
 

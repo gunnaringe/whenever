@@ -68,6 +68,7 @@ import type { Added, Created, Entry, LinkState, LiveMessage, Person, PollEvent, 
 import { newPid, newSecret, token, same, parse } from './link.ts';
 import type { Credential } from './link.ts';
 import type { EventPreview } from './preview.ts';
+import { evict } from './guard.ts';
 
 // What the Worker makes of the Authorization header.
 export type Cred = Credential | { bad: true } | null;
@@ -586,6 +587,15 @@ export class Poll extends DurableObject<Env> {
   override async fetch(req: Request): Promise<Response> {
     if ((req.headers.get('upgrade') ?? '').toLowerCase() !== 'websocket') return Response.json({ error: 'upgrade' }, { status: 426 });
     if (!this.exists()) return Response.json({ error: 'notFound' }, { status: 404 });
+    // At most MAX_SOCKETS an event: the one heard from longest ago makes
+    // room (guard.ts). Its page, if still there, connects again by itself.
+    for (const old of evict(this.ctx.getWebSockets(), (s) => (s.deserializeAttachment() as Live | null)?.at ?? 0)) {
+      try {
+        old.close(1013, 'busy');
+      } catch {
+        // Already closed.
+      }
+    }
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ hello: false, cred: null, at: 0 } satisfies Live);

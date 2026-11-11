@@ -53,6 +53,8 @@ transforming (enums, namespaces, parameter properties) is off
   may do what, and holds the event's live sockets. `link.ts`: making and parsing link tokens. `lookup.ts`: the
   `Lookup` Durable Object (the email index and its codes), `codes.ts` the
   limits on codes (pure), `mail.ts` the code mail and a small SMTP client.
+  `guard.ts`: plain HTTP, the size of a request body and the cap on live
+  sockets (pure).
 - `public/`: static files copied as they are: `index.html`, `privacy.html`,
   `_headers`, `llms.txt` (the API guide for AI assistants, see below),
   `robots.txt`, fonts, icons, the link-preview cards `og-nb.png` /
@@ -108,6 +110,21 @@ transforming (enums, namespaces, parameter properties) is off
   participant's current link again. Links need no Worker secret or key. Never
   put tokens in query strings or logs; the client sends them as
   `Authorization: Bearer`.
+- **Never in the clear:** a page asked for over plain HTTP gets a 301 to its
+  https address, and the API refuses there (403 `https`): `plainHttp()` in
+  `guard.ts`, first thing in the Worker. Every answer carries
+  `Strict-Transport-Security` (the API's `HEADERS`, and `public/_headers`
+  for the pages and static files). wrangler dev is plain http on loopback,
+  which is let through. Static files the Worker doesn't serve (`/privacy`,
+  scripts, fonts) still answer over http unless the zone's «Always Use
+  HTTPS» is on; they carry no secrets.
+- **Limits that keep it small:** an event's last day is at most
+  `LIMITS.aheadDays` (two years) ahead when the server stores it
+  (`latestEnd()`, 400 `tooFar`; the form's calendar reaches one year), so
+  every event is deleted one day. A request body is read up to 256 KB and
+  no further (`readCapped`). An event keeps at most `MAX_SOCKETS` live
+  sockets: the one heard from longest ago makes room (`evict`), and its
+  page connects again by itself.
 - **Option keys:** dates mode `YYYY-MM-DD`, times mode `YYYY-MM-DDTHH:MM`
   (wall-clock in the event's `tz`; nothing converts time zones). An event's
   `options` is the allowed set; answers map key → 1 (yes) or 2 (maybe), and
