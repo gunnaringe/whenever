@@ -19,8 +19,20 @@ transforming (enums, namespaces, parameter properties) is off
   permissions (`canAdd`/`canEdit`), results (`tally`, `bestOptions`,
   `windows`, `bestWindows`), `LIMITS`, retention.
 - `src/app/`: the frontend, bundled by esbuild into one file.
-  - `app.ts`: UI, routing, the event form, overview/results, the answer
-    editor. `i18n.ts`: strings (nb and en) and date formatting; `lang/`
+  - The UI, one module per part. `app.ts` is the entry: the `actions` map
+    (what each `data-act` click does) and the page-wide listeners.
+    `state.ts`: what the app holds while it runs (`app`: route, view, the
+    open form's draft) and small helpers; nothing there draws. `route.ts`:
+    addresses and moving between pages. `shell.ts`: header, footer, shared
+    pieces of HTML. `render.ts`: which view to draw (`render()`,
+    `setView()`). `home.ts`: the start page and `/find`. `form.ts`: the
+    event form. `overview.ts`: the event page. `answer.ts`: the answer
+    editor. `actions.ts`: what the event page's buttons do. `sync.ts`: live
+    updates and the refresh. They import each other in circles (a view
+    calls `render()`, which calls the views): fine as long as nothing calls
+    another module's code while the modules load, so keep top-level code to
+    declarations and listeners.
+  - `i18n.ts`: strings (nb and en) and date formatting; `lang/`
     the other languages' strings. `api.ts`: fetch wrapper (and `writing()`,
     whether a change is in flight). `live.ts`: the event page's live socket
     (see Live updates). `store.ts`: localStorage. `ui.ts`: `$`, `esc`,
@@ -83,7 +95,7 @@ transforming (enums, namespaces, parameter properties) is off
   that is 2028-01-01, unless one of them got later dates since (an edit, or
   the API, which has no such limit); an old link to it would then show «Fant
   ikke siden». To remove it: `moveToken()` and the token group in `ROUTE_RE`
-  (`app.ts`), the old-link checks in smoke sections X and P, and the old-link
+  (`route.ts`), the old-link checks in smoke sections X and P, and the old-link
   sentences in `llms.txt`, the agent text (`preview.ts`), the privacy page
   and the comments in `link.ts` and `index.ts`. Build event addresses with `eventPath()`/`subUrl()`, never from
   `location.pathname`, which has no token. The token (`src/worker/link.ts`, patterns `TOKEN`/`TOKEN_RE` in
