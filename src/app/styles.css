@@ -176,6 +176,11 @@ a { color: var(--accent); }
 /* A button that looks like a link. */
 .linkish { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem 0; border: 0; background: none; color: var(--accent); font: 600 .875rem var(--body); cursor: pointer; }
 .linkish:hover { text-decoration: underline; }
+/* Text links are thin: on a touch screen they get a finger's height. */
+@media (pointer: coarse) {
+  .linkish, .back { min-height: 2.25rem; }
+  .hero .find-link a { display: inline-block; padding: .55rem 0; }
+}
 .linkish .chev { font-size: .7rem; }
 .loading { padding: 3rem 0; text-align: center; color: var(--muted); }
 .sub { margin-top: -.25rem; }
@@ -299,12 +304,17 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   border: 2px solid var(--line);
   border-radius: 12px;
   cursor: pointer;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
+.opt-card > span { min-width: 0; }
 .opt-card input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .opt-card .i { width: 1.6rem; height: 1.6rem; color: var(--accent); }
 .opt-card b { display: block; }
 .opt-card small { color: var(--muted); }
 .opt-card:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+/* On the tinted card the muted colour is too faint in the dark themes. */
+.opt-card:has(input:checked) small { color: var(--ink); }
 .opt-card:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 2px; }
 
 .check { display: flex; gap: .75rem; align-items: flex-start; padding: .6rem 0; border-top: 1px solid var(--line); cursor: pointer; }
@@ -404,9 +414,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 
 /* --- Calendar --------------------------------------------------------------------- */
 
-.cal { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem 1.5rem; }
-.cal-month h4 { margin: 0 0 .4rem; font-size: 1rem; }
-.cal-grid { display: grid; grid-template-columns: 1.6rem repeat(7, 1fr); gap: 3px; }
+/* min(): a 320 px screen has less than 260 px for a month. */
+.cal { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 1rem 1.5rem; }
+.cal-month h3 { margin: 0 0 .4rem; font-size: 1rem; }
+.cal-grid { display: grid; grid-template-columns: 2rem repeat(7, minmax(0, 1fr)); gap: 3px; }
 .cal-h { text-align: center; font-size: .75rem; font-weight: 600; color: var(--muted); padding: .1rem 0; }
 .cal-h.we { color: var(--accent); }
 .cal-wk {
@@ -580,7 +591,8 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
 .best-item.first { background: var(--yes-soft); border-color: color-mix(in srgb, var(--yes) 40%, transparent); }
 .best-item.sel { box-shadow: inset 0 0 0 2px var(--ink); }
 .rank { display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: var(--card); font: 600 .95rem var(--head); }
-.best-item.first .rank { background: var(--yes); color: var(--yes-ink); }
+.best-item.first .rank { background: var(--yes); color: var(--yes-ink); font-weight: 700; }
+[data-theme="light"] .best-item.first .rank { background: color-mix(in srgb, var(--yes) 85%, #000); }
 .bl { font-weight: 600; }
 .bn { color: var(--muted); font-size: .875rem; white-space: nowrap; }
 .best-more { margin: -.6rem 0 1rem; }

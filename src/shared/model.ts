@@ -125,6 +125,9 @@ export interface View {
   // Goes up with every change to the event or its answers, so of two views
   // the newer one is known (live updates may arrive before a reply).
   rev: number;
+  // When the event is deleted (ms; not from a Poll object on the code from
+  // before it).
+  deletes?: number;
   // Admin only: the organisers' addresses, which get the admin link back.
   adminEmails?: string[];
 }
