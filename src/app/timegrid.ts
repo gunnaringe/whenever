@@ -1,6 +1,8 @@
 // The time grid: one column per date, one row per slot. A page is one ISO
 // week (two when the grid is at least WIDE px wide); buttons above it pick
-// the week.
+// the week: a chip per page, or with `nav: 'steps'` (the event form, whose
+// pages are every week of the year ahead) earlier and later buttons, and a
+// chip only for the pages with something marked.
 //
 // paint mode: press a cell and drag to cover a rectangle. If the first cell
 // already has the brush value the rectangle is erased, otherwise painted.
@@ -11,7 +13,7 @@
 //
 import { addDays, hhmm, isoWeek, slotKey, weekday } from '../shared/model.ts';
 import { weekdayShort, shortDate, t, fmtDate } from './i18n.ts';
-import { esc } from './ui.ts';
+import { esc, icon } from './ui.ts';
 
 const HOLD_MS = 300;
 const SLOP = 10; // px a finger may move before a hold becomes a scroll
@@ -55,6 +57,10 @@ interface Common {
   page?: number;
   onPage?: (page: number) => void;
   empty?: string; // text when there are no dates or rows
+  nav?: 'steps'; // earlier/later buttons instead of a chip per page (see the top)
+  marks?: () => ReadonlySet<string>; // with 'steps': the days with something marked
+  dayNote?: (date: string) => string; // a note on a day (a holiday's name), '' for none
+  open?: string; // the day whose page shows first
 }
 export interface PaintOptions extends Common {
   mode: 'paint';
@@ -102,11 +108,17 @@ export class TimeGrid {
   cols: string[] = [];
   grid: HTMLElement | null = null;
   hover: Element | null = null;
+  // A day of the page to show, when the pages are worked out next (the day
+  // to open on; with 'steps', the page's first day, so the same week stays
+  // in view when the pages change between one week and two).
+  anchor: string | null;
+  chipsHtml = '';
 
   constructor(el: HTMLElement, o: GridOptions) {
     this.el = el;
     this.o = o;
     this.page = o.page ?? 0;
+    this.anchor = o.open ?? null;
     el.addEventListener('pointerdown', (e) => this.down(e));
     el.addEventListener('pointermove', (e) => this.move(e));
     el.addEventListener('pointerup', (e) => this.up(e));
@@ -130,6 +142,24 @@ export class TimeGrid {
     return Math.max(1, this.pageList.length);
   }
 
+  // Show the page with this day (or the first one after it).
+  show(date: string): void {
+    this.anchor = date;
+    this.render();
+  }
+
+  // Show page i. The focus stays on the button that was pressed, or goes to
+  // the other step button when that one is now at the end.
+  go(i: number, pressed = ''): void {
+    this.page = Math.max(0, Math.min(i, this.pages - 1));
+    this.anchor = null;
+    this.o.onPage?.(this.page);
+    this.render();
+    if (!pressed) return;
+    const el = this.el.querySelector<HTMLElement>(`${pressed}:not(:disabled)`) ?? this.el.querySelector<HTMLElement>('[data-step]:not(:disabled)');
+    el?.focus({ preventScroll: true });
+  }
+
   render(): void {
     const { dates, mins, mode } = this.o;
     if (!dates.length || !mins.length) {
@@ -141,12 +171,26 @@ export class TimeGrid {
     }
     // A hidden grid measures 0 wide: one week per page until it's shown.
     this.pageList = weekPages(dates, this.el.clientWidth >= WIDE ? 2 : 1);
+    const anchor = this.anchor;
+    if (anchor) {
+      const at = this.pageList.findIndex((p) => p[p.length - 1] >= anchor);
+      if (at >= 0) this.page = at;
+    }
     this.page = Math.max(0, Math.min(this.page, this.pages - 1));
     const cols = this.pageList[this.page];
     this.cols = cols;
+    const steps = this.o.nav === 'steps';
+    this.anchor = steps ? cols[0] : null;
     const wd = weekdayShort();
     let html = '';
-    if (this.pages > 1) {
+    if (steps) {
+      const step = (by: number, off: boolean) => {
+        const label = esc(t(by < 0 ? 'earlierWeeks' : 'laterWeeks'));
+        return `<button type="button" class="icon-btn" data-step="${by}" aria-label="${label}" title="${label}"${off ? ' disabled' : ''}>${icon('back', by > 0 ? 'flip' : '')}</button>`;
+      };
+      html += `<div class="tg-nav">${step(-1, this.page === 0)}<span class="tg-nav-label" aria-live="polite"><b>${esc(pageLabel(cols))}</b><small>${esc(`${shortDate(cols[0])} – ${shortDate(cols[cols.length - 1])}`)}</small></span>${step(1, this.page >= this.pages - 1)}</div><div class="tg-weeks" role="group" aria-label="${esc(t('weeks'))}" hidden></div>`;
+      this.chipsHtml = '';
+    } else if (this.pages > 1) {
       html += `<div class="tg-weeks" role="group" aria-label="${esc(t('weeks'))}">${this.pageList
         .map((p, i) => {
           const span = `${shortDate(p[0])} – ${shortDate(p[p.length - 1])}`;
@@ -157,10 +201,15 @@ export class TimeGrid {
     html += `<div class="tg ${mode}" role="grid" tabindex="0" aria-label="${esc(t(mode === 'paint' ? 'gridPaintLabel' : 'gridViewLabel'))}" style="--cols:${cols.length};--rowh:${this.o.rowh ?? 20}px">`;
     html += '<div class="tg-corner"></div>';
     for (const d of cols) {
-      const inner = `<b>${wd[weekday(d)]}</b><small>${esc(shortDate(d))}</small>`;
-      html += this.o.onDay
-        ? `<div class="tg-day" role="columnheader"><button type="button" data-day="${d}" aria-label="${esc(fmtDate(d, 'long'))}" aria-haspopup="menu">${inner}<i class="caret" aria-hidden="true"></i></button></div>`
-        : `<div class="tg-day" role="columnheader" aria-label="${esc(fmtDate(d, 'long'))}"><span>${inner}</span></div>`;
+      const note = this.o.dayNote?.(d) ?? '';
+      const label = esc(`${fmtDate(d, 'long')}${note ? ` (${note})` : ''}`);
+      const title = note ? ` title="${esc(note)}"` : '';
+      const inner = `<b>${wd[weekday(d)]}</b><small>${esc(shortDate(d))}</small>${note ? '<i class="hol" aria-hidden="true"></i>' : ''}`;
+      // A day with nothing to mark (the form: a day gone by) has no menu.
+      const menu = this.o.onDay && mins.some((m) => this.ok(slotKey(d, m)));
+      html += menu
+        ? `<div class="tg-day" role="columnheader"${title}><button type="button" data-day="${d}" aria-label="${label}" aria-haspopup="menu">${inner}<i class="caret" aria-hidden="true"></i></button></div>`
+        : `<div class="tg-day${this.o.onDay ? ' off' : ''}" role="columnheader" aria-label="${label}"${title}><span>${inner}</span></div>`;
     }
     mins.forEach((m, r) => {
       const hour = m % 60 === 0;
@@ -202,13 +251,36 @@ export class TimeGrid {
       }),
     );
     // In paint mode, a dot on each week that has something marked.
-    if (o.mode === 'paint') {
+    if (o.nav === 'steps') this.chips();
+    else if (o.mode === 'paint') {
       const chips = this.el.querySelectorAll<HTMLElement>('.tg-weeks [data-page]');
       chips.forEach((b, i) => {
         const marked = (this.pageList[i] ?? []).some((d) => o.mins.some((m) => o.value(slotKey(d, m))));
         b.classList.toggle('marked', marked);
       });
     }
+  }
+
+  // With 'steps': a chip for each page with something marked, unless the
+  // only one is the page shown.
+  chips(): void {
+    const box = this.el.querySelector<HTMLElement>('.tg-weeks');
+    if (!box) return;
+    const marks = this.o.marks?.() ?? new Set<string>();
+    const marked = this.pageList.map((p, i) => (p.some((d) => marks.has(d)) ? i : -1)).filter((i) => i >= 0);
+    const html =
+      marked.length > 1 || (marked.length === 1 && marked[0] !== this.page)
+        ? marked
+            .map((i) => {
+              const p = this.pageList[i];
+              return `<button type="button" class="chip${i === this.page ? ' on' : ''}" data-page="${i}" aria-pressed="${i === this.page}" title="${esc(`${shortDate(p[0])} – ${shortDate(p[p.length - 1])}`)}">${esc(pageLabel(p))}</button>`;
+            })
+            .join('')
+        : '';
+    if (html === this.chipsHtml) return;
+    this.chipsHtml = html;
+    box.innerHTML = html;
+    box.hidden = !html;
   }
 
   ok(k: string | undefined): k is string {
@@ -381,11 +453,14 @@ export class TimeGrid {
   click(e: MouseEvent): void {
     const o = this.o;
     const target = e.target as Element;
+    const step = target.closest<HTMLElement>('[data-step]');
+    if (step) {
+      this.go(this.page + Number(step.dataset.step), `[data-step="${step.dataset.step}"]`);
+      return;
+    }
     const nav = target.closest<HTMLElement>('[data-page]');
     if (nav) {
-      this.page = Number(nav.dataset.page);
-      this.o.onPage?.(this.page);
-      this.render();
+      this.go(Number(nav.dataset.page), `[data-page="${nav.dataset.page}"]`);
       return;
     }
     const day = target.closest<HTMLElement>('[data-day]');

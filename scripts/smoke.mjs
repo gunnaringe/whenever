@@ -318,31 +318,85 @@ const boss = await page({ mobile: false });
 await boss.goto(`${BASE}/new`);
 await boss.fill('form [name=name]', 'Planleggingsmøte');
 await boss.check('[name=mode][value=times]');
-check((await picked(boss)) === 0, 'times mode starts with nothing picked too');
-await boss.click('[data-act="period"][data-p="2w"]');
-check((await picked(boss)) === 14, '"Next 2 weeks" picks 14 days');
-await boss.click('[data-act="sel-none"]');
-// Drag across Monday to Friday with the mouse.
-{
-  const a = await day(boss, D(0)).boundingBox();
-  const b = await day(boss, D(4)).boundingBox();
-  await boss.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
-  await boss.mouse.down();
-  await boss.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 8 });
-  await boss.mouse.up();
-}
-check((await picked(boss)) === 5, 'dragging across the calendar picks five days');
-check((await boss.locator('#f-grid .tg-cell.v1').count()) === 5 * 16, 'picked days start with 9-17');
+// Times are marked straight in a week calendar: no days to pick first.
+const marked = (p) => p.locator('#f-grid .tg-cell.v1').count();
+const on = (p, d) => p.locator(`#f-grid .tg-cell.v1[data-k^="${d}"]`).count();
+const countLine = (p) => p.locator('#f-count-t').textContent();
+check((await boss.locator('#days-card').isHidden()) && (await boss.locator('#f-grid .tg-cell').count()) > 0, 'times mode shows a week calendar at once, and no month calendar');
+check((await marked(boss)) === 0 && (await countLine(boss)).startsWith('0 dager'), 'with nothing marked');
+check((await boss.locator('#f-grid .tg-day').count()) === 14, 'a wide screen shows two whole weeks');
+check((await boss.locator('#f-grid .tg-day.off').count()) === dow(today) && (await boss.locator(`#f-grid .tg-cell.na[data-k^="${iso(today)}"]`).count()) === 0, 'the days gone by are hatched and have no menu, today is open');
+check(await boss.locator('#f-grid [data-step="-1"]').isDisabled(), 'there is nothing earlier than this week');
+await boss.click('#f-grid [data-step="1"]');
+check((await boss.locator('.tg-nav-label').textContent()).includes('Uke') && (await boss.locator(`#f-grid .tg-cell[data-k="${iso(today + (14 - dow(today)) * DAY)}T09:00"]`).count()) === 1, 'the arrow shows the two weeks after');
+// The page of the form's calendar with a day: from the first one, forwards.
+const showWeek = async (p, d) => {
+  while (!(await p.locator('#f-grid [data-step="-1"]').isDisabled())) await p.click('#f-grid [data-step="-1"]');
+  while (!(await p.locator(`#f-grid .tg-cell[data-k="${d}T09:00"]`).count())) await p.click('#f-grid [data-step="1"]');
+};
+await showWeek(boss, D(0));
 await boss.selectOption('[name=dayStart]', '480');
 await boss.selectOption('[name=dayEnd]', '1080');
+await dragCells(boss, D(0, '09:00'), D(4, '16:30')); // Monday to Friday, 9-17
+check((await marked(boss)) === 5 * 16, 'dragging across the calendar marks five days, 9-17');
+check((await countLine(boss)).startsWith('5 dager · 80 tidsruter'), 'and the count line follows');
+// The presets fill the weeks shown from today on: working hours on weekdays.
+await boss.click('[data-act="preset"][data-p="evening"]');
+check((await on(boss, D(0))) === 2 && (await on(boss, D(5))) === 2, '"Evenings" fills every day shown (17-18 within the hours shown)');
 await boss.click('[data-act="preset"][data-p="work"]');
-check((await boss.locator('#f-grid .tg-cell.v1').count()) === 5 * 16, 'working hours preset: 5 days x 16 slots');
+check((await on(boss, D(0))) === 16 && (await on(boss, D(5))) === 2, '"Working hours" fills the weekdays and leaves the weekend');
+await boss.click('[data-act="preset"][data-p="clear"]');
+check((await marked(boss)) === 0, '"No times" clears what is shown');
+for (let i = 0; i < 3; i++) await boss.locator('#times-card .undo-btns [data-act="undo"]').click();
+check((await marked(boss)) === 5 * 16, 'three undos take the presets back');
+// A day's menu.
+const dayMenu = async (d, id) => {
+  await boss.click(`#f-grid [data-day="${d}"]`);
+  await boss.click(`#dlg button[value="${id}"]`);
+  await boss.waitForFunction(() => !document.querySelector('#dlg').open);
+  await boss.waitForTimeout(50);
+};
+await dayMenu(D(5), 'all');
+check((await on(boss, D(5))) === 20, 'a day\'s menu: the whole day (8-18)');
+await dayMenu(D(5), 'clear');
+check((await on(boss, D(5))) === 0, 'and clearing it');
+await dragCells(boss, D(2, '09:00'), D(2, '16:30')); // Wednesday off
+await dragCells(boss, D(2, '10:00'), D(2, '11:30')); // but for 10-12
+await dayMenu(D(2), 'week');
+check((await on(boss, D(0))) === 4 && (await on(boss, D(4))) === 4 && (await on(boss, D(5))) === 0, '"these times Monday to Friday" copies a day to its week\'s weekdays');
+await boss.locator('#times-card .undo-btns [data-act="undo"]').click();
+await boss.locator('#times-card .undo-btns [data-act="undo"]').click();
+await boss.locator('#times-card .undo-btns [data-act="undo"]').click();
+check((await marked(boss)) === 5 * 16, 'and undo brings the week back');
+// One more week with the same times: the last week, once more in the week after.
+check(!(await boss.locator('#repeat-week').isDisabled()), 'with times marked, the week can be repeated');
+await boss.click('#repeat-week');
+check((await countLine(boss)).startsWith('10 dager · 160 tidsruter') && (await on(boss, D(7))) === 16 && (await on(boss, D(11))) === 16 && (await on(boss, D(12))) === 0, '"one more week" copies the last week to the week after, and shows it');
+await boss.locator('#times-card .undo-btns [data-act="undo"]').click();
+check((await countLine(boss)).startsWith('5 dager'), 'undone again');
+// From another page, a chip leads back to the one with times.
+await showWeek(boss, iso(today));
+check((await boss.locator('#f-grid .tg-weeks .chip').count()) === 1, 'a page with times gets a chip while another page is shown');
+await boss.click('#f-grid .tg-weeks .chip');
+check((await marked(boss)) === 5 * 16, 'and the chip shows that page');
 await dragCells(boss, D(0, '08:00'), D(1, '08:30')); // add 08:00-09:00 on Mon+Tue
 check((await boss.locator('#f-grid .tg-cell.v1').count()) === 5 * 16 + 4, 'drag paints a rectangle');
 await dragCells(boss, D(4, '15:00'), D(4, '16:30')); // Friday afternoon off
 const afterErase = await boss.locator('#f-grid .tg-cell.v1').count();
 check(afterErase === 5 * 16 + 4 - 4, `drag from a marked cell erases (${afterErase})`);
 await shot(boss, '09-new-times');
+{
+  const ph = await page();
+  await ph.goto(`${BASE}/new`);
+  await ph.check('[name=mode][value=times]');
+  check((await ph.locator('#f-grid .tg-day').count()) === 7, 'a phone shows one whole week');
+  await ph.click('#f-grid [data-step="1"]');
+  await ph.click('[data-act="preset"][data-p="work"]');
+  check((await marked(ph)) === 5 * 16, 'and "Working hours" fills its five weekdays');
+  check(await ph.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'without making the page wider than the screen');
+  await ph.locator('#times-card').screenshot({ path: `${SHOTS}/09b-new-times-phone.png` });
+  await ph.context().close();
+}
 await boss.click('button[type=submit]');
 await boss.waitForURL(LINK_RE);
 const timesUrl = boss.url().replace(/#.*$/, '');
@@ -507,8 +561,8 @@ await hc.close();
   const un = await page({ mobile: false });
   await un.goto(`${BASE}/new`);
   await un.waitForSelector('#f-cal .cal-day');
-  const undoBtn = un.locator('.count-row [data-act="undo"]');
-  const redoBtn = un.locator('.count-row [data-act="redo"]');
+  const undoBtn = un.locator('#days-card .count-row [data-act="undo"]');
+  const redoBtn = un.locator('#days-card .count-row [data-act="redo"]');
   const toastEl = un.locator('#toast');
   check((await undoBtn.isDisabled()) && (await redoBtn.isDisabled()), 'undo and redo start disabled');
   await mouseRange(un, D(0), D(2));
@@ -522,7 +576,7 @@ await hc.close();
   check((await picked(un)) === 14, '"Next 2 weeks" replaces them');
   await un.click('[data-act="sel-none"]');
   check((await toastEl.isVisible()) && (await toastEl.textContent()).includes('Fjernet 14 dager'), '"None" says how many days went, with an Undo');
-  await un.locator('.count-row').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await un.locator('#days-card .count-row').evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await shot(un, '30-undo', false);
   await un.click('#toast [data-act="undo"]');
   check((await picked(un)) === 14 && (await toastEl.isHidden()), "the toast's Undo brings all 14 back and closes it");
@@ -551,6 +605,9 @@ await hc.close();
   check((await cells()) === full - 4, 'a grid stroke is a step');
   await un.keyboard.press('Control+z');
   check((await cells()) === full, 'and Ctrl+Z takes the whole stroke back');
+  // Back in days mode, the days with times are the ones picked.
+  await un.check('[name=mode][value=dates]');
+  check((await picked(un)) === 15, 'switching back to days keeps the days that have times');
   await un.click('[data-act="sel-none"]');
   check(await toastEl.locator('.toast-act').isVisible(), '"None" shows its Undo toast');
   await un.click('a.brand');
