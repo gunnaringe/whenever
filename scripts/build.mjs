@@ -1,5 +1,5 @@
 // Builds dist/, the static assets the Worker serves: public/ as it is, plus
-// the app (src/app/app.ts), stylesheet (src/app/styles.css) and the small
+// the app (src/app/app.ts and what it imports), stylesheet (src/app/styles.css) and the small
 // theme script for <head> (src/app/theme-head.ts, a classic script) bundled
 // by esbuild, with a content hash in their names so a deploy never mixes a
 // new page with old code (the apphub.casa zone caches CSS/JS for 4 hours).
