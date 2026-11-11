@@ -1689,6 +1689,73 @@ await fu.close();
   await ad.close();
 }
 
+// --- Y) Guards: the last day, the size of a body, HSTS, live sockets an event -------------------
+{
+  const hdr = (token) => ({ 'content-type': 'application/json', 'x-dev-ip': devIp(), ...(token ? { authorization: `Bearer ${token}` } : {}) });
+  const send = (method, path, body, token) => fetch(`${BASE}/api/events${path}`, { method, headers: hdr(token), body: typeof body === 'string' ? body : JSON.stringify(body), ...(body instanceof ReadableStream ? { body, duplex: 'half' } : {}) });
+  const ahead = (n) => iso(today + n * DAY);
+  const ev = (start, end, name = 'Guards') => ({ event: { name, mode: 'dates', start, end, options: [start] } });
+  let r = await send('POST', '', ev(ahead(740), ahead(741)));
+  check(r.status === 400 && (await r.json()).error === 'tooFar', 'an event more than two years ahead is refused, so every event is deleted one day');
+  r = await send('POST', '', ev('9998-01-01', '9998-01-02'));
+  check(r.status === 400, 'and one in the year 9998');
+  r = await send('POST', '', ev(ahead(700), ahead(701)));
+  const far = await r.json();
+  check(r.status === 200, 'one 700 days ahead is fine');
+  await send('DELETE', `/${far.id}`, undefined, far.token);
+  r = await send('POST', '', ev(D(0), D(6)));
+  const made = await r.json();
+  check(r.headers.get('strict-transport-security') === 'max-age=31536000', 'the API tells browsers to only come back over https');
+  r = await send('PUT', `/${made.id}`, ev(ahead(800), ahead(801)), made.token);
+  check(r.status === 400 && (await r.json()).error === 'tooFar', "the organiser can't move it more than two years ahead either");
+  r = await send('PUT', `/${made.id}/details`, { name: 'Guards 2' }, made.token);
+  check(r.status === 200 && (await r.json()).view.event.name === 'Guards 2', 'changing its name still works');
+  r = await send('POST', '', JSON.stringify({ event: { name: 'x'.repeat(300 * 1024) } }));
+  check(r.status === 413, 'a 300 KB body is refused');
+  const pieces = new ReadableStream({
+    start(c) {
+      for (let i = 0; i < 40; i++) c.enqueue(new TextEncoder().encode('y'.repeat(16 * 1024)));
+      c.close();
+    },
+  });
+  r = await send('POST', '', pieces);
+  check(r.status === 413, 'and one that says nothing about its length');
+  for (const path of ['/', `/e/${made.id}`, '/privacy', '/llms.txt']) {
+    r = await fetch(`${BASE}${path}`, { headers: { 'x-dev-ip': devIp() }, redirect: 'manual' });
+    check(r.status === 200 && r.headers.get('strict-transport-security') === 'max-age=31536000', `${path} comes with Strict-Transport-Security (and no redirect on this machine)`);
+  }
+  // 300 live sockets an event: the page's is the one heard from longest ago,
+  // so the 300th other one takes its place, and the page connects again.
+  const p = await page();
+  await p.goto(`${BASE}/e/${made.id}`);
+  await p.waitForSelector('html[data-live="open"]');
+  await p.evaluate(() => {
+    window.__live = [];
+    new MutationObserver(() => window.__live.push(document.documentElement.dataset.live)).observe(document.documentElement, { attributes: true, attributeFilter: ['data-live'] });
+  });
+  const socks = [];
+  for (let i = 0; i < 300; i++) {
+    const ws = new WebSocket(`${BASE.replace('http', 'ws')}/api/events/${made.id}/live`, { headers: { 'x-dev-ip': devIp() } });
+    socks.push(ws);
+    await new Promise((yes, no) => {
+      ws.addEventListener('open', yes, { once: true });
+      ws.addEventListener('error', () => no(new Error(`live socket ${i} failed`)), { once: true });
+    });
+    ws.send(JSON.stringify({ token: null }));
+  }
+  await p.waitForFunction(() => window.__live.join() === 'closed,open', null, { timeout: 8000 }).catch(() => {});
+  check((await p.evaluate(() => window.__live.join())) === 'closed,open', 'with 300 other live sockets the page lost its own, and connected again by itself');
+  await send('PUT', `/${made.id}/details`, { name: 'Guards 3' }, made.token);
+  await p.locator('h1:has-text("Guards 3")').waitFor({ timeout: 5000 }).catch(() => {});
+  check((await p.locator('h1').textContent()).includes('Guards 3'), 'and it still hears about changes');
+  // (Node's WebSocket waits for the server to end the connection, so the one
+  // that made room for the page isn't counted as closed here.)
+  check(socks.filter((s) => s.readyState === WebSocket.OPEN).length === 299, 'one of the others made room for it');
+  for (const s of socks) s.close();
+  await send('DELETE', `/${made.id}`, undefined, made.token);
+  await p.context().close();
+}
+
 // --- L) Languages: a menu under the language code ----------------------------------------
 const lg = await page();
 await lg.goto(`${BASE}/`);

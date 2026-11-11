@@ -169,6 +169,8 @@ export const LIMITS = {
   options: 2000,
   daysDates: 366,
   daysTimes: 62,
+  // How far ahead an event's last day may be when the server stores it.
+  aheadDays: 731,
 };
 export const MODES: readonly Mode[] = ['dates', 'times'];
 export const SLOTS: readonly number[] = [15, 30, 60];
@@ -491,15 +493,24 @@ const int = (v: unknown): number => (typeof v === 'number' && Number.isInteger(v
 const fail = (error: string): Failed => ({ ok: false, error });
 const record = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {});
 
+// The last day an event may have when it is stored: an event is deleted some
+// time after its last day (expiresAt), so one dated a thousand years ahead
+// would stay for good. The app's calendar reaches a year ahead; this leaves
+// the API room.
+export const latestEnd = (now = Date.now()): string => fromTime(now + LIMITS.aheadDays * DAY);
+
 // Validates an event from a client. Returns { ok: true, event } or
 // { ok: false, error } where error is an i18n key suffix (err.<error>).
-export function sanitizeEvent(input: unknown): { ok: true; event: PollEvent } | Failed {
+// `latest` is the last day it may have (latestEnd(), when the server is
+// about to store its days; left out, any day goes).
+export function sanitizeEvent(input: unknown, latest?: string): { ok: true; event: PollEvent } | Failed {
   const o = record(input);
   const name = cleanLine(o.name, LIMITS.name);
   if (!name) return fail('name');
   const mode: Mode = o.mode === 'times' ? 'times' : 'dates';
   const { start, end } = o;
   if (!isDate(start) || !isDate(end) || end < start) return fail('range');
+  if (latest !== undefined && end > latest) return fail('tooFar');
   const days = diffDays(start, end) + 1;
   if (days > (mode === 'times' ? LIMITS.daysTimes : LIMITS.daysDates)) return fail('rangeLong');
 
