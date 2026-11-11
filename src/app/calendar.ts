@@ -24,7 +24,7 @@ export function calendarHtml({
   const blocks = months.map(([y, m]) => {
     const first = `${y}-${pad(m + 1)}-01`;
     const last = `${y}-${pad(m + 1)}-${pad(new Date(Date.UTC(y, m + 1, 0)).getUTCDate())}`;
-    let html = `<section class="cal-month"><h4>${monthTitle(y, m)}</h4><div class="cal-grid">`;
+    let html = `<section class="cal-month"><h3>${monthTitle(y, m)}</h3><div class="cal-grid">`;
     html += `<span class="cal-h wk" aria-hidden="true">${t('weekShort')}</span>`;
     html += names.map((n, i) => `<span class="cal-h${i >= 5 ? ' we' : ''}">${n}</span>`).join('');
     for (let mon = addDays(first, -weekday(first)); mon <= last; mon = addDays(mon, 7)) {

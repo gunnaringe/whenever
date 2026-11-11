@@ -1813,6 +1813,51 @@ await fu.close();
   await p.context().close();
 }
 
+// --- Z) A narrow phone (320 px), finger-sized links, and when the event is deleted --------------
+{
+  const hdr = (token) => ({ 'content-type': 'application/json', 'x-dev-ip': devIp(), ...(token ? { authorization: `Bearer ${token}` } : {}) });
+  const days = [D(0), D(1), D(2), D(7)];
+  const made = await (await fetch(`${BASE}/api/events`, { method: 'POST', headers: hdr(), body: JSON.stringify({ event: { name: 'Smal skjerm', mode: 'dates', start: days[0], end: days[3], options: days } }) })).json();
+  await fetch(`${BASE}/api/events/${made.id}/people`, { method: 'POST', headers: hdr(), body: JSON.stringify({ name: 'Kari', answers: { [days[0]]: 1 } }) });
+  // The server says when it goes: the day before, as its last whole day.
+  const last = iso(Date.parse(days[3]) + 30 * DAY);
+  check(iso(made.view.deletes - DAY) === last, `the view says when the event is deleted (${iso(made.view.deletes)})`);
+  for (const theme of ['light', 'hacker']) {
+    const ctx = await browser.newContext({ viewport: { width: 320, height: 640 }, hasTouch: true, locale: 'nb-NO', timezoneId: 'Europe/Oslo', extraHTTPHeaders: { 'x-dev-ip': devIp() } });
+    const p = await ctx.newPage();
+    p.on('pageerror', (e) => errors.push(e.message));
+    await p.goto(`${BASE}/`);
+    await p.evaluate((th) => localStorage.setItem('whenever-v1', JSON.stringify({ lang: 'nb', theme: th })), theme);
+    const wide = [];
+    for (const [name, path, act] of [
+      ['the form', '/new', null],
+      ['the form with times', '/new', (q) => q.check('[name=mode][value=times]')],
+      ['the event page', `/e/${made.id}`, null],
+      ['the answer form', `/e/${made.id}#answer`, null],
+    ]) {
+      await p.goto('about:blank');
+      await p.goto(`${BASE}${path}`);
+      await p.waitForSelector('main.page :is(h1, .card)');
+      if (act) await act(p);
+      if (await p.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) wide.push(name);
+    }
+    check(wide.length === 0, `at 320 px (${theme}) no page is wider than the screen${wide.length ? `: ${wide.join(', ')}` : ''}`);
+    if (theme === 'light') {
+      await p.goto('about:blank');
+      await p.goto(`${BASE}/e/${made.id}#answer`);
+      await p.waitForSelector('.back');
+      const h = await p.evaluate(() => Math.min(...[...document.querySelectorAll('main .linkish, main .back')].filter((e) => e.checkVisibility()).map((e) => e.getBoundingClientRect().height)));
+      check(h >= 36, `text links are a finger high on a touch screen (${Math.round(h)} px)`);
+      await p.goto(`${BASE}/e/${made.id}`);
+      await p.waitForSelector('.results');
+      check((await p.locator('main').textContent()).includes(`slettes automatisk`), 'the event page says when it is deleted');
+      check((await p.locator('.cal-month h3').count()) > 0 && (await p.locator('.cal-month h4').count()) === 0, 'month names are headings right under the card\'s');
+    }
+    await ctx.close();
+  }
+  await fetch(`${BASE}/api/events/${made.id}`, { method: 'DELETE', headers: hdr(made.token) });
+}
+
 // --- L) Languages: a menu under the language code ----------------------------------------
 const lg = await page();
 await lg.goto(`${BASE}/`);
@@ -1846,7 +1891,7 @@ const isMonths = ['Janúar', 'Febrúar', 'Mars', 'Apríl', 'Maí', 'Júní', 'J�
 await lg.reload();
 await lg.waitForSelector('#f-cal');
 check((await langNow()) === 'is' && (await lg.locator('.lang-btn').textContent()).trim().startsWith('IS'), 'the choice is remembered after a reload');
-const firstMonth = (await lg.locator('#f-cal .cal-month h4').first().textContent()).split(' ')[0];
+const firstMonth = (await lg.locator('#f-cal .cal-month h3').first().textContent()).split(' ')[0];
 check(isMonths.includes(firstMonth), `the calendar's month titles are Icelandic (${firstMonth})`);
 await shot(lg, '18-icelandic-new-event', false);
 await lg.close();

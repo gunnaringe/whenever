@@ -260,8 +260,17 @@ export class Poll extends DurableObject<Env> {
     };
     // How many have answered tells as much as who (see the top).
     if (!hidden) Object.assign(out, { count, waitingCount: rows.length - count });
+    const deletes = Number(this.getMeta('deleteAt'));
+    if (deletes) out.deletes = deletes;
     if (who.role === 'admin') out.adminEmails = this.adminEmails();
     return out;
+  }
+
+  // The alarm that deletes it all, and the same time for the view to show.
+  async expire(event: PollEvent): Promise<void> {
+    const at = deleteAt(event);
+    await this.ctx.storage.setAlarm(at);
+    this.setMeta('deleteAt', at);
   }
 
   // --- RPC from the Worker ------------------------------------------------------
@@ -276,7 +285,7 @@ export class Poll extends DurableObject<Env> {
     this.setMeta('adminSecret', secret);
     this.setAdminEmails(emails);
     this.setMeta('created', Date.now());
-    await this.ctx.storage.setAlarm(deleteAt(event));
+    await this.expire(event);
     const out = { token: token(adminId, secret), view: this.view(this.admin()) };
     await this.reindex();
     return out;
@@ -354,7 +363,7 @@ export class Poll extends DurableObject<Env> {
       const a = JSON.stringify(cleanAnswers(JSON.parse(r.answers), event));
       if (a !== r.answers) this.sql.exec(`UPDATE people SET answers = ? WHERE id = ?`, a, r.id);
     }
-    await this.ctx.storage.setAlarm(deleteAt(event));
+    await this.expire(event);
     this.bump();
     const out = { view: this.view(who) };
     await this.reindex();

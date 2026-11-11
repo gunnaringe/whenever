@@ -63,6 +63,10 @@ export function renderOverview(v: M.View): void {
   // Just created: sharing the link is the next thing to do.
   const created = app.flash?.kind === 'created';
   const share = v.role === 'admin' ? shareHtml(v) : '';
+  // Its last whole day: the server's word (it keeps an event a week after
+  // any change), else worked out from the last day, unless that is gone by.
+  const lastDay = v.deletes ? M.addDays(M.fromTime(v.deletes), -1) : M.addDays(ev.end, M.RETENTION_DAYS);
+  const expires = lastDay >= M.localToday() ? lastDay : '';
   paint(`
     ${flashHtml()}
     ${noticesHtml(v, stored)}
@@ -73,7 +77,7 @@ export function renderOverview(v: M.View): void {
     ${created ? '' : share}
     ${resultsHtml(v)}
     ${peopleHtml(v, stored)}
-    <p class="muted small center">${esc(t('expiresNote', { date: fmtDate(M.addDays(ev.end, M.RETENTION_DAYS), 'full') }))}</p>`);
+    ${expires ? `<p class="muted small center">${esc(t('expiresNote', { date: fmtDate(expires, 'full') }))}</p>` : ''}`);
   mountResults(v);
   if (app.flash) app.flashShown = app.flash;
   app.flash = null;
