@@ -152,8 +152,15 @@ transforming (enums, namespaces, parameter properties) is off
   when it has times (`timeDays`), and `Draft.dates` is only the days mode's
   pick. Switching to times gives the days picked 9 to 17; switching back
   picks the days that have times. A day gone by is hatched and can only
-  lose the times it has (`allowed`). «Timer som vises» (`dayStart`/`dayEnd`)
-  is which hours the grid shows; narrowing it drops the times outside.
+  lose the times it has (`allowed`). The hours the grid shows
+  (`dayStart`/`dayEnd`) are buttons, not a setting (answerers see the
+  offered times, first to last): 08–22 to begin with, «Vis tidligere/senere
+  timer» add two hours, and the reset goes back to 08–22 or as far as the
+  times need (`moreHours`, `fitHours`); none of them drops times. The
+  meeting length is chips plus «Annen lengde» (hours and minutes, used when
+  the focus leaves both fields); `setDuration` makes the slots finer when
+  15 or 30 would divide it, else rounds up, and says so. The slot length is
+  folded away with the time zone.
   Shortcuts, so the plain case stays quick: the presets fill the week (or
   two) shown from today on (`applyPreset`: working hours on its weekdays,
   the others on every day); «Én uke til med samme tider» copies the last

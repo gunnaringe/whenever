@@ -18,7 +18,7 @@ import { setView } from './render.ts';
 
 export type Preset = 'all' | 'work' | 'evening' | 'clear';
 const PRESETS: Record<Preset, [number, number]> = { all: [0, 1440], work: [540, 1020], evening: [1020, 1320], clear: [0, 0] };
-const DURATIONS = [15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 480, 600, 720];
+const MAX_DURATION = 720;
 export const rowHeight = (slot: number) => (slot === 15 ? 14 : slot === 30 ? 20 : 30);
 
 function newDraft(): Draft {
@@ -195,20 +195,8 @@ function setWindow(d: Draft, dayStart: number, dayEnd: number, slot: number): vo
     }
   }
   d.times = next;
-  d.duration = durationsFor(d).reduce((best, x) => (Math.abs(x - d.duration) < Math.abs(best - d.duration) ? x : best), slot);
+  d.duration = Math.min(Math.ceil(d.duration / slot) * slot, MAX_DURATION);
 }
-
-function durationsFor(d: M.DayWindow): number[] {
-  const list = DURATIONS.filter((x) => x % d.slot === 0 && x <= d.dayEnd - d.dayStart);
-  return list.length ? list : [d.slot];
-}
-
-const hourOptions = (from: number, to: number, sel: number) =>
-  Array.from({ length: to - from + 1 }, (_, i) => (from + i) * 60)
-    .map((m) => `<option value="${m}" ${m === sel ? 'selected' : ''}>${M.pad(m / 60)}:00</option>`)
-    .join('');
-
-const durationOptions = (d: Draft) => durationsFor(d).map((x) => `<option value="${x}" ${x === d.duration ? 'selected' : ''}>${esc(durationLabel(x))}</option>`).join('');
 
 function tzOptions(sel: string): string {
   let zones: string[] = [];
@@ -260,13 +248,13 @@ export function renderForm(v: M.View | null): void {
         <h2>${esc(t('whatToFind'))}</h2>
         <div class="choice">${modeCard('dates')}${modeCard('times')}</div>
         <div id="times-opts" ${d.mode === 'times' ? '' : 'hidden'}>
-          <div class="grid4">
-            ${field('slot', t('slotLength'), `<select name="slot">${M.SLOTS.map((s) => `<option value="${s}" ${s === d.slot ? 'selected' : ''}>${s} min</option>`).join('')}</select>`)}
-            ${field('duration', t('meetingLength'), `<select name="duration">${durationOptions(d)}</select>`)}
-          </div>
+          ${durationField()}
           <details class="fold">
-            <summary>${esc(t('timeZone'))}: <span id="tz-now">${esc(d.tz.replace(/_/g, ' '))}</span></summary>
-            ${field('tz', t('timeZone'), `<select name="tz">${tzOptions(d.tz)}</select>`, t('timeZoneHint'))}
+            <summary><span>${esc(t('gridFold'))}:</span> <span><span id="slot-now">${d.slot} min</span> · <span id="tz-now">${esc(d.tz.replace(/_/g, ' '))}</span></span></summary>
+            <div class="grid2">
+              ${field('slot', t('slotLength'), `<select name="slot">${M.SLOTS.map((s) => `<option value="${s}" ${s === d.slot ? 'selected' : ''}>${s} min</option>`).join('')}</select>`, t('slotHint'))}
+              ${field('tz', t('timeZone'), `<select name="tz">${tzOptions(d.tz)}</select>`, t('timeZoneHint'))}
+            </div>
           </details>
         </div>
       </section>
@@ -283,15 +271,12 @@ export function renderForm(v: M.View | null): void {
       <section class="card" id="times-card" ${d.mode === 'times' ? '' : 'hidden'}>
         <h2>${esc(t('possibleTimes'))}</h2>
         <p class="muted">${esc(t(touch() ? 'possibleTimesHintTouch' : 'possibleTimesHint'))}</p>
-        <div class="hours-row">
-          <span class="label">${esc(t('hoursShown'))}</span>
-          <span class="hours">
-            <select name="dayStart" aria-label="${esc(t('fromHour'))}">${hourOptions(0, 23, d.dayStart)}</select>
-            <span aria-hidden="true">–</span>
-            <select name="dayEnd" aria-label="${esc(t('toHour'))}">${hourOptions(1, 24, d.dayEnd)}</select>
-          </span>
-        </div>
+        <button type="button" class="btn small ghost hours-btn" id="hours-earlier" data-act="hours" data-dir="-1">${icon('plus')}${esc(t('hoursEarlier'))}</button>
         <div id="f-grid"></div>
+        <div class="hours-after">
+          <button type="button" class="btn small ghost hours-btn" id="hours-later" data-act="hours" data-dir="1">${icon('plus')}${esc(t('hoursLater'))}</button>
+          <button type="button" class="btn small ghost hours-btn" id="hours-reset" data-act="hours" data-dir="0">${esc(t('hoursReset'))}</button>
+        </div>
         <p class="muted small preset-label" id="preset-label"></p>
         <div class="chip-row">${(Object.keys(PRESETS) as Preset[]).map((p) => `<button type="button" class="btn small" data-act="preset" data-p="${p}">${esc(t(`preset.${p}`))}</button>`).join('')}</div>
         <button type="button" class="btn small" id="repeat-week" data-act="repeat-week" title="${esc(t('repeatWeekHint'))}">${icon('plus')}${esc(t('repeatWeek'))}</button>
@@ -319,6 +304,7 @@ export function renderForm(v: M.View | null): void {
   bindForm();
   refreshDays();
   refreshTimes();
+  showDuration();
 }
 
 // The event form's settings: «se svarene» is `hidden` the other way round;
@@ -336,6 +322,7 @@ function bindForm(): void {
     const n = el.name;
     if (n === 'name' || n === 'description' || n === 'location') d[n] = el.value;
     else if (n === 'email') syncEmails();
+    else if (n === 'durH' || n === 'durM') customDuration(false);
     d.dirty = true;
   });
   // Enter in a text field shouldn't create the event by accident.
@@ -350,11 +337,11 @@ function bindForm(): void {
     if (n === 'mode') {
       setMode(el.value as M.Mode);
       resetHistory();
-    } else if (n === 'dayStart' || n === 'dayEnd' || n === 'slot') {
-      changeWindow(n);
-      resetHistory();
+    } else if (n === 'slot') {
+      setSlot(Number(el.value));
     }
-    else if (n === 'duration') d.duration = Number(el.value);
+    else if (n === 'durPick') pickDuration(el.value);
+    else if (n === 'durH' || n === 'durM') customDuration(false);
     else if (n === 'tz') {
       d.tz = el.value;
       $('#tz-now').textContent = el.value.replace(/_/g, ' ');
@@ -378,6 +365,12 @@ function bindForm(): void {
         box.checked = shownOn(d.settings, k);
       }
     }
+  });
+  // A typed length is used once the focus leaves both fields (going from
+  // hours to minutes must not round the hours alone).
+  $('#ev-form .dur-custom').addEventListener('focusout', (e) => {
+    const box = e.currentTarget as HTMLElement;
+    if (!box.contains(e.relatedTarget as Node | null)) customDuration(true);
   });
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -424,24 +417,144 @@ function setMode(mode: M.Mode): void {
   if (mode === 'times') app.formGrid?.show(openDay(d));
 }
 
-function changeWindow(which: string): void {
+// The slot length, from its menu or because a meeting length needs finer
+// slots. Changes the times in ways the earlier steps can't be laid over.
+function setSlot(slot: number, byMenu = true): void {
   const d = draft();
-  const form = $<HTMLFormElement>('#ev-form');
-  const dayStart = control<HTMLSelectElement>(form, 'dayStart');
-  const dayEnd = control<HTMLSelectElement>(form, 'dayEnd');
-  let ds = Number(dayStart.value);
-  let de = Number(dayEnd.value);
-  const slot = Number(control<HTMLSelectElement>(form, 'slot').value);
-  if (de <= ds) {
-    if (which === 'dayEnd') ds = Math.max(0, de - 60);
-    else de = Math.min(1440, ds + 60);
-    dayStart.value = String(ds);
-    dayEnd.value = String(de);
-  }
-  setWindow(d, ds, de, slot);
-  control<HTMLSelectElement>(form, 'duration').innerHTML = durationOptions(d);
+  const before = d.duration;
+  setWindow(d, d.dayStart, d.dayEnd, slot);
+  resetHistory();
+  $<HTMLSelectElement>('#ev-form [name="slot"]').value = String(slot);
+  $('#slot-now').textContent = `${slot} min`;
+  if (byMenu) showDuration(d.duration !== before ? t('durRounded', { dur: durationLabel(d.duration), slot }) : '');
   refreshCount();
   refreshTimes();
+}
+
+// --- Meeting length: a few choices, or any length up to 12 hours -------------------------
+
+const DUR_CHOICES = [30, 60, 90, 120, 180];
+
+function durationField(): string {
+  const radio = (v: string, label: string) =>
+    `<label class="chip pick"><input type="radio" name="durPick" value="${v}">${esc(label)}</label>`;
+  return `<fieldset class="dur">
+    <legend class="label">${esc(t('meetingLength'))}</legend>
+    <div class="chip-row">${DUR_CHOICES.map((x) => radio(String(x), durationLabel(x))).join('')}${radio('other', t('durOther'))}</div>
+    <div class="dur-custom" hidden>
+      ${field('durH', t('durHours'), `<input type="number" name="durH" min="0" max="12" step="1" inputmode="numeric">`)}
+      ${field('durM', t('durMinutes'), `<input type="number" name="durM" min="0" max="59" step="5" inputmode="numeric">`)}
+    </div>
+    <p class="muted small" id="dur-note" aria-live="polite" hidden></p>
+  </fieldset>`;
+}
+
+// The choices as the draft has them: its length ticked, else "Other" with the
+// fields filled (once the form is in the page).
+function showDuration(note = '', custom = false, fill = true): void {
+  const d = draft();
+  const form = $opt<HTMLFormElement>('#ev-form');
+  if (!form) return;
+  const other = custom || !DUR_CHOICES.includes(d.duration);
+  for (const r of form.querySelectorAll<HTMLInputElement>('[name="durPick"]')) r.checked = other ? r.value === 'other' : Number(r.value) === d.duration;
+  const box = $('#ev-form .dur-custom');
+  box.hidden = !other;
+  if (other && fill) {
+    control<HTMLInputElement>(form, 'durH').value = String(Math.floor(d.duration / 60));
+    control<HTMLInputElement>(form, 'durM').value = String(d.duration % 60);
+  }
+  const p = $('#dur-note');
+  p.textContent = note;
+  p.hidden = !note;
+}
+
+function pickDuration(v: string): void {
+  if (v === 'other') {
+    showDuration('', true);
+    $<HTMLInputElement>('#ev-form [name="durH"]').focus();
+    return;
+  }
+  setDuration(Number(v));
+}
+
+// Typed in the "Other" fields: a preview while typing, used once the focus
+// leaves them (`done`), and then the fields show what is used.
+function customDuration(done: boolean): void {
+  const form = $<HTMLFormElement>('#ev-form');
+  const h = Number(control<HTMLInputElement>(form, 'durH').value) || 0;
+  const m = Number(control<HTMLInputElement>(form, 'durM').value) || 0;
+  setDuration(Math.round(h * 60 + m), done ? 'typed' : 'typing');
+}
+
+// A meeting length: a multiple of the slots, from one slot to 12 hours. A
+// length the slots don't divide gets finer slots when 15 or 30 minutes
+// would do (and says so), else it is rounded up. While typing (`preview`)
+// only the note says what will happen; a typed length keeps "Other" open.
+export function setDuration(min: number, from: 'pick' | 'typing' | 'typed' = 'pick'): void {
+  const d = draft();
+  let dur = Math.min(Math.max(min, 1), MAX_DURATION);
+  let slot = d.slot;
+  let note = '';
+  if (dur % slot) {
+    const finer = [30, 15].find((s) => s < slot && dur % s === 0);
+    if (finer) {
+      slot = finer;
+      note = t('durSlots', { slot });
+    } else dur = Math.min(Math.ceil(dur / slot) * slot, MAX_DURATION);
+  }
+  if (dur !== min) note = t('durRounded', { dur: durationLabel(dur), slot });
+  if (from === 'typing') {
+    showDuration(min ? note : '', true, false);
+    return;
+  }
+  if (slot !== d.slot) setSlot(slot, false);
+  d.duration = dur;
+  d.dirty = true;
+  // The hours shown hold at least one meeting (the server asks for that).
+  if (d.dayEnd - d.dayStart < dur) {
+    d.dayEnd = Math.min(1440, d.dayStart + dur);
+    d.dayStart = Math.min(d.dayStart, d.dayEnd - dur);
+    refreshTimes();
+  }
+  showDuration(note, from === 'typed');
+}
+
+// --- The hours shown in the form's grid ---------------------------------------------------
+// Only where the organiser's grid starts and ends: those answering see the
+// offered times, first to last. 08–22 to begin with, two hours more each way
+// on request, and back to 08–22 (or what the offered times need).
+
+const HOURS: [number, number] = [480, 1320];
+
+function fitHours(d: Draft): [number, number] {
+  let [lo, hi] = HOURS;
+  for (const k of d.times) {
+    const m = M.parseKey(k)?.min ?? 0;
+    lo = Math.min(lo, Math.floor(m / 60) * 60);
+    hi = Math.max(hi, Math.ceil((m + d.slot) / 60) * 60);
+  }
+  return [lo, hi];
+}
+
+export function moreHours(b: HTMLElement): void {
+  const d = draft();
+  const dir = Number(b.dataset.dir);
+  const top = b.getBoundingClientRect().top;
+  if (dir < 0) d.dayStart = Math.max(0, d.dayStart - 120);
+  else if (dir > 0) d.dayEnd = Math.min(1440, d.dayEnd + 120);
+  else [d.dayStart, d.dayEnd] = fitHours(d);
+  d.dirty = true;
+  refreshTimes();
+  // The page stays put under the button (rows added above it push it down).
+  if (!b.hidden) window.scrollBy(0, b.getBoundingClientRect().top - top);
+  else (['#hours-later', '#hours-earlier', '#hours-reset'].map((x) => $opt<HTMLButtonElement>(x)).find((x) => x && !x.hidden) ?? $opt<HTMLElement>('#f-grid [data-step="1"]'))?.focus();
+}
+
+function refreshHours(d: Draft): void {
+  const [lo, hi] = fitHours(d);
+  $('#hours-earlier').hidden = d.dayStart === 0;
+  $('#hours-later').hidden = d.dayEnd === 1440;
+  $('#hours-reset').hidden = d.dayStart === lo && d.dayEnd === hi;
 }
 
 // The form calendar: from today (or an earlier picked day, when editing) to
@@ -588,6 +701,7 @@ export function refreshTimes(): void {
       onDay: (date) => dayMenu(date),
     });
   }
+  refreshHours(d);
   $('#preset-label').textContent = t('presetsFor', { n: app.formGrid.cols.length > 7 ? 2 : 1 });
 }
 
@@ -751,6 +865,7 @@ export function travel(back: boolean, from?: HTMLElement): void {
 
 async function submitForm(): Promise<void> {
   if (app.busy) return;
+  if (draft().mode === 'times' && $('#ev-form .dur-custom').contains(document.activeElement)) customDuration(true);
   const d = draft();
   const v = app.route?.page === 'event' ? app.view : null;
   const form = $<HTMLFormElement>('#ev-form');
