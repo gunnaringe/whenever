@@ -37,6 +37,11 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   'lang-pick': async () => switchLang(await menu(t('language'), LANGS.map((l) => ({ id: l, label: LANG_NAMES[l], on: l === getLang() })))),
   theme: () => pickTheme(),
   'events-pick': () => pickEvent(),
+  // Times in this device's time zone or the event's.
+  zone: (b) => {
+    store.setZone(b.dataset.zone === 'event' ? 'event' : 'mine');
+    render();
+  },
   'best-more': () => {
     app.bestOpen = !app.bestOpen;
     const el = $opt('#best');

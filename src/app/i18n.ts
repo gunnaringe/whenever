@@ -5,6 +5,7 @@
 // { one, other }, picked by vars.n (see PLURAL_ONE).
 
 import { toTime, hhmm, parseKey, weekday } from '../shared/model.ts';
+import { moveClock } from './zone.ts';
 import type { TimeWindow } from '../shared/model.ts';
 import { da } from './lang/da.ts';
 import { is } from './lang/is.ts';
@@ -102,7 +103,7 @@ const nb = {
   slotLength: 'Ruter på',
   meetingLength: 'Møtet varer',
   timeZone: 'Tidssone',
-  timeZoneHint: 'Alle ser tidene i denne tidssonen.',
+  timeZoneHint: 'Tidene lagres i denne tidssonen. Den som er i en annen, ser dem i sin egen.',
   possibleDays: 'Mulige dager',
   theme: 'Tema',
   'theme.auto': 'Automatisk',
@@ -205,6 +206,9 @@ const nb = {
   metaTimes: 'Klokkeslett · møtet varer {dur}',
   timesIn: 'Tider i {tz}',
   yourTz: '(du er i {tz})',
+  timesYours: 'Tider i din tidssone ({tz})',
+  showEventTz: 'Vis i tiden til {tz}',
+  showMyTz: 'Vis i min tid',
   metaHidden: 'Bare arrangørene ser svarene',
   metaOpenEdit: 'Alle kan endre svarene',
   permsTitle: 'Deltakerne kan',
@@ -526,7 +530,7 @@ const en: Record<Key, Text> = {
   slotLength: 'Slots of',
   meetingLength: 'Meeting length',
   timeZone: 'Time zone',
-  timeZoneHint: 'Everyone sees the times in this time zone.',
+  timeZoneHint: 'The times are kept in this time zone. Anyone elsewhere sees them in their own.',
   possibleDays: 'Possible days',
   theme: 'Theme',
   'theme.auto': 'Automatic',
@@ -629,6 +633,9 @@ const en: Record<Key, Text> = {
   metaTimes: 'Times · the meeting lasts {dur}',
   timesIn: 'Times in {tz}',
   yourTz: '(you’re in {tz})',
+  timesYours: 'Times in your time zone ({tz})',
+  showEventTz: 'Show in {tz} time',
+  showMyTz: 'Show in my time',
   metaHidden: 'Only the organisers see the answers',
   metaOpenEdit: 'Everyone can edit the answers',
   permsTitle: 'Participants can',
@@ -1015,13 +1022,23 @@ export function durationLabel(min: number): string {
   return m ? `${h} ${hu} ${m} ${mu}` : `${h} ${hu}`;
 }
 
-export function slotLabel(key: string, slot: number): string {
-  const p = parseKey(key);
-  if (!p || p.min === null) return key;
-  return `${fmtDate(p.date, 'long')}, ${hhmm(p.min)}–${hhmm(p.min + slot)}`;
+// From the event's time zone to the one shown; none: as stored.
+export type ZoneMove = { from: string; to: string } | undefined;
+
+function span(date: string, start: number, end: number, z: ZoneMove): string {
+  if (!z) return `${fmtDate(date, 'long')}, ${hhmm(start)}–${hhmm(end)}`;
+  const a = moveClock(date, start, z.from, z.to);
+  const b = moveClock(date, end, z.from, z.to);
+  return `${fmtDate(a.date, 'long')}, ${hhmm(a.min)}–${hhmm(b.min)}`;
 }
 
-export function windowLabel(w: Pick<TimeWindow, 'date' | 'start' | 'end'>): string {
-  return `${fmtDate(w.date, 'long')}, ${hhmm(w.start)}–${hhmm(w.end)}`;
+export function slotLabel(key: string, slot: number, z?: ZoneMove): string {
+  const p = parseKey(key);
+  if (!p || p.min === null) return key;
+  return span(p.date, p.min, p.min + slot, z);
+}
+
+export function windowLabel(w: Pick<TimeWindow, 'date' | 'start' | 'end'>, z?: ZoneMove): string {
+  return span(w.date, w.start, w.end, z);
 }
 

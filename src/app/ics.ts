@@ -3,34 +3,12 @@
 // window, converted from wall-clock time in the event's time zone to UTC.
 // No DOM here: the tests run it in Node.
 
-import { addDays, decision, toTime } from '../shared/model.ts';
+import { addDays, decision } from '../shared/model.ts';
 import type { PollEvent } from '../shared/model.ts';
+import { zonedUtc } from './zone.ts';
 
-const MINUTE = 60_000;
-
-// The time zone's offset from UTC (ms) at instant t.
-function offset(t: number, tz: string): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    second: 'numeric',
-  }).formatToParts(t);
-  const n = (type: string) => Number(parts.find((p) => p.type === type)?.value);
-  return Date.UTC(n('year'), n('month') - 1, n('day'), n('hour'), n('minute'), n('second')) - t;
-}
-
-// The instant of wall-clock `min` minutes into `date` in time zone tz.
-export function zonedUtc(date: string, min: number, tz: string): number {
-  const wall = toTime(date) + min * MINUTE;
-  const guess = wall - offset(wall, tz);
-  // Again from the guess, in case the offset changes in between (DST).
-  return wall - offset(guess, tz);
-}
+// Re-exported for the tests and callers from before zone.ts.
+export { zonedUtc };
 
 const stamp = (t: number) => new Date(t).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 const day = (d: string) => d.replace(/-/g, '');
