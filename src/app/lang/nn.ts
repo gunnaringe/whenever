@@ -32,6 +32,7 @@ export const nn: Record<Key, Text> = {
   tagAdmin: 'Admin',
   tagAnswered: 'Svart',
   forget: 'Gløym på denne eininga',
+  forgotToast: 'Fjerna «{name}» frå denne eininga',
   leave: 'Logg ut',
   leaveQ: 'Logge ut på denne eininga?',
   leaveTextAdmin: 'Admin-lenkja blir fjerna frå denne eininga, og avrøystinga forsvinn frå lista di her. For å kome tilbake treng du lenkja, så ta vare på henne først.',

@@ -34,6 +34,7 @@ export const is: Record<Key, Text> = {
   tagAdmin: 'Stjórnandi',
   tagAnswered: 'Svarað',
   forget: 'Gleyma á þessu tæki',
+  forgotToast: 'Fjarlægði „{name}“ af þessu tæki',
   leave: 'Skrá út',
   leaveQ: 'Skrá út á þessu tæki?',
   leaveTextAdmin: 'Stjórnandahlekkurinn er fjarlægður af þessu tæki og viðburðurinn hverfur af listanum þínum hér. Þú þarft hlekkinn til að komast aftur, svo geymdu hann fyrst.',
