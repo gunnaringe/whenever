@@ -9,18 +9,35 @@ const MINUTE = 60_000;
 const DAY = 1440;
 const GAP = 4 * 60;
 
-// The zone's offset from UTC (ms) at instant t.
+// Making a formatter is slow (most of the time here): one per zone.
+const formats = new Map<string, Intl.DateTimeFormat>();
+function format(tz: string): Intl.DateTimeFormat {
+  let f = formats.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+    formats.set(tz, f);
+  }
+  return f;
+}
+
+// The zone's offset from UTC (ms) at instant t. It only changes when the
+// clocks do, so a UTC day with the same offset at both ends has it all day
+// (no zone changes twice in a day): one look per day, not one per slot.
+const daily = new Map<string, number | null>();
 function offset(t: number, tz: string): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    second: 'numeric',
-  }).formatToParts(t);
+  const d = Math.floor(t / (DAY * MINUTE));
+  const key = `${tz} ${d}`;
+  let o = daily.get(key);
+  if (o === undefined) {
+    const a = exact(d * DAY * MINUTE, tz);
+    o = a === exact((d + 1) * DAY * MINUTE - MINUTE, tz) ? a : null;
+    daily.set(key, o);
+  }
+  return o ?? exact(t, tz);
+}
+
+function exact(t: number, tz: string): number {
+  const parts = format(tz).formatToParts(t);
   const n = (type: string) => Number(parts.find((p) => p.type === type)?.value);
   return Date.UTC(n('year'), n('month') - 1, n('day'), n('hour'), n('minute'), n('second')) - t;
 }
@@ -48,8 +65,22 @@ export function moveClock(date: string, min: number, from: string, to: string): 
 }
 
 // Whether every option reads the same in zone tz as in the event's.
+// Both are worked out once per event object and zone: the page asks for
+// every label, and on every hover. A new view brings a new event object.
+const memo = new WeakMap<M.TimesEvent, Map<string, unknown>>();
+function once<T>(ev: M.TimesEvent, key: string, make: () => T): T {
+  let m = memo.get(ev);
+  if (!m) memo.set(ev, (m = new Map()));
+  if (!m.has(key)) m.set(key, make());
+  return m.get(key) as T;
+}
+
 export function sameClock(ev: M.TimesEvent, tz: string): boolean {
   if (tz === ev.tz) return true;
+  return once(ev, `same ${tz}`, () => sameClockNow(ev, tz));
+}
+
+function sameClockNow(ev: M.TimesEvent, tz: string): boolean {
   return ev.options.every((k) => {
     const p = M.parseKey(k);
     if (!p || p.min === null) return true;
@@ -90,6 +121,10 @@ function rows(ev: M.TimesEvent, mins: number[], own: boolean): number[] {
 }
 
 export function layout(ev: M.TimesEvent, tz: string): Layout {
+  return once(ev, `layout ${tz}`, () => layoutNow(ev, tz));
+}
+
+function layoutNow(ev: M.TimesEvent, tz: string): Layout {
   if (sameClock(ev, tz)) {
     const mins = ev.options.map((k) => M.parseKey(k)?.min).filter((m): m is number => typeof m === 'number');
     return { dates: M.optionDates(ev), mins: rows(ev, mins, true), key: M.slotKey };

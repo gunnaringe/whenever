@@ -1891,6 +1891,13 @@ await fu.close();
   await shot(p, 'zone-answer-tokyo');
   await p.fill('#answer-form [name="name"]', 'Taro');
   await p.click(`#pick-area .tg-cell[data-k="${D(1, '16:00')}"]`);
+  // Switching zones in the form keeps what is painted, and the name.
+  await p.click('.zone-line [data-act="zone"]');
+  await p.waitForSelector('.zone-line [data-act="zone"][data-zone="mine"]');
+  const kept = await p.locator(`#pick-area .tg-cell[data-k="${D(1, '16:00')}"]`).evaluate((c) => c.classList.contains('v1'));
+  check(kept && (await p.inputValue('#answer-form [name="name"]')) === 'Taro', 'switching the time zone in the answer form keeps the unsaved answers');
+  await p.click('.zone-line [data-act="zone"]');
+  await p.waitForSelector('.zone-line [data-act="zone"][data-zone="event"]');
   await p.click('[data-act="save-answer"]');
   await p.waitForSelector('.results');
   const view = (await (await fetch(`${BASE}/api/events/${made.id}`, { headers: hdr() })).json()).view;
