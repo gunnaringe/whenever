@@ -800,27 +800,37 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
 .dropdown .menu-item > span { overflow-wrap: anywhere; }
 .qr { display: block; width: min(16rem, 70vw); margin: .5rem auto 1rem; border-radius: 8px; }
 .toast {
+  /* Centred with auto margins, not left: 50% and a transform: that left it
+     only half the screen to grow in, so a short message wrapped. */
   position: fixed;
-  left: 50%;
+  inset-inline: 0;
   bottom: calc(5rem + env(safe-area-inset-bottom));
   z-index: 50;
-  transform: translateX(-50%);
-  max-width: calc(100vw - 2rem);
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  width: fit-content;
+  max-width: min(32rem, calc(100vw - 2rem));
+  margin-inline: auto;
   padding: .65rem 1.1rem;
-  border-radius: 999px;
+  /* A pill on one line, a rounded box on two. */
+  border-radius: 1.4rem;
   background: var(--ink);
   color: var(--card);
   font-weight: 600;
+  text-wrap: pretty;
   box-shadow: 0 8px 24px rgb(0 0 0 / .25);
 }
 .toast-act {
-  margin-left: .75rem;
-  padding: .15rem .75rem;
+  flex: none;
+  margin-right: -.45rem;
+  padding: .3rem .8rem;
   border: 1.5px solid currentColor;
   border-radius: 999px;
   background: none;
   color: inherit;
   font: inherit;
+  white-space: nowrap;
   cursor: pointer;
 }
 .toast-act:hover { background: rgb(127 127 127 / .25); }
