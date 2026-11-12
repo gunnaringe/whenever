@@ -9,12 +9,12 @@ import { $, $opt, $$, esc, icon, toast, menu } from './ui.ts';
 import type { MenuItem } from './ui.ts';
 import { calendarHtml, bindPaint } from './calendar.ts';
 import { TimeGrid } from './timegrid.ts';
-import { type AnswerDraft, app, here, current, answer, data, touch, waitingOf, entryOf, hasDraft, errText } from './state.ts';
+import { type AnswerDraft, app, here, current, answer, data, touch, waitingOf, entryOf, hasDraft, errText, gridLayout } from './state.ts';
 import { eventPath, subUrl, go, closeSub, linkUrl } from './route.ts';
 import { paint, field, setBusy } from './shell.ts';
 import { render, setView } from './render.ts';
 import { rowHeight } from './form.ts';
-import { rowsFor } from './overview.ts';
+import { zoneHtml } from './overview.ts';
 import { linkDialog } from './actions.ts';
 
 export function renderAnswer(v: M.View, sub: string | null): void {
@@ -93,6 +93,7 @@ export function renderAnswer(v: M.View, sub: string | null): void {
     <section class="card picker">
       <h2>${esc(t(ev.mode === 'dates' ? 'whichDays' : 'whichTimes'))}</h2>
       <p class="muted">${esc(t(hint))}</p>
+      ${ev.mode === 'times' ? zoneHtml(ev) : ''}
       <div class="toolbar" id="pick-tools">${pickerToolbar(v)}</div>
       <div id="pick-area"></div>
       <p id="pick-sum" class="count-line" aria-live="polite"></p>
@@ -341,8 +342,7 @@ function mountPicker(v: M.View): void {
     const opts = new Set(ev.options);
     new TimeGrid(area, {
       mode: 'paint',
-      dates: M.optionDates(ev),
-      mins: rowsFor(ev),
+      ...gridLayout(ev),
       rowh: rowHeight(ev.slot),
       allowed: (k) => opts.has(k),
       value: (k) => a.answers[k] || 0,
@@ -400,7 +400,14 @@ async function answerDayMenu(date: string): Promise<void> {
   items.push({ id: '0', label: t('dayNone') });
   const r = await menu(cap(fmtDate(date, 'long')), items);
   if (r === '') return;
-  for (const k of ev.options) if (k.startsWith(date)) setAns(k, Number(r));
+  // The day as drawn: in the zone shown, its slots can be another day's keys.
+  if (ev.mode !== 'times') return;
+  const L = gridLayout(ev);
+  const opts = new Set(ev.options);
+  for (const m of L.mins) {
+    const k = L.key(date, m);
+    if (k && opts.has(k)) setAns(k, Number(r));
+  }
   render();
 }
 

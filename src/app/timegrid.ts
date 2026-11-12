@@ -61,6 +61,9 @@ interface Common {
   marks?: () => ReadonlySet<string>; // with 'steps': the days with something marked
   dayNote?: (date: string) => string; // a note on a day (a holiday's name), '' for none
   open?: string; // the day whose page shows first
+  // The option key under a cell (default slotKey); null: none there. The
+  // grid is drawn in another time zone than the keys' (see zone.ts).
+  key?: (date: string, min: number) => string | null;
 }
 export interface PaintOptions extends Common {
   mode: 'paint';
@@ -113,6 +116,7 @@ export class TimeGrid {
   // in view when the pages change between one week and two).
   anchor: string | null;
   chipsHtml = '';
+  step = Infinity; // the least gap between rows
 
   constructor(el: HTMLElement, o: GridOptions) {
     this.el = el;
@@ -206,16 +210,20 @@ export class TimeGrid {
       const title = note ? ` title="${esc(note)}"` : '';
       const inner = `<b>${wd[weekday(d)]}</b><small>${esc(shortDate(d))}</small>${note ? '<i class="hol" aria-hidden="true"></i>' : ''}`;
       // A day with nothing to mark (the form: a day gone by) has no menu.
-      const menu = this.o.onDay && mins.some((m) => this.ok(slotKey(d, m)));
+      const menu = this.o.onDay && mins.some((m) => this.ok(this.keyAt(d, m)));
       html += menu
         ? `<div class="tg-day" role="columnheader"${title}><button type="button" data-day="${d}" aria-label="${label}" aria-haspopup="menu">${inner}<i class="caret" aria-hidden="true"></i></button></div>`
         : `<div class="tg-day${this.o.onDay ? ' off' : ''}" role="columnheader" aria-label="${label}"${title}><span>${inner}</span></div>`;
     }
+    const lead = this.lead();
+    this.step = Math.min(...mins.slice(1).map((m, i) => m - mins[i]));
     mins.forEach((m, r) => {
-      const hour = m % 60 === 0;
-      html += `<div class="tg-time${hour ? ' hour' : ''}" role="rowheader">${hour || r === 0 ? hhmm(m) : ''}</div>`;
+      const hour = m % 60 === lead;
+      const jump = this.jump(r);
+      html += `<div class="tg-time${hour ? ' hour' : ''}${jump ? ' jump' : ''}" role="rowheader">${hour || jump || r === 0 ? hhmm(m) : ''}</div>`;
       cols.forEach((d, c) => {
-        html += `<div class="tg-cell" role="gridcell" data-k="${slotKey(d, m)}" data-c="${c}" data-r="${r}"></div>`;
+        const k = this.keyAt(d, m);
+        html += `<div class="tg-cell${k ? '' : ' na'}" role="gridcell"${k ? ` data-k="${k}"` : ''} data-c="${c}" data-r="${r}"></div>`;
       });
     });
     html += '</div>';
@@ -228,13 +236,15 @@ export class TimeGrid {
 
   refresh(): void {
     const o = this.o;
+    const lead = this.lead();
     this.cells.forEach((col, c) =>
       col.forEach((cell, r) => {
         const k = cell.dataset.k ?? '';
         let cls = 'tg-cell';
-        if (o.mins[r] % 60 === 0) cls += ' hour';
+        if (o.mins[r] % 60 === lead) cls += ' hour';
+        if (this.jump(r)) cls += ' jump';
         let text = '';
-        if (o.allowed && !o.allowed(k)) cls += ' na';
+        if (!k || (o.allowed && !o.allowed(k))) cls += ' na';
         else if (o.mode === 'view') {
           const dec = o.decorate(k);
           cls += ` ${dec.cls}`;
@@ -255,7 +265,10 @@ export class TimeGrid {
     else if (o.mode === 'paint') {
       const chips = this.el.querySelectorAll<HTMLElement>('.tg-weeks [data-page]');
       chips.forEach((b, i) => {
-        const marked = (this.pageList[i] ?? []).some((d) => o.mins.some((m) => o.value(slotKey(d, m))));
+        const marked = (this.pageList[i] ?? []).some((d) => o.mins.some((m) => {
+          const k = this.keyAt(d, m);
+          return k !== null && o.value(k);
+        }));
         b.classList.toggle('marked', marked);
       });
     }
@@ -283,8 +296,24 @@ export class TimeGrid {
     box.hidden = !html;
   }
 
-  ok(k: string | undefined): k is string {
-    return k !== undefined && (!this.o.allowed || this.o.allowed(k));
+  keyAt(date: string, min: number): string | null {
+    return this.o.key ? this.o.key(date, min) : slotKey(date, min);
+  }
+
+  // Whether rows are left out above row r (times in another zone, see zone.ts).
+  jump(r: number): boolean {
+    return r > 0 && this.o.mins[r] - this.o.mins[r - 1] > this.step;
+  }
+
+  // Which minute past the hour the hour lines and labels go on: the hour,
+  // unless no row is on it (a zone off the hour, as India's).
+  lead(): number {
+    const ms = this.o.mins;
+    return ms.some((m) => m % 60 === 0) ? 0 : (ms[0] ?? 0) % 60;
+  }
+
+  ok(k: string | null | undefined): k is string {
+    return typeof k === 'string' && k !== '' && (!this.o.allowed || this.o.allowed(k));
   }
 
   down(e: PointerEvent): void {

@@ -1,6 +1,6 @@
 // This device's memory, in localStorage (key whenever-v1): links to events you
-// made or answered, so you find them again, plus the language and theme
-// choices (theme.ts reads the theme from here too, before the app loads). Only a
+// made or answered, so you find them again, plus the language, theme and
+// time zone choices (theme.ts reads the theme from here too, before the app loads). Only a
 // convenience: every link works on any device without it. All keys used by
 // the app start with whenever-.
 
@@ -23,6 +23,7 @@ interface State {
   events?: Record<string, Raw>;
   lang?: unknown;
   theme?: unknown;
+  zone?: unknown;
 }
 
 function read(): State {
@@ -120,5 +121,17 @@ export function getTheme(): ThemeChoice {
 export function setTheme(theme: ThemeChoice): void {
   const s = read();
   s.theme = theme;
+  write(s);
+}
+
+// Times in this device's time zone ('mine', the default) or the event's.
+export type ZoneChoice = 'mine' | 'event';
+export function getZone(): ZoneChoice {
+  return read().zone === 'event' ? 'event' : 'mine';
+}
+
+export function setZone(zone: ZoneChoice): void {
+  const s = read();
+  s.zone = zone;
   write(s);
 }

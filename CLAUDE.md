@@ -126,10 +126,23 @@ transforming (enums, namespaces, parameter properties) is off
   sockets: the one heard from longest ago makes room (`evict`), and its
   page connects again by itself.
 - **Option keys:** dates mode `YYYY-MM-DD`, times mode `YYYY-MM-DDTHH:MM`
-  (wall-clock in the event's `tz`; nothing converts time zones). An event's
+  (wall-clock in the event's `tz`; see Time zones). An event's
   `options` is the allowed set; answers map key → 1 (yes) or 2 (maybe), and
   `cleanAnswers` drops keys that aren't options. Editing an event prunes
   answers to removed options (the form warns first).
+- **Time zones:** a times event's keys are wall-clock in its `tz` (the
+  form's zone picker, the browser's by default), and stay so everywhere:
+  the API, answers, `.ics`, previews and `llms.txt`. A viewer whose clock
+  reads differently sees, and answers in, their own zone by default
+  (`zone.ts`: `layout()` draws the grid in that zone and maps each cell back
+  to an option key, `TimeGrid`'s `key`; `slotLabel`/`windowLabel` take a
+  `ZoneMove`). The head card and the answer form say which zone is shown,
+  with a button for the other (`zone` in the store, `shownTz()`). A zone that
+  reads the same (Stockholm for Oslo, `sameClock`) gets no button. In
+  another zone the slots can land on another date, off the hour (rows on
+  the half hour) or wrap past midnight: gaps of up to four hours between
+  rows are filled, longer ones left out and marked (`.jump`). The event form
+  always works in the event's zone.
 - **Picking times (times mode): a week calendar, straight away.** The form's
   «Mulige tider» card is a `TimeGrid` with every week from this one to a year
   ahead (`gridDays`, `nav: 'steps'`: earlier/later buttons, and a chip for

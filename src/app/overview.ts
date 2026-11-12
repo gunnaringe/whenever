@@ -9,28 +9,16 @@ import type { Stored } from './store.ts';
 import { $, $opt, $$, esc, icon, toast, dialog, copyText } from './ui.ts';
 import { calendarHtml } from './calendar.ts';
 import { TimeGrid } from './timegrid.ts';
-import { type Tab, app, here, current, waitingOf, entryOf, hasDraft, browserTz, errText } from './state.ts';
+import { type Tab, app, here, current, waitingOf, entryOf, hasDraft, browserTz, errText, shownTz, gridLayout, zoneMove } from './state.ts';
 import { eventPath, eventUrl, linkUrl } from './route.ts';
 import { paint, field, linkBox } from './shell.ts';
 import { render, setView } from './render.ts';
 import { rowHeight } from './form.ts';
+import { sameClock } from './zone.ts';
 
 const heat = (g: M.Tally, n: number, s: M.Settings): string => M.heat(g, n, s).toFixed(3);
 // Dark cells get light text.
 const hi = (h: string) => (Number(h) > 0.55 ? ' hi' : '');
-
-export function rowsFor(ev: M.TimesEvent): number[] {
-  let lo = 1440;
-  let hi = 0;
-  for (const k of ev.options) {
-    const min = M.parseKey(k)?.min;
-    if (min === null || min === undefined) continue;
-    lo = Math.min(lo, min);
-    hi = Math.max(hi, min);
-  }
-  lo = Math.max(ev.dayStart, Math.floor(lo / 60) * 60);
-  return M.daySlots(ev).filter((m) => m >= lo && m <= hi);
-}
 
 function hue(s: string): number {
   let h = 0;
@@ -115,14 +103,35 @@ function noticesHtml(v: M.View, stored: Stored | null): string {
   return out.join('');
 }
 
+const zoneName = (tz: string) => tz.replace(/_/g, ' ');
+
+// Which time zone the times are in, and a button to show them in the other
+// one when the viewer's clock reads differently from the event's.
+function zoneParts(ev: M.TimesEvent): { text: string; button: string } {
+  const mine = browserTz();
+  if (sameClock(ev, mine)) return { text: `${t('timesIn', { tz: zoneName(ev.tz) })}${mine !== ev.tz ? ` ${t('yourTz', { tz: zoneName(mine) })}` : ''}`, button: '' };
+  const own = shownTz(ev) === mine;
+  const text = own ? t('timesYours', { tz: zoneName(mine) }) : `${t('timesIn', { tz: zoneName(ev.tz) })} ${t('yourTz', { tz: zoneName(mine) })}`;
+  const label = own ? t('showEventTz', { tz: zoneName(ev.tz) }) : t('showMyTz');
+  return { text, button: `<button type="button" class="linkish small" data-act="zone" data-zone="${own ? 'event' : 'mine'}">${esc(label)}</button>` };
+}
+
+// The same as a line of its own (the answer form).
+export function zoneHtml(ev: M.TimesEvent): string {
+  const z = zoneParts(ev);
+  return `<p class="zone-line muted small">${icon('globe')}<span>${esc(z.text)}${z.button ? ` ${z.button}` : ''}</span></p>`;
+}
+
 function headHtml(v: M.View): string {
   const ev = v.event;
-  const meta: [string, string][] = [[icon('cal'), fmtRange(ev.start, ev.end)]];
+  // Times mode: the first and last day as shown, in the viewer's zone.
+  const days = ev.mode === 'times' ? gridLayout(ev).dates : [];
+  const meta: [string, string, string?][] = [[icon('cal'), days.length ? fmtRange(days[0], days[days.length - 1]) : fmtRange(ev.start, ev.end)]];
   if (ev.mode === 'dates') meta.push([icon('grid'), t('metaDates', { n: ev.options.length })]);
   else {
     meta.push([icon('clock'), t('metaTimes', { dur: durationLabel(ev.duration) })]);
-    const mine = browserTz();
-    meta.push([icon('globe'), `${t('timesIn', { tz: ev.tz.replace(/_/g, ' ') })}${mine !== ev.tz ? ` ${t('yourTz', { tz: mine.replace(/_/g, ' ') })}` : ''}`]);
+    const z = zoneParts(ev);
+    meta.push([icon('globe'), z.text, z.button]);
   }
   if (ev.location) meta.push([icon('pin'), ev.location]);
   const s = ev.settings;
@@ -134,7 +143,7 @@ function headHtml(v: M.View): string {
   const details = v.role !== 'admin' && M.canChangeDetails(v, s);
   return `<section class="card head">
     <h1>${esc(ev.name)}</h1>
-    <ul class="meta">${meta.map(([i, s]) => `<li>${i}<span>${esc(s)}</span></li>`).join('')}</ul>
+    <ul class="meta">${meta.map(([i, s, more]) => `<li>${i}<span>${esc(s)}${more ? ` ${more}` : ''}</span></li>`).join('')}</ul>
     ${ev.description ? `<p class="desc">${esc(ev.description)}</p>` : ''}
     ${details ? `<p class="head-edit"><button type="button" class="linkish small" data-act="edit-details">${icon('edit')}${esc(t('editDetails'))}</button></p>` : ''}
   </section>`;
@@ -230,7 +239,7 @@ export function bestHtml(v: M.View): string {
     .map(
       (b, i) => `<li><button type="button" class="best-item${rank[i] === 1 ? ' first' : ''}${app.pick?.k === b.key ? ' sel' : ''}" data-act="pick" data-k="${b.key}" ${ev.mode === 'times' ? 'data-win="1"' : ''}>
         <span class="rank">${rank[i]}</span><span class="vh">. </span>
-        <span class="bl">${esc(cap('date' in b ? windowLabel(b) : fmtDate(b.key, 'long')))}${ev.decided === b.key ? ` <span class="tag">${icon('check')}${esc(t('decidedTag'))}</span>` : ''}</span><span class="vh"> – </span>
+        <span class="bl">${esc(cap('date' in b ? windowLabel(b, zoneMove(ev)) : fmtDate(b.key, 'long')))}${ev.decided === b.key ? ` <span class="tag">${icon('check')}${esc(t('decidedTag'))}</span>` : ''}</span><span class="vh"> – </span>
         <span class="bn">${esc(countText(b, n, s))}</span>
       </button></li>`,
     )
@@ -284,7 +293,7 @@ function resultsBody(v: M.View): string {
     if (app.tab === 'grid') return '<div id="res-grid"></div>';
     const ws = M.bestWindows(ev, v.people, 15);
     if (!ws.length) return `<p class="muted">${esc(t('noneAvailable'))}</p>`;
-    return `<div class="res-list">${ws.map((w) => row(w.key, windowLabel(w), w, true)).join('')}</div>`;
+    return `<div class="res-list">${ws.map((w) => row(w.key, windowLabel(w, zoneMove(ev)), w, true)).join('')}</div>`;
   }
 
   if (app.tab === 'list') return `<div class="res-list">${ev.options.map((k) => row(k, fmtDate(k, 'long'), at(k), false)).join('')}</div>`;
@@ -330,11 +339,11 @@ function detailHtml(v: M.View): string {
     const w = M.windows(ev, v.people).find((x) => x.key === p.k);
     if (!w) return '';
     g = w;
-    label = windowLabel(w);
+    label = windowLabel(w, zoneMove(ev));
   } else {
     g = M.tally(ev, v.people).get(p.k);
     if (!g) return '';
-    label = ev.mode === 'dates' ? fmtDate(p.k, 'long') : slotLabel(p.k, ev.slot);
+    label = ev.mode === 'dates' ? fmtDate(p.k, 'long') : slotLabel(p.k, ev.slot, zoneMove(ev));
   }
   const byId = new Map(v.people.map((x) => [x.id, x.name]));
   const wait = waitingOf(v);
@@ -354,7 +363,7 @@ function detailHtml(v: M.View): string {
 export function whenLabel(ev: M.PollEvent, key: string): string {
   if (ev.mode === 'dates') return fmtDate(key, 'long');
   const w = M.windows(ev, []).find((x) => x.key === key);
-  return w ? windowLabel(w) : slotLabel(key, ev.slot);
+  return w ? windowLabel(w, zoneMove(ev)) : slotLabel(key, ev.slot, zoneMove(ev));
 }
 
 // Under the details of an option: pick it as the final date (the admin, or
@@ -409,8 +418,7 @@ function mountResults(v: M.View): void {
   let sel = selKeys();
   app.resGrid = new TimeGrid(el, {
     mode: 'view',
-    dates: M.optionDates(ev),
-    mins: rowsFor(ev),
+    ...gridLayout(ev),
     rowh: rowHeight(ev.slot),
     page: app.gridPage,
     allowed: (k) => opts.has(k),

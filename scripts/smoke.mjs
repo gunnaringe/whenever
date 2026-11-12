@@ -8,6 +8,7 @@
 import { mkdirSync } from 'node:fs';
 import { chromium, firefox } from 'playwright-core';
 import { holidaysIn } from '../src/shared/model.ts';
+import { moveClock } from '../src/app/zone.ts';
 
 const BASE = process.env.BASE ?? 'http://127.0.0.1:8787';
 // An admin or personal link is /e/<id>#<token>: the token's pattern, a whole
@@ -1855,6 +1856,76 @@ await fu.close();
     }
     await ctx.close();
   }
+  await fetch(`${BASE}/api/events/${made.id}`, { method: 'DELETE', headers: hdr(made.token) });
+}
+
+// --- J) Time zones: times shown and answered in the viewer's own zone -------------------------
+{
+  const hdr = (token) => ({ 'content-type': 'application/json', 'x-dev-ip': devIp(), ...(token ? { authorization: `Bearer ${token}` } : {}) });
+  // Oslo: an afternoon that is the next morning in Tokyo, and 10:00.
+  const opts = [D(1, '15:00'), D(1, '16:00'), D(1, '17:00'), D(2, '10:00')];
+  const event = { name: 'Tidssoner', mode: 'times', start: D(1), end: D(2), options: opts, slot: 60, dayStart: 480, dayEnd: 1320, duration: 60, tz: 'Europe/Oslo' };
+  const made = await (await fetch(`${BASE}/api/events`, { method: 'POST', headers: hdr(), body: JSON.stringify({ event }) })).json();
+  const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const ctxFor = (tz) => browser.newContext({ viewport: { width: 900, height: 900 }, locale: 'en-GB', timezoneId: tz, extraHTTPHeaders: { 'x-dev-ip': devIp() } });
+
+  const ctx = await ctxFor('Asia/Tokyo');
+  const p = await ctx.newPage();
+  p.on('pageerror', (e) => errors.push(e.message));
+  await p.goto(`${BASE}/`);
+  await p.evaluate(() => localStorage.setItem('whenever-v1', JSON.stringify({ lang: 'en' })));
+  await p.goto(`${BASE}/e/${made.id}#answer`);
+  await p.waitForSelector('#pick-area .tg-cell');
+  check((await p.locator('.zone-line').textContent()).includes('your time zone (Asia/Tokyo)'), 'the answer form says the times are in your zone');
+  // The 16:00 Oslo slot, where Tokyo has it: its column's date and its row's time.
+  const want = moveClock(D(1), 960, 'Europe/Oslo', 'Asia/Tokyo');
+  const at = await p.evaluate((k) => {
+    const cell = document.querySelector(`#pick-area .tg-cell[data-k="${k}"]`);
+    if (!cell) return null;
+    const grid = cell.closest('.tg');
+    const days = [...grid.querySelectorAll('.tg-day')].map((d) => d.querySelector('[data-day]')?.dataset.day ?? d.textContent);
+    const times = [...grid.querySelectorAll('.tg-time')].map((t) => t.textContent);
+    return { day: days[Number(cell.dataset.c)], time: times[Number(cell.dataset.r)] };
+  }, D(1, '16:00'));
+  check(at?.day === want.date && at?.time === hm(want.min), `the Oslo 16:00 slot is drawn at Tokyo's ${want.date} ${hm(want.min)} (${JSON.stringify(at)})`);
+  await shot(p, 'zone-answer-tokyo');
+  await p.fill('#answer-form [name="name"]', 'Taro');
+  await p.click(`#pick-area .tg-cell[data-k="${D(1, '16:00')}"]`);
+  await p.click('[data-act="save-answer"]');
+  await p.waitForSelector('.results');
+  const view = (await (await fetch(`${BASE}/api/events/${made.id}`, { headers: hdr() })).json()).view;
+  check(JSON.stringify(view.people[0]?.answers) === JSON.stringify({ [D(1, '16:00')]: 1 }), `the answer is stored under the event's own key (${JSON.stringify(view.people[0]?.answers)})`);
+  const best = await p.locator('.best-item').first().textContent();
+  check(best.includes(`${hm(want.min)}–${hm(want.min + 60)}`), `the best list shows Tokyo's time (${best.trim().replace(/\s+/g, ' ')})`);
+  await shot(p, 'zone-event-tokyo');
+  await p.click('[data-act="zone"]');
+  await p.waitForSelector('[data-act="zone"][data-zone="mine"]');
+  check((await p.locator('.best-item').first().textContent()).includes('16:00–17:00'), 'shown in the event\'s zone, the best list says 16:00–17:00');
+  await p.reload();
+  await p.waitForSelector('.results');
+  check((await p.locator('[data-act="zone"]').getAttribute('data-zone')) === 'mine', 'the choice is remembered on this device');
+  await p.click('[data-act="zone"]');
+  await ctx.close();
+
+  // Kolkata is off the hour: rows on the half hour, labelled.
+  const ctx2 = await ctxFor('Asia/Kolkata');
+  const q = await ctx2.newPage();
+  q.on('pageerror', (e) => errors.push(e.message));
+  await q.goto(`${BASE}/`);
+  await q.evaluate(() => localStorage.setItem('whenever-v1', JSON.stringify({ lang: 'en' })));
+  await q.goto(`${BASE}/e/${made.id}`);
+  await q.waitForSelector('#res-grid .tg-time');
+  const labels = (await q.locator('#res-grid .tg-time').allTextContents()).filter(Boolean);
+  check(labels.length > 0 && labels.every((l) => l.endsWith(':30')), `in Kolkata the rows are labelled on the half hour (${labels.join(' ')})`);
+  await ctx2.close();
+
+  // Stockholm reads the same as Oslo: nothing to switch.
+  const ctx3 = await ctxFor('Europe/Stockholm');
+  const s = await ctx3.newPage();
+  await s.goto(`${BASE}/e/${made.id}`);
+  await s.waitForSelector('.results');
+  check((await s.locator('[data-act="zone"]').count()) === 0, 'Stockholm gets no time zone switch');
+  await ctx3.close();
   await fetch(`${BASE}/api/events/${made.id}`, { method: 'DELETE', headers: hdr(made.token) });
 }
 

@@ -527,6 +527,12 @@ button.cal-day { cursor: pointer; touch-action: manipulation; -webkit-touch-call
 .tg-time { grid-column: 1; font-size: .7rem; line-height: 1; color: var(--muted); text-align: right; padding-right: .35rem; transform: translateY(-.4em); }
 .tg-cell { border-top: 1px dashed var(--line); background: var(--heat0); }
 .tg-cell.hour { border-top: 1px solid color-mix(in srgb, var(--muted) 45%, transparent); }
+/* Which time zone the answer form's times are in. */
+.zone-line { display: flex; gap: .4rem; align-items: baseline; flex-wrap: wrap; }
+.zone-line > svg { flex: none; align-self: center; }
+/* Rows left out above (times shown in another zone). */
+.tg-cell.jump { border-top: 3px double var(--muted); }
+.tg-time.jump { font-weight: 700; }
 .tg.paint .tg-cell { touch-action: manipulation; cursor: pointer; }
 .tg-cell.v1 { background: var(--yes); border-top-color: color-mix(in srgb, var(--yes-ink) 25%, transparent); }
 .tg-cell.v2 { background: var(--maybe); border-top-color: color-mix(in srgb, var(--maybe-ink) 20%, transparent); }

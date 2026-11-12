@@ -7,6 +7,8 @@ import { ApiError } from './api.ts';
 import { ask } from './ui.ts';
 import { TimeGrid } from './timegrid.ts';
 import { History } from './history.ts';
+import { getZone } from './store.ts';
+import { sameClock, type Layout, layout } from './zone.ts';
 
 export type Route = { page: 'home' } | { page: 'new' } | { page: 'find' } | { page: 'missing' } | { page: 'event'; id: string; token: string | null };
 export type Sub = { kind: 'overview' } | { kind: 'edit' } | { kind: 'answer'; pid: string | null };
@@ -190,6 +192,25 @@ export function guessHolidays(): M.HolidayCalendar {
     if (/^da\b/i.test(l)) return 'dk';
   }
   return 'none';
+}
+
+// Which zone an event's times are shown in: this device's, unless the
+// viewer asked for the event's or the two read the same.
+export function shownTz(ev: M.PollEvent): string {
+  if (ev.mode !== 'times') return '';
+  const mine = browserTz();
+  return getZone() === 'event' || sameClock(ev, mine) ? ev.tz : mine;
+}
+
+// For the labels: from the event's zone to the one shown (none: the same).
+export function zoneMove(ev: M.PollEvent): { from: string; to: string } | undefined {
+  const to = shownTz(ev);
+  return ev.mode === 'times' && to !== ev.tz ? { from: ev.tz, to } : undefined;
+}
+
+// The grid of an event's times, in the zone shown.
+export function gridLayout(ev: M.TimesEvent): Layout {
+  return layout(ev, shownTz(ev));
 }
 
 export function browserTz(): string {
