@@ -524,6 +524,11 @@ transforming (enums, namespaces, parameter properties) is off
 - `npm test`: model, link tokens, i18n, the picker's undo history, the code limits, link-preview tags and page text, and the SMTP client
   against a scripted server (node:test, Node 22.18+ for type stripping; CI
   uses 26).
+- `npm run dev`, then `BASE=http://127.0.0.1:8787 npm run test:api`
+  (`test/api/`, also a CI step): who may do what. Every change the API has,
+  tried as a visitor, with a bad or replaced link, as a participant and as
+  the admin, under twelve sets of settings, against a table written out by
+  hand in the test. A new API action or setting gets a row there.
 - `npm run dev` (wrangler dev, which runs the build and rebuilds on
   changes), then `BASE=http://127.0.0.1:8787 npm run smoke`: a browser
   end-to-end check (dates and times events, chips, drag and touch painting,

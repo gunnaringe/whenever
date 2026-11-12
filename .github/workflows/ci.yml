@@ -26,3 +26,9 @@ jobs:
         run: npm run build
       - name: Bundle the Worker
         run: npx wrangler deploy --dry-run --outdir /tmp/worker
+      # Who may do what, against the Worker running here (test/api).
+      - name: API tests
+        run: |
+          npx wrangler dev --port 8787 --ip 127.0.0.1 --var MAIL_ECHO:1 > /tmp/wrangler-dev.log 2>&1 &
+          curl -s -o /dev/null --retry 60 --retry-connrefused --retry-delay 1 http://127.0.0.1:8787/ || { cat /tmp/wrangler-dev.log; exit 1; }
+          BASE=http://127.0.0.1:8787 npm run test:api
