@@ -1454,6 +1454,9 @@ await sw.close();
 const many = await page({ lang: 'en-US' });
 await many.setViewportSize({ width: 320, height: 640 });
 await many.context().addInitScript(() => {
+  // Once per tab: a reload keeps what the page changed.
+  if (sessionStorage.getItem('seeded')) return;
+  sessionStorage.setItem('seeded', '1');
   const events = {};
   for (let i = 1; i <= 9; i++) events[`abcdefghijk${i}`] = { name: `Event ${i}`, admin: 'a'.repeat(38), seen: i };
   localStorage.setItem('whenever-v1', JSON.stringify({ events }));
@@ -1470,6 +1473,21 @@ const headerFits = await many.evaluate(() => {
 });
 check(headerFits, 'three header buttons fit on one line at 320 px in English');
 await many.screenshot({ path: `${SHOTS}/23-events-menu-many.png` });
+// Forgetting one on the home page: gone at once, with Undo in the message.
+await many.keyboard.press('Escape');
+const mineNames = () => many.locator('.mine .mine-name b').allTextContents();
+await many.click('[data-act="forget"][data-id="abcdefghijk5"]');
+check(!(await mineNames()).includes('Event 5'), 'forgetting takes the event off the list at once, with no question');
+check((await many.locator('#toast').textContent()).startsWith('Removed “Event 5” from this device'), `and says so (${await many.locator('#toast').textContent()})`);
+check((await many.evaluate(() => document.activeElement?.dataset.id)) === 'abcdefghijk4', 'the focus goes to the next row');
+await many.screenshot({ path: `${SHOTS}/24-forget-undo.png` });
+await many.click('#toast [data-act="unforget"]');
+const back = await many.evaluate(() => JSON.parse(localStorage.getItem('whenever-v1')).events.abcdefghijk5);
+check((await mineNames()).join() === 'Event 9,Event 8,Event 7,Event 6,Event 5,Event 4,Event 3,Event 2,Event 1' && back.admin === 'a'.repeat(38) && back.seen === 5, 'Undo puts it back as it was, in its place');
+check(await many.locator('#toast').isHidden(), 'and the message goes');
+await many.click('[data-act="forget"][data-id="abcdefghijk5"]');
+await many.reload();
+check(!(await mineNames()).includes('Event 5') && (await mineNames()).length === 8, 'without Undo it stays forgotten');
 await many.close();
 
 // --- M) Find your events by email ------------------------------------------------------------

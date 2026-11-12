@@ -32,6 +32,7 @@ export const da: Record<Key, Text> = {
   tagAdmin: 'Admin',
   tagAnswered: 'Svaret',
   forget: 'Glem på denne enhed',
+  forgotToast: 'Fjernede »{name}« fra denne enhed',
   leave: 'Log ud',
   leaveQ: 'Log ud på denne enhed?',
   leaveTextAdmin: 'Admin-linket fjernes fra denne enhed, og aftalen forsvinder fra din liste her. Du skal bruge linket for at komme tilbage, så gem det først.',

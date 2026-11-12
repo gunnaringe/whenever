@@ -17,7 +17,7 @@ import * as M from '../shared/model.ts';
 import { t, getLang, setLang, LANGS, LANG_NAMES } from './i18n.ts';
 import type { Lang } from './i18n.ts';
 import * as store from './store.ts';
-import { $, $opt, esc, ask, menu, dialog, copyText, shareUrl, qrSvg } from './ui.ts';
+import { $, $opt, esc, ask, menu, dialog, copyText, shareUrl, qrSvg, toast, hideToast } from './ui.ts';
 import { type Tab, type AnswerDraft, app, current, draft, answer, unsaved, leaveOk, data } from './state.ts';
 import { go, openSub, closeSub } from './route.ts';
 import { pickEvent, menuOpen } from './shell.ts';
@@ -29,6 +29,9 @@ import { lockClaims, fitClaims, setClaim, pickerToolbar, setAns, updatePickSum, 
 import { deleteEntry, personLink, decide, downloadIcs, toggleClosed, adminMore, leave, meMore, pickTheme, setTheme, switchLang } from './actions.ts';
 
 // data-act="<name>" -> what a click on it does.
+// The event just taken off the home page's list, until Undo or the next one.
+let forgotten: { id: string; e: store.Raw } | null = null;
+
 const actions: Record<string, (b: HTMLElement) => unknown> = {
   lang: (b) => {
     $opt('#lang-menu')?.hidePopover();
@@ -74,9 +77,28 @@ const actions: Record<string, (b: HTMLElement) => unknown> = {
   share: (b) => shareUrl(data(b, 'url'), b.dataset.title || app.view?.event.name || t('appName')),
   qr: (b) =>
     dialog(`<h3>${esc(t('qrTitle'))}</h3>${qrSvg(data(b, 'url'))}<p class="muted small center">${esc(b.dataset.url)}</p><div class="row end"><button value="" class="btn primary">${esc(t('done'))}</button></div>`),
+  // Off the list on the home page at once, with Undo in the message (no
+  // question first). What was stored is kept only here, in memory.
   forget: (b) => {
-    store.forget(data(b, 'id'));
+    const id = data(b, 'id');
+    const ids = store.events().map((e) => e.id);
+    const i = ids.indexOf(id);
+    const gone = store.forget(id);
     render();
+    const next = ids[i + 1] ?? ids[i - 1];
+    (next ? $opt(`[data-act="forget"][data-id="${next}"]`) : $opt('.hero .find-link a'))?.focus();
+    if (!gone) return;
+    forgotten = { id, e: gone };
+    toast(t('forgotToast', { name: typeof gone.name === 'string' && gone.name ? gone.name : '–' }), { label: t('undo'), act: 'unforget' });
+  },
+  unforget: () => {
+    if (!forgotten) return;
+    const { id, e } = forgotten;
+    forgotten = null;
+    store.restore(id, e);
+    hideToast();
+    render();
+    $opt(`[data-act="forget"][data-id="${id}"]`)?.focus();
   },
   decide: (b) => decide(data(b, 'k')),
   undecide: () => decide(null),

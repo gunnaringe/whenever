@@ -32,6 +32,7 @@ export const sv: Record<Key, Text> = {
   tagAdmin: 'Admin',
   tagAnswered: 'Svarat',
   forget: 'Glöm på den här enheten',
+  forgotToast: 'Tog bort ”{name}” från den här enheten',
   leave: 'Logga ut',
   leaveQ: 'Logga ut på den här enheten?',
   leaveTextAdmin: 'Admin-länken tas bort från den här enheten, och träffen försvinner från din lista här. Du behöver länken för att komma tillbaka, så spara den först.',

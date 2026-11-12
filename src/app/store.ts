@@ -18,7 +18,7 @@ export interface Stored {
   pid?: string;
   seen: number;
 }
-type Raw = Record<string, unknown>;
+export type Raw = Record<string, unknown>;
 interface State {
   events?: Record<string, Raw>;
   lang?: unknown;
@@ -96,9 +96,20 @@ export function forgetMe(id: string): void {
   write(s);
 }
 
-export function forget(id: string): void {
+// Forgets the event here. Gives back what was stored, for restore().
+export function forget(id: string): Raw | undefined {
   const s = read();
+  const gone = s.events?.[id];
   if (s.events) delete s.events[id];
+  write(s);
+  return gone;
+}
+
+// Puts back what forget() gave, as it was (its place in the list too).
+export function restore(id: string, e: Raw): void {
+  const s = read();
+  s.events ??= {};
+  s.events[id] = e;
   write(s);
 }
 
