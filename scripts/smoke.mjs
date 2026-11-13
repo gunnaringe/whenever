@@ -336,16 +336,14 @@ const showWeek = async (p, d) => {
   while (!(await p.locator(`#f-grid .tg-cell[data-k="${d}T09:00"]`).count())) await p.click('#f-grid [data-step="1"]');
 };
 await showWeek(boss, D(0));
-await boss.selectOption('[name=dayStart]', '480');
-await boss.selectOption('[name=dayEnd]', '1080');
 await dragCells(boss, D(0, '09:00'), D(4, '16:30')); // Monday to Friday, 9-17
 check((await marked(boss)) === 5 * 16, 'dragging across the calendar marks five days, 9-17');
 check((await countLine(boss)).startsWith('5 dager · 80 tidsruter'), 'and the count line follows');
 // The presets fill the weeks shown from today on: working hours on weekdays.
 await boss.click('[data-act="preset"][data-p="evening"]');
-check((await on(boss, D(0))) === 2 && (await on(boss, D(5))) === 2, '"Evenings" fills every day shown (17-18 within the hours shown)');
+check((await on(boss, D(0))) === 10 && (await on(boss, D(5))) === 10, '"Evenings" fills every day shown, 17-22');
 await boss.click('[data-act="preset"][data-p="work"]');
-check((await on(boss, D(0))) === 16 && (await on(boss, D(5))) === 2, '"Working hours" fills the weekdays and leaves the weekend');
+check((await on(boss, D(0))) === 16 && (await on(boss, D(5))) === 10, '"Working hours" fills the weekdays and leaves the weekend');
 await boss.click('[data-act="preset"][data-p="clear"]');
 check((await marked(boss)) === 0, '"No times" clears what is shown');
 for (let i = 0; i < 3; i++) await boss.locator('#times-card .undo-btns [data-act="undo"]').click();
@@ -358,7 +356,7 @@ const dayMenu = async (d, id) => {
   await boss.waitForTimeout(50);
 };
 await dayMenu(D(5), 'all');
-check((await on(boss, D(5))) === 20, 'a day\'s menu: the whole day (8-18)');
+check((await on(boss, D(5))) === 28, 'a day\'s menu: the whole day (the hours shown, 8-22)');
 await dayMenu(D(5), 'clear');
 check((await on(boss, D(5))) === 0, 'and clearing it');
 await dragCells(boss, D(2, '09:00'), D(2, '16:30')); // Wednesday off
@@ -397,6 +395,61 @@ await shot(boss, '09-new-times');
   check(await ph.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'without making the page wider than the screen');
   await ph.locator('#times-card').screenshot({ path: `${SHOTS}/09b-new-times-phone.png` });
   await ph.context().close();
+}
+// The hours shown are only the grid's: buttons, not a setting. The meeting
+// length: a few choices or any length, fitted to the slots.
+{
+  const hp = await page({ mobile: false });
+  await hp.goto(`${BASE}/new`);
+  await hp.fill('form [name=name]', 'Timer og lengde');
+  await hp.check('[name=mode][value=times]');
+  const rowsShown = async () => {
+    const t = (await hp.locator('#f-grid .tg-time').allTextContents()).filter(Boolean);
+    return `${t[0]}-${t[t.length - 1]}`;
+  };
+  check((await hp.locator('[name=dayStart], [name=dayEnd]').count()) === 0 && (await rowsShown()) === '08:00-21:00', `no menus for the hours shown, and the grid shows 08-22 (${await rowsShown()})`);
+  check((await hp.locator('#hours-reset').isHidden()) && (await hp.locator('#hours-earlier').isVisible()) && (await hp.locator('#hours-later').isVisible()), 'with "show earlier" above it and "show later" below, and no reset yet');
+  await hp.click('#hours-earlier');
+  check((await rowsShown()) === '06:00-21:00' && (await hp.locator('#hours-reset').isVisible()), `"show earlier" adds two hours (${await rowsShown()}), and the reset shows`);
+  for (let i = 0; i < 3; i++) await hp.click('#hours-earlier');
+  check((await rowsShown()).startsWith('00:00') && (await hp.locator('#hours-earlier').isHidden()), 'at midnight the button goes');
+  check((await hp.evaluate(() => document.activeElement?.id)) === 'hours-later', 'and the focus moves on to "show later"');
+  await hp.click('#hours-later');
+  check((await rowsShown()) === '00:00-23:00' && (await hp.locator('#hours-later').isHidden()), `"show later" reaches midnight too (${await rowsShown()})`);
+  await showWeek(hp, D(0));
+  await dragCells(hp, D(0, '06:00'), D(0, '06:30'));
+  await hp.click('#hours-reset');
+  check((await rowsShown()) === '06:00-21:00' && (await on(hp, D(0))) === 2 && (await hp.locator('#hours-reset').isHidden()), `the reset goes back to 08-22, or as far as the times marked need (${await rowsShown()})`);
+  // Meeting length.
+  const durNote = () => hp.locator('#dur-note').textContent();
+  check((await hp.locator('[name=durPick][value="60"]').isChecked()) && (await hp.locator('.dur-custom').isHidden()), 'the meeting lasts 1 hour unless changed');
+  check((await hp.locator('[name=slot]').isHidden()) && (await hp.locator('.fold > summary', { hasText: '30 min' }).count()) === 1, 'the slots are folded away, with their length in the fold\'s title');
+  await hp.locator('label.chip.pick', { hasText: '2 t' }).click();
+  check(await hp.locator('[name=durPick][value="120"]').isChecked(), 'a choice is a tap');
+  await hp.locator('[name=durPick][value=other]').check();
+  check((await hp.locator('.dur-custom').isVisible()) && (await hp.inputValue('[name=durH]')) === '2' && (await hp.inputValue('[name=durM]')) === '0', '"Other length" shows hours and minutes, filled with the length chosen');
+  check((await hp.evaluate(() => document.activeElement?.getAttribute('name'))) === 'durH', 'and puts the focus in the hours');
+  await hp.fill('[name=durH]', '1');
+  await hp.keyboard.press('Tab');
+  check((await hp.inputValue('[name=durM]')) === '0' && (await hp.locator('#dur-note').isHidden()), 'going on to the minutes changes nothing yet');
+  await hp.fill('[name=durM]', '20');
+  await hp.keyboard.press('Tab');
+  check((await hp.inputValue('[name=durH]')) === '1' && (await hp.inputValue('[name=durM]')) === '30' && (await durNote()).startsWith('Rundet opp til 1 t 30 min'), `leaving the fields rounds up to the slots and says so (${await durNote()})`);
+  check(await hp.locator('[name=durPick][value=other]').isChecked(), '"Other length" stays open, even on a length that has a button');
+  await hp.click('.fold > summary:has(#slot-now)');
+  await hp.selectOption('[name=slot]', '60');
+  check((await hp.locator('[name=durPick][value="120"]').isChecked()) && (await durNote()).startsWith('Rundet opp til 2 t') && (await hp.locator('#slot-now').textContent()) === '60 min', 'hourly slots round the length up to 2 hours');
+  await hp.locator('label.chip.pick', { hasText: '1 t 30 min' }).click();
+  check((await hp.inputValue('[name=slot]')) === '30' && (await durNote()).startsWith('Rutene er nå på 30 min') && (await on(hp, D(0))) === 2, `a length the slots don't divide makes them finer, and says so (${await durNote()})`);
+  await hp.locator('[name=durPick][value=other]').check();
+  await hp.fill('[name=durH]', '0');
+  await hp.fill('[name=durM]', '45');
+  await hp.click('button[type=submit]');
+  await hp.waitForURL(LINK_RE);
+  const [hid, htok] = hp.url().split('/e/')[1].split('#');
+  const hev = await hp.evaluate(async ([id, tok]) => (await (await fetch(`/api/events/${id}`, { headers: { authorization: `Bearer ${tok}` } })).json()).view.event, [hid, htok]);
+  check(hev.duration === 45 && hev.slot === 15 && hev.dayStart === 360 && hev.dayEnd === 1320, `saved with focus still in the minutes: 45 min in 15-minute slots, hours 06-22 (${hev.duration}, ${hev.slot}, ${hev.dayStart}-${hev.dayEnd})`);
+  await hp.context().close();
 }
 await boss.click('button[type=submit]');
 await boss.waitForURL(LINK_RE);
